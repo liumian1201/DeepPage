@@ -65,7 +65,7 @@ src/                        ← 开发源码目录
 ├── manifest.json          # Manifest V3, permissions: storage, unlimitedStorage
 ├── background.js          # Service Worker（天气 + 图片代理）
 ├── index.html             # 新标签页 + 设置面板 + 对话框 + 右键菜单
-├── README.md              # 本文档
+├── DEVELOPMENT.md         # 本文档
 ├── css/
 │   └── style.css          # 全局样式、CSS 变量体系、深色模式、响应式
 ├── js/
