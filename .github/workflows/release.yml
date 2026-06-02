@@ -1,0 +1,76 @@
+name: Release on Tag
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（如 1.0.4）'
+        required: true
+        default: '1.0.4'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 获取版本号
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 验证 manifest.json
+        run: |
+          if [ ! -f src/manifest.json ]; then
+            echo "❌ 缺少 src/manifest.json"
+            exit 1
+          fi
+          echo "✅ manifest.json 存在"
+
+      - name: 打包扩展
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          ZIP_NAME="DeepPage_v${VERSION}.zip"
+          cd src
+          zip -r "../${ZIP_NAME}" . -x "README.md"
+          cd ..
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+          echo "✅ 打包完成: ${ZIP_NAME}"
+
+      - name: 提取更新日志
+        id: changelog
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          # 提取对应版本的更新日志
+          CHANGELOG=$(awk "/^## v${VERSION}/, /^## v/" CHANGELOG.md | sed '$d')
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="DeepPage v${VERSION}"
+          fi
+          # 写入文件避免多行问题
+          echo "$CHANGELOG" > /tmp/changelog.md
+          echo "✅ 已提取 v${VERSION} 更新日志"
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "DeepPage v${{ steps.version.outputs.VERSION }}"
+          body_path: /tmp/changelog.md
+          files: ${{ env.ZIP_NAME }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 完成
+        run: |
+          echo "🚀 Release v${{ steps.version.outputs.VERSION }} 已发布!"
+          echo "📦 下载: ${{ github.server_url }}/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.VERSION }}"
