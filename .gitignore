@@ -1,8 +1,5 @@
 # ===== DeepPage .gitignore =====
 
-# 历史发布版本（通过 GitHub Releases 发布）
-Release/
-
 # 私有文件（独立仓库 DeepPage-dev）
 _private/
 
