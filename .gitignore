@@ -1,11 +1,5 @@
 # ===== DeepPage .gitignore =====
 
-# 历史备份
-backup/
-
-# 用户导出数据（含个人信息）
-config/
-
 # 历史发布版本（通过 GitHub Releases 发布）
 Release/
 
