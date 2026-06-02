@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DeepPage - 新标签页</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="container">
+
+    <!-- ===== 左侧分组指示器 ===== -->
+    <div id="group-indicator" class="group-indicator">
+      <div id="group-dots" class="group-dots">
+        <!-- 由 main.js 动态渲染 -->
+      </div>
+      <button id="group-add" class="group-add-btn" title="新建分组">+</button>
+      <button id="group-manage" class="group-add-btn" title="管理分组">⚙</button>
+    </div>
+
+    <!-- ===== 右上角按钮组 ===== -->
+    <div class="top-right-btns">
+      <button id="btn-theme" class="btn-settings" title="切换主题模式">
+        <svg id="ico-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="5"></circle>
+          <line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+          <line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+        </svg>
+        <svg id="ico-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+        </svg>
+        <svg id="ico-auto" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none">
+          <polyline points="23 4 23 10 17 10"></polyline>
+          <polyline points="1 20 1 14 7 14"></polyline>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+        </svg>
+      </button>
+      <button id="btn-settings" class="btn-settings" title="设置">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
+    </div>
+
+    <!-- ===== 搜索栏区域 ===== -->
+    <section class="search-section">
+      <div class="search-wrapper">
+        <span id="search-engine-icon" class="search-engine-icon" title="当前搜索引擎">🔍</span>        <div id="search-engine-dropdown" class="search-engine-dropdown hidden">
+          <!-- 由 main.js 动态渲染 -->
+        </div>        <input
+          type="text"
+          id="search-input"
+          class="search-input"
+          placeholder="搜索网页...（按 / 聚焦搜索）"
+          autocomplete="off"
+          autofocus
+        >
+      </div>
+    </section>
+
+    <!-- ===== 快捷导航区域 ===== -->
+    <section class="speeddial-section">
+      <div id="speeddial-grid" class="speeddial-grid" data-columns="5">
+        <!-- 卡片由 main.js 动态渲染 -->
+      </div>
+    </section>
+
+    <!-- ===== 信息看板区域 ===== -->
+    <section class="dashboard-section">
+      <div id="dashboard-clock" class="dashboard-item dashboard-clock">
+        <div class="clock-row">
+          <span class="clock-time">00:00</span><span class="clock-seconds">:00</span>
+        </div>
+        <span class="clock-date">----年--月--日 星期-</span>
+      </div>
+      <div id="dashboard-lunar" class="dashboard-item dashboard-lunar">
+        <span class="lunar-year">农历加载中...</span>
+        <span class="lunar-date"></span>
+      </div>
+      <div id="dashboard-weather" class="dashboard-item dashboard-weather">
+        <span class="weather-city">天气加载中...</span>
+        <span class="weather-detail"></span>
+      </div>
+    </section>
+
+    <!-- ===== 设置面板（默认隐藏） ===== -->
+    <div id="settings-panel" class="settings-panel hidden">
+      <div class="settings-panel-header">
+        <h2>设置</h2>
+        <button id="btn-settings-close" class="btn-close" title="关闭">&times;</button>
+      </div>
+      <div class="settings-panel-body">
+
+        <div class="settings-tabs">
+          <button class="tab-btn active" data-tab="general">⚙️ 功能</button>
+          <button class="tab-btn" data-tab="dashboard">📊 看板</button>
+          <button class="tab-btn" data-tab="appearance">🎨 外观</button>
+          <button class="tab-btn" data-tab="wallpaper">🖼️ 壁纸</button>
+          <button class="tab-btn" data-tab="weather">🌤️ 天气</button>
+          <button class="tab-btn" data-tab="data">💾 数据</button>
+        </div>
+
+        <!-- ===== 功能 ===== -->
+        <div class="tab-content active" id="tab-general">
+          <div class="setting-group">
+            <div class="toggle-list">
+              <label class="toggle-item"><input type="checkbox" id="toggle-lock"> 锁定界面（禁止拖拽、编辑、删除）</label>
+            </div>
+          </div>
+          <div class="setting-group">
+            <label>搜索引擎</label>
+            <div class="toggle-list">
+              <label class="toggle-item"><input type="checkbox" id="toggle-show-search" checked> 显示搜索栏</label>
+            </div>
+            <select id="setting-search-engine"><option value="google">Google</option><option value="baidu">百度</option></select>
+            <button id="btn-search-engine-mgr" class="btn-backup" style="margin-top:4px">🔍 管理搜索引擎</button>
+          </div>
+          <div class="setting-group">
+            <label>主题模式</label>
+            <select id="setting-theme"><option value="light">浅色模式</option><option value="dark">深色模式</option><option value="auto">跟随系统</option></select>
+          </div>
+          <div class="setting-group">
+            <label>卡片外观</label>
+            <div class="toggle-list">
+              <label class="toggle-item"><input type="checkbox" id="toggle-add-button" checked> 显示「+」添加按钮</label>
+              <label class="toggle-item"><input type="checkbox" id="toggle-card-icon" checked> 卡片上方显示图标</label>
+              <label class="toggle-item"><input type="checkbox" id="toggle-card-title" checked> 卡片上方显示标题</label>
+              <label class="toggle-item"><input type="checkbox" id="toggle-confirm-delete" checked> 删除卡片时弹出确认</label>
+            </div>
+          </div>
+          <div class="setting-group">
+            <label>分组</label>
+            <select id="setting-group-position"><option value="left">左侧（圆点）</option><option value="top">顶部（标签）</option><option value="right">右侧（圆点）</option><option value="bottom">底部（标签）</option></select>
+            <div class="toggle-list">
+              <label class="toggle-item"><input type="checkbox" id="toggle-show-group-indicator" checked> 显示分组指示器</label>
+            </div>
+            <label style="margin-top:6px">组名显示</label>
+            <select id="setting-group-name-mode"><option value="active">仅当前组</option><option value="all">显示所有组名</option><option value="off">不显示组名</option></select>
+            <button id="btn-open-group-manager" class="btn-backup">📂 管理分组</button>
+          </div>
+        </div>
+
+        <!-- ===== 看板 ===== -->
+        <div class="tab-content" id="tab-dashboard">
+          <div class="setting-group">
+            <label>组件开关</label>
+            <div class="toggle-list">
+              <label class="toggle-item"><input type="checkbox" id="toggle-clock" checked> 时间显示</label>
+              <label class="toggle-item"><input type="checkbox" id="toggle-lunar" checked> 农历信息</label>
+              <label class="toggle-item"><input type="checkbox" id="toggle-weather" checked> 天气预报</label>
+            </div>
+          </div>
+          <div class="setting-group">
+            <label>布局方向</label>
+            <select id="setting-dashboard-layout"><option value="row">水平排列</option><option value="column">垂直排列</option></select>
+          </div>
+          <div class="settings-section-title">📐 看板位置</div>
+          <div class="setting-group">
+            <label>水平位置 <span id="dash-left-val" class="slider-val">居中</span></label>
+            <input type="range" id="setting-dash-left" min="-1200" max="1200" value="0" step="5">
+          </div>
+          <div class="setting-group">
+            <label>垂直位置 <span id="dash-bottom-val" class="slider-val">底部</span></label>
+            <input type="range" id="setting-dash-bottom" min="0" max="1200" value="0" step="5">
+          </div>
+          <div class="setting-group">
+            <button id="btn-reset-dash-pos" class="btn-reset-danger">↺ 重置位置</button>
+          </div>
+          <div class="settings-section-title">📏 组件尺寸</div>
+          <div class="setting-group">
+            <label>组件宽度 <span id="dash-item-w-val" class="slider-val">140px</span></label>
+            <input type="range" id="setting-dash-item-w" min="100" max="500" value="140" step="10">
+          </div>
+          <div class="setting-group">
+            <label>组件高度 <span id="dash-item-h-val" class="slider-val">自适应</span></label>
+            <input type="range" id="setting-dash-item-h" min="0" max="300" value="0" step="10">
+          </div>
+          <div class="setting-group">
+            <label>组件间距 <span id="dash-gap-val" class="slider-val">16px</span></label>
+            <input type="range" id="setting-dash-gap" min="2" max="48" value="16" step="2">
+          </div>
+          <div class="setting-group">
+            <button id="btn-reset-dash-size" class="btn-reset-danger">↺ 重置大小</button>
+          </div>
+          <div class="settings-section-title">⏰ 时钟</div>
+          <div class="setting-group">
+            <label>时钟格式</label>
+            <select id="setting-clock-format"><option value="24h">24 小时制</option><option value="12h">12 小时制</option></select>
+            <div class="toggle-list" style="margin-top:6px">
+              <label class="toggle-item"><input type="checkbox" id="toggle-clock-seconds" checked> 显示秒数</label>
+            </div>
+          </div>
+          <div class="settings-section-title">📅 农历</div>
+          <div class="setting-group">
+            <label>显示样式</label>
+            <select id="setting-lunar-style"><option value="double">双行（干支年+生肖 / 月日）</option><option value="single">单行（干支年 月日）</option></select>
+          </div>
+          <div class="setting-group">
+            <span class="setting-hint">🌤️ 天气数据源请到 天气 标签设置</span>
+          </div>
+        </div>
+
+        <!-- ===== 外观 ===== -->
+        <div class="tab-content" id="tab-appearance">
+          <div class="setting-group">
+            <label>背景颜色</label>
+            <input type="color" id="setting-bg-color" value="#f0f2f5">
+          </div>
+          <div class="setting-group">
+            <label>卡片背景色</label>
+            <input type="color" id="setting-card-bg-color" value="#ffffff">
+          </div>
+          <div class="setting-group">
+            <label>卡片文字颜色</label>
+            <input type="color" id="setting-card-text-color" value="#202124">
+          </div>
+          <div class="setting-group">
+            <label>卡片字号 <span id="font-size-val" class="slider-val">13px</span></label>
+            <input type="range" id="setting-card-font-size" min="12" max="24" value="13" step="1">
+          </div>
+          <div class="settings-section-title">📐 卡片尺寸与布局</div>
+          <div class="setting-group">
+            <label>每行列数 <span id="columns-slider-val" class="slider-val">5</span></label>
+            <input type="range" id="setting-columns-slider" min="2" max="12" value="5" step="1">
+          </div>
+          <div class="setting-group">
+            <label>卡片宽度 <span id="card-width-val" class="slider-val">270px</span></label>
+            <input type="range" id="setting-card-width" min="100" max="400" value="270" step="10">
+          </div>
+          <div class="setting-group">
+            <label>卡片高度 <span id="card-height-val" class="slider-val">270px</span></label>
+            <input type="range" id="setting-card-height" min="80" max="400" value="270" step="10">
+          </div>
+          <div class="setting-group">
+            <button id="btn-reset-card-size" class="btn-reset-small">↺ 恢复默认 (270×270)</button>
+          </div>
+          <div class="setting-group">
+            <label>卡片圆角 <span id="radius-val" class="slider-val">14px</span></label>
+            <input type="range" id="setting-card-radius" min="0" max="50" value="14" step="1">
+          </div>
+          <div class="settings-section-title">🔍 搜索框位置</div>
+          <div class="setting-group">
+            <label>距顶部 <span id="search-top-val" class="slider-val">60px</span></label>
+            <input type="range" id="setting-search-top" min="2" max="300" value="60" step="2">
+          </div>
+          <div class="setting-group">
+            <label>到卡片间距 <span id="search-gap-val" class="slider-val">48px</span></label>
+            <input type="range" id="setting-search-gap" min="12" max="200" value="48" step="4">
+          </div>
+          <div class="settings-section-title">📍 分组指示器</div>
+          <div class="setting-group">
+            <label>指示器边距 <span id="group-offset-val" class="slider-val">16px</span></label>
+            <input type="range" id="setting-group-offset" min="2" max="80" value="16" step="2">
+          </div>
+        </div>
+
+        <!-- ===== 壁纸 ===== -->
+        <div class="tab-content" id="tab-wallpaper">
+          <div class="setting-group">
+            <label>背景壁纸</label>
+            <select id="setting-wallpaper-mode"><option value="bing">Bing 每日壁纸</option><option value="custom">自定义图片 URL</option><option value="none">纯色背景</option></select>
+          </div>
+          <div id="bing-wallpaper-group" class="setting-group">
+            <div class="settings-section-title">🌍 区域</div>
+            <select id="setting-bing-region"><option value="zh-CN">中国 (zh-CN)</option><option value="en-US">美国 (en-US)</option><option value="ja-JP">日本 (ja-JP)</option><option value="de-DE">德国 (de-DE)</option><option value="en-GB">英国 (en-GB)</option><option value="fr-FR">法国 (fr-FR)</option></select>
+            <div class="toggle-list" style="margin-top:8px">
+              <label class="toggle-item"><input type="checkbox" id="toggle-bing-uhd"> UHD 超高清（4K 壁纸）</label>
+              <label class="toggle-item"><input type="checkbox" id="toggle-bing-auto-refresh" checked> 自动刷新</label>
+            </div>
+            <label style="margin-top:8px">刷新间隔 <span id="bing-refresh-val" class="slider-val">6小时</span></label>
+            <input type="range" id="setting-bing-refresh" min="1" max="24" value="6" step="1">
+            <button id="btn-bing-refresh-now" class="btn-backup" style="margin-top:8px">🔄 立即刷新壁纸</button>
+          </div>
+          <div id="custom-wallpaper-group" class="setting-group hidden">
+            <label>壁纸图片 URL</label>
+            <input type="text" id="setting-wallpaper-url" placeholder="https://example.com/wallpaper.jpg">
+            <div class="upload-row">
+              <button id="btn-wallpaper-upload" class="btn-upload">📁 上传本地壁纸</button>
+              <input type="file" id="wallpaper-file-input" accept="image/*" class="hidden">
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 天气 ===== -->
+        <div class="tab-content" id="tab-weather">
+          <div class="setting-group">
+            <label>天气数据源</label>
+            <select id="setting-weather-type"><option value="openmeteo">Open-Meteo（免费免 Key，推荐）</option><option value="hefeng">和风天气</option><option value="openweathermap">OpenWeatherMap</option><option value="custom">自定义 API</option></select>
+            <span id="weather-limit-info" class="setting-hint"></span>
+          </div>
+          <div class="setting-group">
+            <label>城市（可选，留空自动检测）</label>
+            <input type="text" id="setting-weather-city" placeholder="例如：北京">
+          </div>
+          <div class="setting-group">
+            <label>天气 API Key</label>
+            <input type="text" id="setting-weather-key" placeholder="输入你的 API Key">
+            <a id="weather-api-link" class="api-link" href="https://open-meteo.com/" target="_blank" rel="noopener">↗ Open-Meteo 官网（无需注册）</a>
+          </div>
+          <div class="setting-group">
+            <label>刷新间隔 <span id="refresh-interval-val" class="slider-val">15分钟</span></label>
+            <input type="range" id="setting-weather-refresh" min="5" max="120" value="15" step="5">
+          </div>
+          <div id="weather-cache-status" class="setting-group">
+            <span class="cache-status">📡 缓存状态：暂无数据</span>
+          </div>
+          <div id="custom-weather-group" class="setting-group hidden">
+            <label>自定义 API 地址</label>
+            <input type="text" id="setting-weather-api" placeholder="https://api.example.com/weather?city={city}&key={key}">
+          </div>
+        </div>
+
+        <!-- ===== 数据 ===== -->
+        <div class="tab-content" id="tab-data">
+          <p class="backup-hint">配置和图片库分开存储，需分别导出导入。</p>
+          <div class="setting-group">
+            <label>📋 配置数据</label>
+            <div class="btn-row">
+              <button id="btn-export-config" class="btn-backup">📥 导出</button>
+              <button id="btn-import-config" class="btn-backup">📤 导入</button>
+            </div>
+          </div>
+          <div class="setting-group">
+            <label>🖼️ 图片库</label>
+            <div class="btn-row">
+              <button id="btn-export-images" class="btn-backup">📥 导出</button>
+              <button id="btn-import-images" class="btn-backup">📤 导入</button>
+            </div>
+            <span id="image-db-info" class="setting-hint">暂无图片数据</span>
+          </div>
+          <div class="setting-group" style="margin-top:12px">
+            <button id="btn-reset-all" class="btn-reset-danger">⚠️ 重置全部数据</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 设置面板遮罩 ===== -->
+    <div id="settings-overlay" class="settings-overlay hidden"></div>
+
+    <!-- ===== 添加/编辑卡片弹窗 ===== -->
+    <div id="dialog-card" class="dialog-overlay hidden">
+      <div class="dialog-card">
+        <h3 id="dialog-title">添加快捷方式</h3>
+        <input type="text" id="dialog-name" placeholder="网站名称" autocomplete="off">
+        <input type="text" id="dialog-url" placeholder="网站地址 (https://...)" autocomplete="off">
+        <input type="text" id="dialog-image" placeholder="自定义图标 URL（可选，留空使用网站 Favicon）" autocomplete="off">
+        <div class="upload-row">
+          <button id="dialog-image-upload" class="btn-upload">📁 上传本地图片</button>
+          <input type="file" id="dialog-image-file" accept="image/*" class="hidden">
+        </div>
+        <div class="dialog-actions">
+          <button id="dialog-delete" class="btn-dialog-delete hidden">🗑️ 删除</button>
+          <button id="dialog-cancel" class="btn-secondary">取消</button>
+          <button id="dialog-save" class="btn-primary">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 右键上下文菜单 ===== -->
+    <div id="context-menu" class="context-menu hidden">
+      <div class="context-menu-item" data-action="open">🔗 打开</div>
+      <div class="context-menu-item" data-action="copyurl">📋 复制 URL</div>
+      <div class="context-menu-item" data-action="edit">✏️ 编辑</div>
+      <div class="context-menu-item has-sub" data-action="moveToGroup">📂 移动到分组 ▸</div>
+      <div class="context-menu-item danger" data-action="delete">🗑️ 删除</div>
+      <div class="context-menu-separator"></div>
+      <div class="context-menu-item" data-action="add">➕ 添加</div>
+      <div class="context-menu-item" data-action="refresh">🔄 刷新</div>
+      <div class="context-menu-item" data-action="nextWallpaper">🖼️ 下一张壁纸</div>
+      <div class="context-menu-item" data-action="settings">⚙️ 设置</div>
+      <div class="context-menu-separator"></div>
+      <div class="context-menu-item danger" data-action="lock">🔒 锁定界面</div>
+      <div class="context-menu-item success" data-action="unlock">🔓 解锁界面</div>
+      <!-- 分组右键菜单 -->
+      <div class="context-menu-item" data-action="groupRename" data-group="-1">✏️ 重命名分组</div>
+      <div class="context-menu-item danger" data-action="groupDelete" data-group="-1">🗑️ 删除分组</div>
+    </div>
+
+    <!-- ===== 壁纸信息与导航按钮 ===== -->
+    <div id="wallpaper-info" class="wallpaper-info">
+      <button id="btn-wallpaper-prev" class="wallpaper-nav-btn" title="上一张壁纸">◀</button>
+      <span id="wallpaper-copyright" class="wallpaper-copyright"></span>
+      <button id="btn-wallpaper-next" class="wallpaper-nav-btn" title="下一张壁纸">▶</button>
+    </div>
+
+    <!-- ===== 移动到分组子菜单 ===== -->
+    <div id="move-group-sub" class="context-menu hidden" style="min-width:120px">
+      <!-- 由 contextmenu.js 动态渲染 -->
+    </div>
+
+    <!-- ===== 分组名称弹窗 ===== -->
+    <div id="dialog-group" class="dialog-overlay hidden">
+      <div class="dialog-card dialog-confirm-card">
+        <h3 id="dialog-group-title">新建分组</h3>
+        <input type="text" id="dialog-group-name" placeholder="输入分组名称" autocomplete="off">
+        <div class="dialog-actions">
+          <button id="dialog-group-cancel" class="btn-secondary">取消</button>
+          <button id="dialog-group-save" class="btn-primary">确定</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 分组管理器弹窗 ===== -->
+    <div id="dialog-group-manager" class="dialog-overlay hidden">
+      <div class="dialog-card" style="width:420px">
+        <h3>📂 分组管理器</h3>
+        <div id="group-manager-list" class="group-manager-list">
+          <!-- 由 main.js 动态渲染 -->
+        </div>
+        <div class="dialog-actions" style="gap:8px">
+          <button id="group-mgr-add" class="btn-secondary">➕ 新建</button>
+          <button id="group-mgr-cancel" class="btn-secondary">取消</button>
+          <button id="group-mgr-close" class="btn-primary">完成</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 删除确认弹窗 ===== -->
+    <div id="dialog-confirm" class="dialog-overlay hidden">
+      <div class="dialog-card dialog-confirm-card">
+        <h3>确认删除</h3>
+        <p id="confirm-delete-name">确定要删除此快捷方式吗？</p>
+        <label class="confirm-checkbox">
+          <input type="checkbox" id="confirm-no-ask">
+          不再提示
+        </label>
+        <div class="dialog-actions">
+          <button id="confirm-cancel" class="btn-secondary">否</button>
+          <button id="confirm-ok" class="btn-primary btn-danger">是</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 重置确认弹窗 ===== -->
+    <div id="dialog-reset" class="dialog-overlay hidden">
+      <div class="dialog-card" style="width:380px">
+        <h3>⚠️ 重置全部数据</h3>
+        <p style="font-size:14px;color:var(--text-secondary);margin:8px 0;line-height:1.6">
+          此操作将永久清除以下所有数据：<br>
+          • 所有分组及快捷导航卡片<br>
+          • 外观配色与布局设置<br>
+          • 壁纸与卡片图标图片库<br>
+          • 天气缓存与坐标缓存<br><br>
+          <span style="color:#d93025;font-weight:600">此操作不可撤销！</span>
+        </p>
+        <div class="dialog-actions">
+          <button id="reset-cancel" class="btn-secondary">取消</button>
+          <button id="reset-ok" class="btn-primary btn-danger">确认重置</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 导入确认弹窗 ===== -->
+    <div id="dialog-import-confirm" class="dialog-overlay hidden">
+      <div class="dialog-card dialog-confirm-card">
+        <h3>确认导入</h3>
+        <p id="import-confirm-msg">导入将覆盖当前数据，确定继续吗？</p>
+        <div class="dialog-actions">
+          <button id="import-confirm-cancel" class="btn-secondary">取消</button>
+          <button id="import-confirm-ok" class="btn-primary">确认导入</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 搜索引擎管理器 ===== -->
+    <div id="dialog-search-engines" class="dialog-overlay hidden">
+      <div class="dialog-card" style="width:400px">
+        <h3>🔍 搜索引擎管理</h3>
+        <div id="search-engine-list" class="search-engine-list">
+          <!-- 由 main.js 动态渲染 -->
+        </div>
+        <div class="settings-section-title" style="margin-top:12px">➕ 添加自定义</div>
+        <div class="custom-engine-row">
+          <input type="text" id="custom-engine-name" placeholder="名称">
+          <input type="text" id="custom-engine-url" placeholder="URL（用 {q} 代关键词）">
+        </div>
+        <button id="btn-add-custom-engine" class="btn-backup" style="width:100%">➕ 添加自定义搜索引擎</button>
+        <div class="dialog-actions" style="margin-top:12px">
+          <button id="search-engine-mgr-cancel" class="btn-secondary">取消</button>
+          <button id="search-engine-mgr-close" class="btn-primary">完成</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="js/storage.js"></script>
+  <script src="js/settings.js"></script>
+  <script src="js/weather.js"></script>
+  <script src="js/lunar.js"></script>
+  <script src="js/clock.js"></script>
+  <script src="js/wallpaper.js"></script>
+  <script src="js/appearance.js"></script>
+  <script src="js/backup.js"></script>
+  <script src="js/cards.js"></script>
+  <script src="js/groups.js"></script>
+  <script src="js/dragdrop.js"></script>
+  <script src="js/search-engines.js"></script>
+  <script src="js/contextmenu.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

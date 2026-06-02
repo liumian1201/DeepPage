@@ -1,0 +1,33 @@
+# ===== DeepPage .gitignore =====
+
+# 历史备份
+backup/
+
+# 用户导出数据（含个人信息）
+config/
+
+# 历史发布版本（通过 GitHub Releases 发布）
+Release/
+
+# 开发者会话笔记
+SESSION.md
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE / 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Node.js（如有）
+node_modules/
+package-lock.json
+
+# 临时文件
+*.tmp
+*.log
