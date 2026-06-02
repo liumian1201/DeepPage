@@ -36,7 +36,18 @@ jobs:
           fi
           echo "✅ manifest.json 存在"
 
-      - name: 打包扩展
+      - name: 检查私钥状态
+        id: key_check
+        run: |
+          if [ -n "${{ secrets.CRX_PRIVATE_KEY }}" ]; then
+            echo "CRX_KEY_AVAILABLE=true" >> $GITHUB_ENV
+            echo "🔑 检测到私钥，将生成 .crx"
+          else
+            echo "CRX_KEY_AVAILABLE=false" >> $GITHUB_ENV
+            echo "⚠️ 未配置 CRX_PRIVATE_KEY，仅生成 .zip"
+          fi
+
+      - name: 打包 .zip
         run: |
           VERSION=${{ steps.version.outputs.VERSION }}
           ZIP_NAME="DeepPage_v${VERSION}.zip"
@@ -44,7 +55,21 @@ jobs:
           zip -r "../${ZIP_NAME}" . -x "README.md"
           cd ..
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
-          echo "✅ 打包完成: ${ZIP_NAME}"
+          echo "✅ .zip 打包完成: ${ZIP_NAME}"
+
+      - name: 打包 .crx
+        if: env.CRX_KEY_AVAILABLE == 'true'
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          CRX_NAME="DeepPage_v${VERSION}.crx"
+          echo "${{ secrets.CRX_PRIVATE_KEY }}" | base64 -d > key.pem
+          chromium-browser --no-sandbox --headless=new \
+            --pack-extension=./src \
+            --pack-extension-key=./key.pem
+          mv src.crx "${CRX_NAME}"
+          rm -f key.pem
+          echo "CRX_NAME=${CRX_NAME}" >> $GITHUB_ENV
+          echo "✅ .crx 打包完成: ${CRX_NAME}"
 
       - name: 提取更新日志
         id: changelog
@@ -59,12 +84,24 @@ jobs:
           echo "$CHANGELOG" > /tmp/changelog.md
           echo "✅ 已提取 v${VERSION} 更新日志"
 
+      - name: 准备发布文件
+        run: |
+          FILES="${ZIP_NAME}"
+          if [ -n "${CRX_NAME}" ] && [ -f "${CRX_NAME}" ]; then
+            FILES="${FILES}
+          ${CRX_NAME}"
+          fi
+          echo "RELEASE_FILES<<EOF" >> $GITHUB_ENV
+          echo "$FILES" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          echo "📦 发布文件: $FILES"
+
       - name: 创建 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: "DeepPage v${{ steps.version.outputs.VERSION }}"
           body_path: /tmp/changelog.md
-          files: ${{ env.ZIP_NAME }}
+          files: ${{ env.RELEASE_FILES }}
           draft: false
           prerelease: false
         env:
