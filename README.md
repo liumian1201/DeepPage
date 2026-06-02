@@ -101,7 +101,7 @@ DeepPage/
 │   ├── manifest.json       # Manifest V3 配置
 │   ├── background.js       # Service Worker（天气+图片代理）
 │   ├── index.html          # 新标签页 + 设置面板 + 对话框
-│   ├── README.md           # 详细开发文档
+│   ├── DEVELOPMENT.md      # 详细开发文档
 │   ├── css/
 │   │   └── style.css       # 全局样式 + CSS 变量体系 + 双主题
 │   ├── js/

@@ -54,7 +54,7 @@ jobs:
           VERSION=${{ steps.version.outputs.VERSION }}
           ZIP_NAME="DeepPage_v${VERSION}.zip"
           cd src
-          zip -r "../${ZIP_NAME}" . -x "README.md"
+          zip -r "../${ZIP_NAME}" . -x "DEVELOPMENT.md"
           cd ..
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
           echo "✅ .zip 打包完成: ${ZIP_NAME}"
