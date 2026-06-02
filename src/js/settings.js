@@ -85,7 +85,8 @@ const domSettings = {
   columnsSlider:  document.getElementById('setting-columns-slider'),
   columnsSliderVal: document.getElementById('columns-slider-val'),
   cardBorderRadius: document.getElementById('setting-card-radius'),
-  cardBorderRadiusVal: document.getElementById('radius-val')
+  cardBorderRadiusVal: document.getElementById('radius-val'),
+  cardOpenMode:    document.getElementById('setting-card-open-mode')
 };
 
 /* ---------- 初始化 ---------- */
@@ -115,6 +116,7 @@ function populateSettingsForm(settings) {
   if (domSettings.toggleShowGroupIndicator) domSettings.toggleShowGroupIndicator.checked = settings.showGroupIndicator !== false;
   if (domSettings.groupNameMode) domSettings.groupNameMode.value = settings.showGroupName || 'all';
   domSettings.toggleShowSearch.checked = settings.showSearch !== false;
+  if (domSettings.cardOpenMode) domSettings.cardOpenMode.value = settings.cardOpenMode || 'current';
   if (domSettings.groupPosition) domSettings.groupPosition.value = settings.groupPosition || 'left';
   if (domSettings.groupOffset) domSettings.groupOffset.value = settings.groupOffset || 16;
   if (domSettings.groupOffsetVal) domSettings.groupOffsetVal.textContent = (settings.groupOffset || 16) + 'px';
@@ -371,6 +373,7 @@ function collectSettingsFromForm() {
     bingUHD:       domSettings.bingUHD ? domSettings.bingUHD.checked : false,
     bingAutoRefresh: domSettings.bingAutoRefresh ? domSettings.bingAutoRefresh.checked : true,
     bingRefreshMin: domSettings.bingRefresh ? parseInt(domSettings.bingRefresh.value, 10) * 60 : 360,
+    cardOpenMode:  domSettings.cardOpenMode ? domSettings.cardOpenMode.value : 'current',
     // 外观数据由 appearance.js 的 collectAppearanceForm 收集并合并
     ...collectAppearanceForm(domSettings)
   };
@@ -660,6 +663,11 @@ function bindSettingsEvents() {
       }
       onSettingChanged();
     });
+  }
+
+  // 卡片打开方式
+  if (domSettings.cardOpenMode) {
+    domSettings.cardOpenMode.addEventListener('change', onSettingChanged);
   }
 
   // 跟随系统主题的实时响应

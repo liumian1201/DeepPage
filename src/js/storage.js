@@ -77,7 +77,8 @@ var DEFAULT_SETTINGS = {
   presetSize: 'medium',
   cardWidth: 270,
   cardHeight: 270,
-  cardBorderRadius: 14
+  cardBorderRadius: 14,
+  cardOpenMode: 'current'
 };
 
 function loadFromStorage(key, defaultValue) {

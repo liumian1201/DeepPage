@@ -179,7 +179,16 @@ function handleContextAction(action, ds) {
     case 'open':
       if (contextCardId) {
         const card = speeddials.find((c) => c.id === contextCardId);
-        if (card) window.location.href = card.url;
+        if (card) {
+          var mode = (typeof currentSettings !== 'undefined' && currentSettings) ? currentSettings.cardOpenMode : 'current';
+          if (mode === 'foreground') {
+            chrome.tabs.create({ url: card.url, active: true });
+          } else if (mode === 'background') {
+            chrome.tabs.create({ url: card.url, active: false });
+          } else {
+            window.location.href = card.url;
+          }
+        }
       }
       break;
     case 'copyurl':

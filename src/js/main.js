@@ -107,7 +107,14 @@ function bindMainEvents() {
     if (card && card.dataset.url) {
       // 刚完成拖拽，忽略本次点击
       if (window._justDragged && Date.now() - window._justDragged < 300) return;
-      window.location.href = card.dataset.url;
+      var mode = currentSettings ? currentSettings.cardOpenMode : 'current';
+      if (mode === 'foreground') {
+        chrome.tabs.create({ url: card.dataset.url, active: true });
+      } else if (mode === 'background') {
+        chrome.tabs.create({ url: card.dataset.url, active: false });
+      } else {
+        window.location.href = card.dataset.url;
+      }
     }
   });
 
