@@ -77,12 +77,14 @@ jobs:
         id: changelog
         run: |
           VERSION=${{ steps.version.outputs.VERSION }}
-          # 提取对应版本的更新日志
-          CHANGELOG=$(awk "/^## v${VERSION}/, /^## v/" CHANGELOG.md | sed '$d')
+          CHANGELOG=$(awk -v ver="v${VERSION}" '
+            $0 ~ "^## " ver { found=1; next }
+            found && /^## v/ { exit }
+            found { print }
+          ' CHANGELOG.md)
           if [ -z "$CHANGELOG" ]; then
             CHANGELOG="DeepPage v${VERSION}"
           fi
-          # 写入文件避免多行问题
           echo "$CHANGELOG" > /tmp/changelog.md
           echo "✅ 已提取 v${VERSION} 更新日志"
 
