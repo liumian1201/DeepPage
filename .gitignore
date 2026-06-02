@@ -12,6 +12,9 @@ Release/
 # 开发者会话笔记
 SESSION.md
 
+# 开发文档（仅本地使用）
+src/DEVELOPMENT.md
+
 # 系统文件
 .DS_Store
 Thumbs.db
