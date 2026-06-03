@@ -49,7 +49,7 @@
 ### 💾 数据管理
 - 轻量配置 → `chrome.storage.sync`（跨设备自动同步）
 - 图片资源 → IndexedDB（本地存储，Blob 直存，无大小限制）
-- 配置 JSON + 图片库 .zip（fflate 二进制打包）分体导出/导入，兼容旧版 .json + 一键重置
+- 一键全部导出/导入：fflate 二进制 zip 打包（`_DeepPage_Backup.zip`），兼容旧版 .json
 - 卡片图标本地缓存（SW 代理下载，断网可用）
 
 ### �️ 浏览器右键菜单
@@ -128,7 +128,7 @@ DeepPage/
 │   │   ├── settings.js     # 设置面板交互 + CSS 变量预览
 │   │   ├── appearance.js   # 外观配色 + 卡片尺寸预览
 │   │   ├── wallpaper.js    # 壁纸系统 + IndexedDB
-│   │   ├── backup.js       # 分体导出/导入 + 重置
+│   │   ├── backup.js       # 一键全部导出/导入 + 重置
 │   │   ├── weather.js      # 天气（4 API + SW 代理 + 缓存）
 │   │   ├── clock.js        # 时钟（12/24h + 秒数）
 │   │   ├── lunar.js        # 农历转换（1900-2100）

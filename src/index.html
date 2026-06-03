@@ -319,24 +319,22 @@
 
         <!-- ===== 数据 ===== -->
         <div class="tab-content" id="tab-data">
-          <p class="backup-hint">配置和图片库分开存储，需分别导出导入。</p>
+          <p class="backup-hint">一键导出/导入全部数据（配置 + 图片库），兼容旧版 .json 格式。</p>
           <div class="setting-group">
-            <label>📋 配置数据</label>
+            <label>📦 备份与还原</label>
             <div class="btn-row">
-              <button id="btn-export-config" class="btn-backup">📥 导出</button>
-              <button id="btn-import-config" class="btn-backup">📤 导入</button>
-            </div>
-          </div>
-          <div class="setting-group">
-            <label>🖼️ 图片库</label>
-            <div class="btn-row">
-              <button id="btn-export-images" class="btn-backup">📥 导出</button>
-              <button id="btn-import-images" class="btn-backup">📤 导入</button>
+              <button id="btn-export-all" class="btn-backup">📥 导出数据</button>
+              <button id="btn-import-all" class="btn-backup">📤 导入数据</button>
             </div>
             <span id="image-db-info" class="setting-hint">暂无图片数据</span>
           </div>
           <div class="setting-group" style="margin-top:12px">
             <button id="btn-reset-all" class="btn-reset-danger">⚠️ 重置全部数据</button>
+          </div>
+          <!-- 导入 loading 遮罩 -->
+          <div id="backup-loading" class="backup-loading hidden">
+            <div class="backup-loading-spinner"></div>
+            <p>正在解压并恢复数据，请勿关闭页面...</p>
           </div>
         </div>
       </div>

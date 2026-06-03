@@ -1071,6 +1071,7 @@ body.has-wallpaper::before {
   display: none;
   flex-direction: column;
   gap: 14px;
+  position: relative;
 }
 
 .tab-content.active {
@@ -1249,6 +1250,40 @@ body.has-wallpaper::before {
 
 .btn-reset-danger:hover {
   background: #f8d7da;
+}
+
+/* --------------------- 导入 loading 遮罩 --------------------- */
+.backup-loading {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--panel-radius, 12px);
+  z-index: 10;
+}
+
+.backup-loading-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: backup-spin 0.8s linear infinite;
+  margin-bottom: 16px;
+}
+
+@keyframes backup-spin {
+  to { transform: rotate(360deg); }
+}
+
+.backup-loading p {
+  color: #fff;
+  font-size: 14px;
+  font-family: var(--font-family);
+  margin: 0;
 }
 
 /* 看板重置按钮：全宽居中 */

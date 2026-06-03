@@ -73,7 +73,10 @@ async function loadLocalCardImages() {
     if (!key) return;
     key = key.replace('idx:', '');
     var blob = await loadImage(key);
-    if (blob) img.src = URL.createObjectURL(blob);
+    if (blob) {
+      if (img.src && img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
+      img.src = URL.createObjectURL(blob);
+    }
   });
 }
 

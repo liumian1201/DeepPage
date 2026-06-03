@@ -230,17 +230,25 @@ async function loadWallpaperFromDB() {
   if (blob) setBackgroundImage(URL.createObjectURL(blob));
 }
 
+var _currentBlobUrl = null;
+
 function setBackgroundImage(url) {
+  var prevBlob = _currentBlobUrl;
   var body = document.body;
   var img = new Image();
   img.onload = function () {
     body.style.backgroundImage = 'url("' + url.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '') + '")';
     body.classList.add('has-wallpaper');
+    // CSS 已内部持有图片，Blob URL 可安全释放
+    if (url.startsWith('blob:')) _currentBlobUrl = url;
+    else _currentBlobUrl = null;
+    if (prevBlob && prevBlob.startsWith('blob:')) URL.revokeObjectURL(prevBlob);
   };
   img.onerror = function () {
     console.warn('壁纸图片加载失败:', url);
     body.style.backgroundImage = '';
     body.classList.remove('has-wallpaper');
+    if (prevBlob && prevBlob.startsWith('blob:')) URL.revokeObjectURL(prevBlob);
   };
   img.src = url;
 }

@@ -43,32 +43,40 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
 // ---- 浏览器右键菜单（v1.0.5） ----
 
+var _rebuildingMenus = false;
+
 /** 根据当前分组数据重建右键菜单 */
 async function rebuildContextMenus() {
-  // 清除所有菜单项
-  await new Promise(function (r) { chrome.contextMenus.removeAll(r); });
+  if (_rebuildingMenus) return;
+  _rebuildingMenus = true;
+  try {
+    // 清除所有菜单项
+    await new Promise(function (r) { chrome.contextMenus.removeAll(r); });
 
-  // 读取分组
-  var result = await chrome.storage.sync.get(['groups']);
-  var groups = result.groups;
-  if (!groups || !Array.isArray(groups) || groups.length === 0) return;
+    // 读取分组
+    var result = await chrome.storage.sync.get(['groups']);
+    var groups = result.groups;
+    if (!groups || !Array.isArray(groups) || groups.length === 0) return;
 
-  // 创建父菜单
-  chrome.contextMenus.create({
-    id: 'deeppage-add-to-group',
-    title: '➕ 添加到 DeepPage',
-    contexts: ['page']
-  });
-
-  // 为每个分组创建子菜单
-  groups.forEach(function (g, i) {
+    // 创建父菜单
     chrome.contextMenus.create({
-      id: 'deeppage-group-' + i,
-      parentId: 'deeppage-add-to-group',
-      title: '📂 ' + (g.name || '未命名') + ' (' + ((g.cards && g.cards.length) || 0) + ')',
+      id: 'deeppage-add-to-group',
+      title: '➕ 添加到 DeepPage',
       contexts: ['page']
     });
-  });
+
+    // 为每个分组创建子菜单
+    groups.forEach(function (g, i) {
+      chrome.contextMenus.create({
+        id: 'deeppage-group-' + i,
+        parentId: 'deeppage-add-to-group',
+        title: '📂 ' + (g.name || '未命名') + ' (' + ((g.cards && g.cards.length) || 0) + ')',
+        contexts: ['page']
+      });
+    });
+  } finally {
+    _rebuildingMenus = false;
+  }
 }
 
 /** 监听 storage 变更：分组数据变化时自动刷新右键菜单 */

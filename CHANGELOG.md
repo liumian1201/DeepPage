@@ -10,14 +10,16 @@
 - 「指示器边距」→「指示器与边缘距离」
 - 「恢复默认」→「重置默认大小(270×270)」，按钮居中 + 红色样式
 
-### 🗜️ 图片库导入导出重构（fflate Zip）
-- 引入 `fflate`（5KB）替换 base64 JSON，零编码开销
-- 导出：IndexedDB Blob → 二进制 zip → `_DeepPage_Images.zip`（省 33% 体积，无内存膨胀）
-- 导入：直接解压 zip → Blob 写回 IndexedDB，无需 JSON.parse
-- 向下兼容：仍支持旧版 `_Images.json` 导入
+### 🗜️ 数据导入导出重构（fflate Zip 合并）
+- 引入 `fflate`（5KB），配置 + 图片库合并为单一 `_DeepPage_Backup.zip`
+- 导出：chrome.storage.sync + IndexedDB Blob → fflate 二进制 zip（零 base64）
+- 导入：解压 zip → 配置写回 sync + 图片写回 IndexedDB，带 loading 遮罩
+- 向下兼容旧版 `.json` 格式（配置 JSON / base64 图片 JSON 自动识别）
+- Object URL 内存泄漏修复（cards.js / wallpaper.js）
 
 ### 🐛 修复
-- `weather.js`：`WMO_ICONS` 补全全部 28 种天气代码图标映射（修复部分天气显示 `?` 图标）
+- `weather.js`：`WMO_ICONS` 补全全部 28 种天气代码图标映射
+- `background.js`：`rebuildContextMenus` 并发锁，修复扩展重载时右键菜单重复 ID 报错
 
 ---
 
