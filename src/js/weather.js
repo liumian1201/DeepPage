@@ -40,7 +40,7 @@ var WEATHER_APIS = {
 
 // ---- 天气图标映射 ----
 var HEFENG_ICONS = { '100': '\u2600\uFE0F', '101': '\uD83C\uDF24\uFE0F', '102': '\u26C5', '103': '\uD83C\uDF25\uFE0F', '104': '\u2601\uFE0F', '300': '\uD83C\uDF26\uFE0F', '400': '\uD83C\uDF28\uFE0F', '500': '\uD83C\uDF2B\uFE0F' };
-var WMO_ICONS = { 0: '\u2600\uFE0F', 1: '\uD83C\uDF24\uFE0F', 2: '\u26C5', 3: '\u2601\uFE0F', 45: '\uD83C\uDF2B\uFE0F', 51: '\uD83C\uDF26\uFE0F', 61: '\uD83C\uDF27\uFE0F', 71: '\uD83C\uDF28\uFE0F', 80: '\uD83C\uDF26\uFE0F', 95: '\u26C8\uFE0F' };
+var WMO_ICONS = { 0: '\u2600\uFE0F', 1: '\uD83C\uDF24\uFE0F', 2: '\u26C5', 3: '\u2601\uFE0F', 45: '\uD83C\uDF2B\uFE0F', 48: '\uD83C\uDF2B\uFE0F', 51: '\uD83C\uDF26\uFE0F', 53: '\uD83C\uDF26\uFE0F', 55: '\uD83C\uDF26\uFE0F', 56: '\uD83C\uDF26\uFE0F', 57: '\uD83C\uDF26\uFE0F', 61: '\uD83C\uDF27\uFE0F', 63: '\uD83C\uDF27\uFE0F', 65: '\uD83C\uDF27\uFE0F', 66: '\uD83C\uDF27\uFE0F', 67: '\uD83C\uDF27\uFE0F', 71: '\uD83C\uDF28\uFE0F', 73: '\uD83C\uDF28\uFE0F', 75: '\uD83C\uDF28\uFE0F', 77: '\uD83C\uDF28\uFE0F', 80: '\uD83C\uDF27\uFE0F', 81: '\uD83C\uDF27\uFE0F', 82: '\uD83C\uDF27\uFE0F', 85: '\uD83C\uDF28\uFE0F', 86: '\uD83C\uDF28\uFE0F', 95: '\u26C8\uFE0F', 96: '\u26C8\uFE0F', 99: '\u26C8\uFE0F' };
 var WMO_TEXT = { 0: '晴', 1: '大部晴', 2: '多云', 3: '阴', 45: '雾', 51: '毛毛雨', 53: '毛毛雨', 55: '毛毛雨', 56: '冻毛毛雨', 57: '冻毛毛雨', 61: '小雨', 63: '中雨', 65: '大雨', 66: '冻雨', 67: '冻雨', 71: '小雪', 73: '中雪', 75: '大雪', 77: '雪粒', 80: '阵雨', 81: '中阵雨', 82: '大阵雨', 85: '小雪阵', 86: '大雪阵', 95: '雷暴', 96: '雷暴+冰雹', 99: '强雷暴+冰雹' };
 
 // ---- 缓存系统 ----
