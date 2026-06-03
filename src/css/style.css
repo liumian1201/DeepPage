@@ -175,7 +175,8 @@ body.has-wallpaper::before {
 }
 
 [data-theme="dark"] .btn-backup {
-  background: var(--bg-card);
+  background: var(--bg-input);
+  color: var(--text-primary);
 }
 
 /* 深色模式下操作按钮 */
@@ -713,26 +714,23 @@ body.has-wallpaper::before {
   height: 28px;
   padding: 0 10px;
   flex-shrink: 0;
-  background: var(--bg-card, #ffffff);
-}
-.card-top-icon {
-  width: 16px; height: 16px;
-  object-fit: contain;
-  flex-shrink: 0;
-  border-radius: 2px;
+  background: var(--topbar-bg, var(--bg-card, #ffffff));
+  position: relative;
 }
 .card-top-title {
   flex: 1; min-width: 0;
   font-size: var(--card-font-size, 13px);
   font-weight: 500;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  color: var(--text-on-card, #202124);
+  color: var(--topbar-text, var(--text-on-card, #202124));
+  text-align: center;
 }
 .card-top-counter {
+  position: absolute;
+  right: 10px;
   font-size: 11px;
-  color: var(--text-on-card, #202124);
+  color: var(--topbar-text, var(--text-on-card, #202124));
   opacity: 0.6;
-  flex-shrink: 0;
   white-space: nowrap;
 }
 
@@ -762,7 +760,7 @@ body.has-wallpaper::before {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #ffffff;
+  background: var(--bg-card, #ffffff);
   position: relative;
   overflow: hidden;
 }
@@ -782,14 +780,7 @@ body.has-wallpaper::before {
   box-sizing: border-box;
 }
 
-.card-thumb .card-favicon-center {
-  width: 64px;
-  height: 64px;
-  object-fit: contain;
-  opacity: 0.6;
-}
-
-/* 兜底文字卡片（无图时） */
+/* 兜底文字卡片（无自定义图时） */
 .card-fallback {
   width: 100%;
   height: 100%;
@@ -1194,14 +1185,42 @@ body.has-wallpaper::before {
   transform: scale(1.2);
 }
 
+/* 颜色选择器所在行：标签与色块同行 */
+.setting-group:has(input[type="color"]) {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .setting-group input[type="color"] {
-  width: 100%;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   border: 1px solid var(--border-color);
-  border-radius: var(--btn-radius);
-  padding: 2px 6px;
+  border-radius: 6px;
+  padding: 2px;
   background: var(--bg-input);
   cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* 同行滑块布局 */
+.setting-inline-row input[type="range"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.setting-inline-row .slider-val {
+  float: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-light);
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 56px;
+  text-align: center;
 }
 
 .slider-val {
@@ -1236,6 +1255,42 @@ body.has-wallpaper::before {
   line-height: 1.5;
   margin: -8px 0 0 0;
   padding: 0;
+}
+
+/* 设置面板内同行布局（标签+控件+按钮） */
+.setting-inline-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.setting-inline-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.setting-inline-row select {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--btn-radius);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: var(--font-family);
+}
+
+.setting-inline-row .btn-backup-sm {
+  padding: 8px 10px;
+  font-size: 13px;
+  margin-bottom: 0;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .btn-backup {
@@ -1644,6 +1699,18 @@ body.is-locked .card-actions {
 
 body.is-locked .lock-indicator {
   display: block;
+}
+
+/* v1.1.0: 沉浸模式 — 双击空白隐藏界面 */
+body.immersive .speeddial-section,
+body.immersive .search-section,
+body.immersive .dashboard-section,
+body.immersive .group-indicator {
+  display: none !important;
+}
+body.immersive .container {
+  justify-content: center;
+  min-height: 100vh;
 }
 
 /* 锁定拖拽→红白闪烁+抖动 */

@@ -101,6 +101,58 @@ async function deleteCardIcon(cardId) {
   await deleteImage(key);
 }
 
+/* ========== IndexedDB 垃圾回收 (GC) ========== */
+
+/**
+ * 清理 IndexedDB 中无主图片（已删除卡片/分组的残留图片）
+ * 静默执行，不影响用户操作
+ */
+async function collectGarbage() {
+  try {
+    // 收集所有有效卡片的 image 引用
+    var validKeys = new Set();
+    var result = await new Promise(function (resolve) {
+      chrome.storage.sync.get(['groups'], function (data) { resolve(data); });
+    });
+    var groups = result.groups || [];
+    for (var i = 0; i < groups.length; i++) {
+      var cards = groups[i].cards || [];
+      for (var j = 0; j < cards.length; j++) {
+        var img = cards[j].image;
+        if (img && img.startsWith('idx:')) {
+          validKeys.add(img.slice(4)); // 'idx:cardimg_xxx' → 'cardimg_xxx'
+        }
+      }
+    }
+
+    // 遍历 IndexedDB，删除不在有效集合中的 cardimg_ 条目
+    var db = await openImgDB();
+    var orphans = [];
+    await new Promise(function (resolve) {
+      var tx = db.transaction('images', 'readwrite');
+      var store = tx.objectStore('images');
+      var cursorReq = store.openCursor();
+      cursorReq.onsuccess = function (e) {
+        var cursor = e.target.result;
+        if (cursor) {
+          var key = cursor.key;
+          if (typeof key === 'string' && key.startsWith('cardimg_') && !validKeys.has(key)) {
+            orphans.push(key);
+            cursor.delete();
+          }
+          cursor.continue();
+        } else { resolve(); }
+      };
+    });
+
+    if (orphans.length > 0) {
+      console.log('GC: 清理了 ' + orphans.length + ' 个无主图片:', orphans);
+    }
+  } catch (e) {
+    console.warn('GC 执行失败:', e);
+  }
+}
+
 /* ========== Bing 壁纸多图缓存 ========== */
 var bingCache = null;
 

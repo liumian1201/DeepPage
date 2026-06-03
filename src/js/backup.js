@@ -35,6 +35,10 @@ async function exportAll() {
     var config = await new Promise(function (resolve) {
       chrome.storage.sync.get(null, function (result) { resolve(result); });
     });
+    // 写入导出时间戳，供导入预览使用
+    if (config.settings) {
+      config.settings._exportTime = new Date().toLocaleString('zh-CN');
+    }
 
     // 2. 读取图片库
     var db = await openImgDB();
@@ -101,6 +105,26 @@ function importAll() {
         var hasImages = manifest && manifest.images && manifest.images.length > 0;
 
         if (!hasConfig && !hasImages) throw new Error('备份文件中没有有效数据');
+
+        // 预览摘要：先读取 config.json 统计分组和卡片数
+        var preview = '';
+        if (hasConfig) {
+          var previewConfig = JSON.parse(fflate.strFromU8(unzipped['config.json']));
+          var previewGroups = previewConfig.groups || [];
+          var totalCards = 0;
+          for (var pi = 0; pi < previewGroups.length; pi++) {
+            totalCards += (previewGroups[pi].cards || []).length;
+          }
+          var exportTime = previewConfig.settings && previewConfig.settings._exportTime;
+          preview = '📂 ' + previewGroups.length + ' 个分组，🗂️ ' + totalCards + ' 张卡片';
+          if (exportTime) preview += '\n🕐 导出时间：' + exportTime;
+          if (hasImages) preview += '\n🖼️ ' + manifest.images.length + ' 张缓存图片';
+        } else {
+          preview = '🖼️ ' + manifest.images.length + ' 张缓存图片（无配置）';
+        }
+        preview += '\n\n⚠️ 导入将覆盖当前所有数据，是否继续？';
+
+        await showImportConfirmAsync(preview);
 
         // 先恢复图片（IndexedDB），再恢复配置（storage.sync）
         // 避免 storage.onChanged 触发渲染时 IndexedDB 还没写完
@@ -288,6 +312,7 @@ function pickFile(accept, callback) {
   var input = document.createElement('input');
   input.type = 'file';
   input.accept = accept;
+  input.style.cssText = 'position:fixed;top:-100px;left:0;width:1px;height:1px';
   input.addEventListener('change', function () {
     var file = input.files[0];
     if (file) callback(file);

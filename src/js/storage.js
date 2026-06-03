@@ -38,7 +38,6 @@ var DEFAULT_SETTINGS = {
   showWeather: true,
   theme: 'light',
   showAddButton: true,
-  showCardIcon: true,
   showCardTitle: true,
   pureTextCards: false,
   weatherType: 'openmeteo',

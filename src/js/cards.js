@@ -71,28 +71,17 @@ function renderSpeeddials() {
     const hasCustomImage = card.image && card.image.trim();
     const isLocal = hasCustomImage && card.image.startsWith('idx:');
     const imgSrc = isLocal ? '' : (hasCustomImage ? escapeHtml(card.image.trim()) : '');
-    var domain;
-    try { domain = new URL(card.url).hostname.replace(/^www\./, ''); } catch(e) { domain = encodeURIComponent(card.url); }
-    var faviconUrl = 'https://favicon.cccyun.cc/' + domain;
-    var fb1 = 'https://faviconkit.net/favicon/' + domain + '?sz=32';
-    var fb2 = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(card.url) + '&sz=32';
-    // v1.0.9: 三级降级 — cccyun → faviconkit → Google S2
-    var topIconSrc = faviconUrl;
+    const showTitle = !currentSettings || currentSettings.showCardTitle !== false;
     const firstChar = (card.name || '?').charAt(0).toUpperCase();
     const bgColor = card.color || stringToColor(card.url || card.name);
-    const showIcon = !currentSettings || currentSettings.showCardIcon !== false;
-    const showTitle = !currentSettings || currentSettings.showCardTitle !== false;
     const showCounter = currentSettings && currentSettings.showVisitCount === true;
     const visitCount = card.visitCount || 0;
     const pureText = currentSettings && currentSettings.pureTextCards === true;
 
-    // 顶部信息栏：图标 + 标题 + 计数
+    // 顶部信息栏：标题 + 计数（v1.1.0: 移除图标）
     var topBarHtml = '';
-    if (showIcon || showTitle || showCounter) {
+    if (showTitle || showCounter) {
       topBarHtml = '<div class="card-top-bar">';
-      if (showIcon) {
-        topBarHtml += '<img class="card-top-icon" src="' + topIconSrc + '" alt="" data-fb="' + escapeHtml(fb1) + '" data-fb2="' + escapeHtml(fb2) + '">';
-      }
       if (showTitle) {
         topBarHtml += '<span class="card-top-title">' + escapeHtml(card.name) + '</span>';
       }
@@ -107,7 +96,7 @@ function renderSpeeddials() {
       return;
     }
 
-    html += '\n      <div class="card-wrapper"\n           data-index="' + index + '"\n           data-id="' + card.id + '"\n           data-url="' + escapeHtml(card.url) + '"\n           ' + (isLocal ? 'data-local-img="' + card.image + '"' : '') + '\n           title="' + escapeHtml(card.name) + ' — ' + escapeHtml(card.url) + '">\n        ' + topBarHtml + '\n        <div class="speeddial-card" draggable="true">\n          <div class="card-thumb">\n            ' + (hasCustomImage ? '\n              <img class="card-thumb-img" src="' + (isLocal ? '' : imgSrc) + '" alt="' + escapeHtml(card.name) + '" loading="lazy"\n                   ' + (isLocal ? 'data-local="1"' : '') + '>\n            ' : '\n              <img class="card-favicon-center" src="' + (imgSrc || 'https://favicon.cccyun.cc/' + domain) + '" alt="' + escapeHtml(card.name) + '" loading="lazy">\n              <div class="card-fallback" style="display:none;background:' + bgColor + ';">' + firstChar + '</div>\n            ') + '\n          </div>\n          <div class="card-actions">\n            <button class="btn-card-edit" data-action="edit" data-id="' + card.id + '" title="编辑">✎</button>\n            <button class="btn-card-delete" data-action="delete" data-id="' + card.id + '" title="删除">✕</button>\n          </div>\n        </div>\n      </div>';
+    html += '\n      <div class="card-wrapper"\n           data-index="' + index + '"\n           data-id="' + card.id + '"\n           data-url="' + escapeHtml(card.url) + '"\n           ' + (isLocal ? 'data-local-img="' + card.image + '"' : '') + '\n           title="' + escapeHtml(card.name) + ' — ' + escapeHtml(card.url) + '">\n        ' + topBarHtml + '\n        <div class="speeddial-card" draggable="true">\n          <div class="card-thumb">\n            ' + (hasCustomImage ? '\n              <img class="card-thumb-img" src="' + (isLocal ? '' : imgSrc) + '" alt="' + escapeHtml(card.name) + '" loading="lazy"\n                   ' + (isLocal ? 'data-local="1"' : '') + '>\n            ' : '\n              <div class="card-fallback" style="background:' + bgColor + ';">' + firstChar + '</div>\n            ') + '\n          </div>\n          <div class="card-actions">\n            <button class="btn-card-edit" data-action="edit" data-id="' + card.id + '" title="编辑">✎</button>\n            <button class="btn-card-delete" data-action="delete" data-id="' + card.id + '" title="删除">✕</button>\n          </div>\n        </div>\n      </div>';
   });
 
   var showAdd = (!currentSettings || currentSettings.showAddButton !== false) && !isLocked;
@@ -125,7 +114,6 @@ function renderSpeeddials() {
 
   loadLocalCardImages();
   bindDragEvents();
-  bindFaviconErrors();
 }
 
 /** 加载卡片中的本地 IndexedDB 图片 */
@@ -146,14 +134,7 @@ async function loadLocalCardImages() {
       if (img.src && img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
       img.src = URL.createObjectURL(blob);
     } else {
-      // IndexedDB 中无此 blob（如重置后导入）→ 隐藏破图，显示兜底色块，并清除无效引用
-      img.style.display = 'none';
-      var thumb = img.closest('.card-thumb');
-      if (thumb) {
-        var fallback = thumb.querySelector('.card-fallback');
-        if (fallback) fallback.style.display = 'flex';
-      }
-      // 清除 card 数据中无效的 image 引用
+      // IndexedDB 中无此 blob → 隐藏破图并清除无效引用
       var wrapper = img.closest('.card-wrapper');
       if (wrapper) {
         var cid = wrapper.dataset.id;
@@ -169,35 +150,6 @@ async function loadLocalCardImages() {
         }
       }
     }
-  });
-}
-
-/** 图片加载失败处理（JS 监听替代 inline onerror，符合 CSP） */
-function bindFaviconErrors() {
-  domMain.grid.querySelectorAll('.card-favicon-center').forEach((img) => {
-    img.addEventListener('error', function () {
-      this.style.display = 'none';
-      const fallback = this.nextElementSibling;
-      if (fallback && fallback.classList.contains('card-fallback')) {
-        fallback.style.display = 'flex';
-      }
-    });
-  });
-  domMain.grid.querySelectorAll('.card-top-icon').forEach((img) => {
-    img.addEventListener('error', function () {
-      // 三级降级：cccyun → faviconkit → Google S2
-      if (!this._tried) {
-        this._tried = 1;
-        var fb = this.dataset.fb;
-        if (fb) { this.src = fb; return; }
-      }
-      if (this._tried === 1) {
-        this._tried = 2;
-        var fb2 = this.dataset.fb2;
-        if (fb2) { this.src = fb2; return; }
-      }
-      this.style.display = 'none';
-    });
   });
 }
 

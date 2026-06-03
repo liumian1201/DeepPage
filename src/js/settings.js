@@ -17,7 +17,6 @@ const domSettings = {
   toggleLunar:  document.getElementById('toggle-lunar'),
   toggleWeather: document.getElementById('toggle-weather'),
   toggleAddBtn:  document.getElementById('toggle-add-button'),
-  toggleCardIcon: document.getElementById('toggle-card-icon'),
   toggleCardTitle: document.getElementById('toggle-card-title'),
   toggleShowVisitCount: document.getElementById('toggle-show-visit-count'),
   togglePureTextCards: document.getElementById('toggle-pure-text-cards'),
@@ -111,7 +110,6 @@ function populateSettingsForm(settings) {
   domSettings.toggleLunar.checked  = settings.showLunar;
   domSettings.toggleWeather.checked = settings.showWeather;
   domSettings.toggleAddBtn.checked  = settings.showAddButton !== false;
-  domSettings.toggleCardIcon.checked = settings.showCardIcon !== false;
   domSettings.toggleCardTitle.checked = settings.showCardTitle !== false;
   if (domSettings.toggleShowVisitCount) domSettings.toggleShowVisitCount.checked = settings.showVisitCount !== false;
   if (domSettings.togglePureTextCards) domSettings.togglePureTextCards.checked = settings.pureTextCards === true;
@@ -346,7 +344,6 @@ function collectSettingsFromForm() {
     showLunar:    domSettings.toggleLunar.checked,
     showWeather:  domSettings.toggleWeather.checked,
     showAddButton: domSettings.toggleAddBtn.checked,
-    showCardIcon: domSettings.toggleCardIcon.checked,
     showCardTitle: domSettings.toggleCardTitle.checked,
     showVisitCount: domSettings.toggleShowVisitCount ? domSettings.toggleShowVisitCount.checked : true,
     pureTextCards: domSettings.togglePureTextCards ? domSettings.togglePureTextCards.checked : false,
@@ -641,7 +638,7 @@ function bindSettingsEvents() {
     el.addEventListener('change', onSettingChanged);
   });
 
-  [domSettings.toggleClock, domSettings.toggleLunar, domSettings.toggleWeather, domSettings.toggleAddBtn, domSettings.toggleCardIcon, domSettings.toggleCardTitle, domSettings.toggleShowVisitCount, domSettings.toggleConfirmDelete, domSettings.toggleShowGroupIndicator, domSettings.bingUHD, domSettings.bingAutoRefresh, domSettings.toggleShowSearch, domSettings.toggleClockSeconds].forEach((el) => {
+  [domSettings.toggleClock, domSettings.toggleLunar, domSettings.toggleWeather, domSettings.toggleAddBtn, domSettings.toggleCardTitle, domSettings.toggleShowVisitCount, domSettings.toggleConfirmDelete, domSettings.toggleShowGroupIndicator, domSettings.bingUHD, domSettings.bingAutoRefresh, domSettings.toggleShowSearch, domSettings.toggleClockSeconds].forEach((el) => {
     if (!el) return;
     el.addEventListener('change', onSettingChanged);
   });

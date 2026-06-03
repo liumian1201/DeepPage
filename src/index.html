@@ -115,53 +115,68 @@
             <div class="toggle-list">
               <label class="toggle-item"><input type="checkbox" id="toggle-lock"> 锁定界面（禁止拖拽、编辑、删除）</label>
               <label class="toggle-item"><input type="checkbox" id="toggle-pure-text-cards"> 极简卡片（纯色文字，不加载图片）</label>
+              <label class="toggle-item"><input type="checkbox" id="toggle-confirm-delete" checked> 删除卡片时弹出确认</label>
             </div>
           </div>
           <div class="setting-group">
-            <label for="setting-search-engine">搜索引擎</label>
             <div class="toggle-list">
               <label class="toggle-item"><input type="checkbox" id="toggle-show-search" checked> 显示搜索栏</label>
             </div>
-            <select id="setting-search-engine"><option value="google">Google</option><option value="baidu">百度</option></select>
-            <button id="btn-search-engine-mgr" class="btn-backup" style="margin-top:4px">🔍 管理搜索引擎</button>
+            <div class="setting-inline-row">
+              <label for="setting-search-engine" class="setting-inline-label">默认搜索引擎</label>
+              <select id="setting-search-engine"><option value="google">Google</option><option value="baidu">百度</option></select>
+              <button id="btn-search-engine-mgr" class="btn-backup btn-backup-sm">🔍 管理</button>
+            </div>
           </div>
           <div class="setting-group">
-            <label for="setting-theme">主题模式</label>
-            <select id="setting-theme"><option value="light">浅色模式</option><option value="dark">深色模式</option><option value="auto">跟随系统</option></select>
+            <div class="setting-inline-row">
+              <label for="setting-theme" class="setting-inline-label">主题模式选择</label>
+              <select id="setting-theme"><option value="light">浅色模式</option><option value="dark">深色模式</option><option value="auto">跟随系统</option></select>
+            </div>
           </div>
           <div class="setting-group">
             <span class="setting-label">卡片外观</span>
             <div class="toggle-list">
               <label class="toggle-item"><input type="checkbox" id="toggle-add-button" checked> 显示「+」添加按钮</label>
-              <label class="toggle-item"><input type="checkbox" id="toggle-card-icon" checked> 卡片上方显示图标</label>
               <label class="toggle-item"><input type="checkbox" id="toggle-card-title" checked> 卡片上方显示标题</label>
               <label class="toggle-item"><input type="checkbox" id="toggle-show-visit-count" checked> 显示访问计数</label>
-              <label class="toggle-item"><input type="checkbox" id="toggle-confirm-delete" checked> 删除卡片时弹出确认</label>
             </div>
           </div>
           <div class="setting-group">
-            <label for="setting-sort-mode">当前分组排序</label>
-            <select id="setting-sort-mode">
+            <div class="setting-inline-row">
+              <label for="setting-sort-mode" class="setting-inline-label">当前分组排序</label>
+              <select id="setting-sort-mode">
               <option value="manual">手动排序（默认）</option>
               <option value="time-desc">按添加时间 ↓（最新在前）</option>
               <option value="time-asc">按添加时间 ↑（最早在前）</option>
               <option value="visits-desc">按访问数 ↓（最多在前）</option>
               <option value="visits-asc">按访问数 ↑（最少在前）</option>
             </select>
+            </div>
           </div>
           <div class="setting-group">
-            <label for="setting-card-open-mode">卡片打开方式</label>
-            <select id="setting-card-open-mode"><option value="current">当前页面打开</option><option value="foreground">新标签页前台打开</option><option value="background">新标签页后台打开</option></select>
+            <div class="setting-inline-row">
+              <label for="setting-card-open-mode" class="setting-inline-label">卡片打开方式</label>
+              <select id="setting-card-open-mode"><option value="current">当前页面打开</option><option value="foreground">新标签页前台打开</option><option value="background">新标签页后台打开</option></select>
+            </div>
           </div>
           <div class="setting-group">
-            <label for="setting-group-position">分组</label>
-            <select id="setting-group-position"><option value="left">左侧（圆点）</option><option value="top">顶部（标签）</option><option value="right">右侧（圆点）</option><option value="bottom">底部（标签）</option></select>
             <div class="toggle-list">
               <label class="toggle-item"><input type="checkbox" id="toggle-show-group-indicator" checked> 显示分组指示器</label>
             </div>
-            <label for="setting-group-name-mode" style="margin-top:6px">组名显示</label>
-            <select id="setting-group-name-mode"><option value="active">仅当前组</option><option value="all">显示所有组名</option><option value="off">不显示组名</option></select>
-            <button id="btn-open-group-manager" class="btn-backup">📂 管理分组</button>
+          </div>
+          <div class="setting-group">
+            <div class="setting-inline-row">
+              <label for="setting-group-position" class="setting-inline-label">分组指示器位置</label>
+              <select id="setting-group-position"><option value="left">左侧（圆点）</option><option value="top">顶部（标签）</option><option value="right">右侧（圆点）</option><option value="bottom">底部（标签）</option></select>
+            </div>
+          </div>
+          <div class="setting-group">
+            <div class="setting-inline-row">
+              <label for="setting-group-name-mode" class="setting-inline-label">分组名显示规则</label>
+              <select id="setting-group-name-mode"><option value="active">仅当前组</option><option value="all">显示所有组名</option><option value="off">不显示组名</option></select>
+              <button id="btn-open-group-manager" class="btn-backup btn-backup-sm">📂 分组管理</button>
+            </div>
           </div>
         </div>
 
@@ -180,44 +195,61 @@
           </div>
           <div class="settings-section-title">📐 看板位置</div>
           <div class="setting-group">
-            <label for="setting-dash-left">水平位置 <span id="dash-left-val" class="slider-val">居中</span></label>
-            <input type="range" id="setting-dash-left" min="-1200" max="1200" value="0" step="5">
+            <div class="setting-inline-row">
+              <label for="setting-dash-left" class="setting-inline-label">水平位置</label>
+              <span id="dash-left-val" class="slider-val">居中</span>
+              <input type="range" id="setting-dash-left" min="-1200" max="1200" value="0" step="5">
+            </div>
           </div>
           <div class="setting-group">
-            <label for="setting-dash-bottom">垂直位置 <span id="dash-bottom-val" class="slider-val">底部</span></label>
-            <input type="range" id="setting-dash-bottom" min="0" max="1200" value="0" step="5">
+            <div class="setting-inline-row">
+              <label for="setting-dash-bottom" class="setting-inline-label">垂直位置</label>
+              <span id="dash-bottom-val" class="slider-val">底部</span>
+              <input type="range" id="setting-dash-bottom" min="0" max="1200" value="0" step="5">
+            </div>
           </div>
           <div class="setting-group">
             <button id="btn-reset-dash-pos" class="btn-reset-danger">↺ 重置位置</button>
           </div>
           <div class="settings-section-title">📏 组件尺寸</div>
           <div class="setting-group">
-            <label for="setting-dash-item-w">组件宽度 <span id="dash-item-w-val" class="slider-val">140px</span></label>
-            <input type="range" id="setting-dash-item-w" min="100" max="500" value="140" step="10">
+            <div class="setting-inline-row">
+              <label for="setting-dash-item-w" class="setting-inline-label">组件宽度</label>
+              <span id="dash-item-w-val" class="slider-val">140px</span>
+              <input type="range" id="setting-dash-item-w" min="100" max="500" value="140" step="10">
+            </div>
           </div>
           <div class="setting-group">
-            <label for="setting-dash-item-h">组件高度 <span id="dash-item-h-val" class="slider-val">自适应</span></label>
-            <input type="range" id="setting-dash-item-h" min="0" max="300" value="0" step="10">
+            <div class="setting-inline-row">
+              <label for="setting-dash-item-h" class="setting-inline-label">组件高度</label>
+              <span id="dash-item-h-val" class="slider-val">自适应</span>
+              <input type="range" id="setting-dash-item-h" min="0" max="300" value="0" step="10">
+            </div>
           </div>
           <div class="setting-group">
-            <label for="setting-dash-gap">组件间距 <span id="dash-gap-val" class="slider-val">16px</span></label>
-            <input type="range" id="setting-dash-gap" min="2" max="48" value="16" step="2">
+            <div class="setting-inline-row">
+              <label for="setting-dash-gap" class="setting-inline-label">组件间距</label>
+              <span id="dash-gap-val" class="slider-val">16px</span>
+              <input type="range" id="setting-dash-gap" min="2" max="48" value="16" step="2">
+            </div>
           </div>
           <div class="setting-group">
             <button id="btn-reset-dash-size" class="btn-reset-danger">↺ 重置大小</button>
           </div>
           <div class="settings-section-title">⏰ 时钟</div>
           <div class="setting-group">
-            <label for="setting-clock-format">时钟格式</label>
-            <select id="setting-clock-format"><option value="24h">24 小时制</option><option value="12h">12 小时制</option></select>
-            <div class="toggle-list" style="margin-top:6px">
-              <label class="toggle-item"><input type="checkbox" id="toggle-clock-seconds" checked> 显示秒数</label>
+            <div class="setting-inline-row">
+              <label for="setting-clock-format" class="setting-inline-label">时钟格式</label>
+              <select id="setting-clock-format"><option value="24h">24 小时制</option><option value="12h">12 小时制</option></select>
+              <label class="toggle-item" style="white-space:nowrap;flex-shrink:0;"><input type="checkbox" id="toggle-clock-seconds" checked> 显示秒数</label>
             </div>
           </div>
           <div class="settings-section-title">📅 农历</div>
           <div class="setting-group">
-            <label for="setting-lunar-style">显示样式</label>
-            <select id="setting-lunar-style"><option value="double">双行（干支年+生肖 / 月日）</option><option value="single">单行（干支年 月日）</option></select>
+            <div class="setting-inline-row">
+              <label for="setting-lunar-style" class="setting-inline-label">显示样式</label>
+              <select id="setting-lunar-style"><option value="double">双行（干支年+生肖 / 月日）</option><option value="single">单行（干支年 月日）</option></select>
+            </div>
           </div>
           <div class="setting-group">
             <span class="setting-hint">🌤️ 天气数据源请到 天气 标签设置</span>
@@ -226,55 +258,86 @@
 
         <!-- ===== 外观 ===== -->
         <div class="tab-content" id="tab-appearance">
+          <div class="settings-section-title">🔤 信息栏设置</div>
           <div class="setting-group">
-            <label for="setting-bg-color">背景颜色</label>
+            <label for="setting-bg-color">信息栏背景颜色</label>
             <input type="color" id="setting-bg-color" value="#f0f2f5">
           </div>
           <div class="setting-group">
-            <label for="setting-card-bg-color">卡片背景色</label>
-            <input type="color" id="setting-card-bg-color" value="#ffffff">
-          </div>
-          <div class="setting-group">
-            <label for="setting-card-text-color">卡片文字颜色</label>
+            <label for="setting-card-text-color">信息栏文字颜色</label>
             <input type="color" id="setting-card-text-color" value="#202124">
           </div>
           <div class="setting-group">
-            <label for="setting-card-font-size">卡片字号 <span id="font-size-val" class="slider-val">13px</span></label>
-            <input type="range" id="setting-card-font-size" min="12" max="24" value="13" step="1">
-          </div>
-          <div class="settings-section-title">📐 卡片尺寸与布局</div>
-          <div class="setting-group">
-            <label for="setting-columns-slider">每行列数 <span id="columns-slider-val" class="slider-val">5</span></label>
-            <input type="range" id="setting-columns-slider" min="2" max="12" value="5" step="1">
+            <div class="setting-inline-row">
+              <label for="setting-card-font-size" class="setting-inline-label">信息栏字号</label>
+              <span id="font-size-val" class="slider-val">13px</span>
+              <input type="range" id="setting-card-font-size" min="12" max="24" value="13" step="1">
+            </div>
           </div>
           <div class="setting-group">
-            <label for="setting-card-width">卡片宽度 <span id="card-width-val" class="slider-val">270px</span></label>
-            <input type="range" id="setting-card-width" min="100" max="400" value="270" step="10">
+            <button id="btn-reset-topbar" class="btn-reset-small">↺ 重置信息栏</button>
+          </div>
+          <div class="settings-section-title">📐 卡片布局</div>
+          <div class="setting-group">
+            <label for="setting-card-bg-color">卡片背景颜色</label>
+            <input type="color" id="setting-card-bg-color" value="#ffffff">
           </div>
           <div class="setting-group">
-            <label for="setting-card-height">卡片高度 <span id="card-height-val" class="slider-val">270px</span></label>
-            <input type="range" id="setting-card-height" min="80" max="400" value="270" step="10">
+            <div class="setting-inline-row">
+              <label for="setting-columns-slider" class="setting-inline-label">每行列数</label>
+              <span id="columns-slider-val" class="slider-val">5</span>
+              <input type="range" id="setting-columns-slider" min="2" max="12" value="5" step="1">
+            </div>
           </div>
           <div class="setting-group">
-            <button id="btn-reset-card-size" class="btn-reset-small">↺ 重置默认大小(270×270)</button>
+            <div class="setting-inline-row">
+              <label for="setting-card-width" class="setting-inline-label">卡片宽度</label>
+              <span id="card-width-val" class="slider-val">270px</span>
+              <input type="range" id="setting-card-width" min="100" max="400" value="270" step="10">
+            </div>
           </div>
           <div class="setting-group">
-            <label for="setting-card-radius">卡片圆角 <span id="radius-val" class="slider-val">14px</span></label>
-            <input type="range" id="setting-card-radius" min="0" max="50" value="14" step="1">
+            <div class="setting-inline-row">
+              <label for="setting-card-height" class="setting-inline-label">卡片高度</label>
+              <span id="card-height-val" class="slider-val">270px</span>
+              <input type="range" id="setting-card-height" min="80" max="400" value="270" step="10">
+            </div>
+          </div>
+          <div class="setting-group">
+            <div class="setting-inline-row">
+              <label for="setting-card-radius" class="setting-inline-label">卡片圆角</label>
+              <span id="radius-val" class="slider-val">14px</span>
+              <input type="range" id="setting-card-radius" min="0" max="50" value="14" step="1">
+            </div>
+          </div>
+          <div class="setting-group">
+            <button id="btn-reset-card-size" class="btn-reset-small">↺ 重置卡片大小</button>
           </div>
           <div class="settings-section-title">🔍 搜索框位置</div>
           <div class="setting-group">
-            <label for="setting-search-top">搜索框与边缘距离 <span id="search-top-val" class="slider-val">60px</span></label>
-            <input type="range" id="setting-search-top" min="2" max="300" value="60" step="2">
+            <div class="setting-inline-row">
+              <label for="setting-search-top" class="setting-inline-label">搜索边距 </label>
+              <span id="search-top-val" class="slider-val">60px</span>
+              <input type="range" id="setting-search-top" min="2" max="300" value="60" step="2">
+            </div>
           </div>
           <div class="setting-group">
-            <label for="setting-search-gap">搜索框与卡片距离 <span id="search-gap-val" class="slider-val">48px</span></label>
-            <input type="range" id="setting-search-gap" min="12" max="200" value="48" step="4">
+            <div class="setting-inline-row">
+              <label for="setting-search-gap" class="setting-inline-label">搜索卡距</label>
+              <span id="search-gap-val" class="slider-val">48px</span>
+              <input type="range" id="setting-search-gap" min="12" max="200" value="48" step="4">
+            </div>
           </div>
-          <div class="settings-section-title">📍 分组指示器</div>
           <div class="setting-group">
-            <label for="setting-group-offset">指示器与边缘距离 <span id="group-offset-val" class="slider-val">16px</span></label>
-            <input type="range" id="setting-group-offset" min="2" max="80" value="16" step="2">
+            <button id="btn-reset-search-pos" class="btn-reset-small">↺ 重置搜索位置</button>
+          </div>
+          <div class="settings-section-title">📍 分组指示器位置</div>
+          <div class="setting-group">
+            <div class="setting-inline-row">
+              <label for="setting-group-offset" class="setting-inline-label">指示器边距</label>
+              <span id="group-offset-val" class="slider-val">16px</span>
+              <input type="range" id="setting-group-offset" min="2" max="80" value="16" step="2">
+            </div>
           </div>
         </div>
 

@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Manifest-V3-blue?logo=googlechrome" alt="Manifest V3">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/Version-1.0.9-brightgreen" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.1.0-brightgreen" alt="Version">
   <img src="https://img.shields.io/badge/PRs-Welcome-orange" alt="PRs Welcome">
 </p>
 
@@ -26,7 +26,6 @@
 
 ### 🧩 FVD 风格快捷导航
 - 大方块卡片网格布局（CSS Grid）
-- 自动抓取网站 Favicon（cccyun → faviconkit → Google S2 三级降级）
 - **访问计数**：卡片显示 👁 打开次数，点击/右键均计入
 - **卡片排序**：5 种排序模式（手动/时间/访问数），按分组独立设置
 - 拖拽排序（纯鼠标事件）、右键菜单、中键新标签页打开
@@ -39,7 +38,8 @@
 
 ### 🎨 视觉与外观
 - 浅色 / 深色 / 跟随系统 三种主题模式
-- **顶部信息栏**：图标+标题+计数独立于卡片上方，缩略图 100% 不挤压
+- **顶部信息栏**：标题居中+计数右侧，独立背景色/文字色/字号可调
+- **沉浸模式**：双击空白隐藏界面，仅留壁纸+导航+设置按钮
 - Bing 每日壁纸（8 张缓存 + UHD 4K + 多区域 + 自动切换）
 - 自定义壁纸 URL / 本地上传
 - 外观配色 ColorPicker + 实时 CSS 变量预览
@@ -52,7 +52,9 @@
 ### 💾 数据管理
 - 轻量配置 → `chrome.storage.sync`（跨设备自动同步）
 - 图片资源 → IndexedDB（本地存储，Blob 直存，无大小限制）
+- **IndexedDB GC**：启动时自动清理删除卡片/分组的残留图片，防止备份包膨胀
 - 一键全部导出/导入：fflate 二进制 zip 打包（`_DeepPage_Backup.zip`），兼容旧版 .json
+- **导入预览**：导入前展示分组数/卡片数/图片数/导出时间，确认后写入
 - 卡片图标本地缓存（SW 代理下载，断网可用）
 
 ### 🖱️ 浏览器右键菜单
@@ -122,16 +124,16 @@ DeepPage/
 │   │   └── style.css       # 全局样式 + CSS 变量体系 + 双主题
 │   ├── js/
 │   │   ├── main.js         # 主入口：初始化/事件/快捷键/锁定/Toast
-│   │   ├── cards.js        # 卡片渲染/CRUD/对话框/图标缓存
-│   │   ├── groups.js       # 分组管理：指示器/切换/管理器
+│   │   ├── cards.js        # 卡片渲染/CRUD/计数/排序/idx验证
+│   │   ├── groups.js       # 分组管理：指示器/切换/删除(含图片清理)
 │   │   ├── dragdrop.js     # 拖拽排序（纯鼠标事件）
 │   │   ├── search-engines.js  # 搜索引擎管理/下拉/搜索
 │   │   ├── contextmenu.js  # 右键菜单 + 移动到分组子菜单
 │   │   ├── storage.js      # chrome.storage 封装 + 默认值
 │   │   ├── settings.js     # 设置面板交互 + CSS 变量预览
 │   │   ├── appearance.js   # 外观配色 + 卡片尺寸预览
-│   │   ├── wallpaper.js    # 壁纸系统 + IndexedDB
-│   │   ├── backup.js       # 一键全部导出/导入 + 重置
+│   │   ├── wallpaper.js    # 壁纸系统 + IndexedDB + GC
+│   │   ├── backup.js       # 导出(含时间戳)/导入(预览确认) + 重置
 │   │   ├── weather.js      # 天气（4 API + SW 代理 + 缓存）
 │   │   ├── clock.js        # 时钟（12/24h + 秒数）
 │   │   ├── lunar.js        # 农历转换（1900-2100）

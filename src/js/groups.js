@@ -87,6 +87,15 @@ async function deleteGroup(index) {
   if (groups.length <= 1) { showToast('至少保留一个分组', 'warning'); return; }
   var g = groups[index];
   if (!confirm('确定删除分组「' + g.name + '」及其所有卡片？')) return;
+
+  // 删除该分组所有卡片的缓存图片
+  var cards = g.cards || [];
+  for (var i = 0; i < cards.length; i++) {
+    if (cards[i].image && cards[i].image.startsWith('idx:') && typeof deleteCardIcon === 'function') {
+      deleteCardIcon(cards[i].id);
+    }
+  }
+
   groups.splice(index, 1);
   if (activeGroupIndex >= groups.length) activeGroupIndex = groups.length - 1;
   if (activeGroupIndex === index) activeGroupIndex = Math.min(activeGroupIndex, groups.length - 1);

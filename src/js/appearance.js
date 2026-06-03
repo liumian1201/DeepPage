@@ -5,7 +5,9 @@
 function applyAppearance(settings) {
   var root = document.documentElement;
   root.style.setProperty('--bg-primary', settings.bgColor || '#f0f2f5');
+  root.style.setProperty('--topbar-bg', settings.bgColor || '#f0f2f5');
   root.style.setProperty('--bg-card', settings.cardBgColor || '#ffffff');
+  root.style.setProperty('--topbar-text', settings.cardTextColor || '#202124');
   root.style.setProperty('--text-on-card', settings.cardTextColor || '#202124');
   root.style.setProperty('--card-font-size', (settings.cardFontSize || 13) + 'px');
   root.style.setProperty('--card-width', (settings.cardWidth || 270) + 'px');
@@ -31,9 +33,11 @@ function bindAppearancePreview(dom, onChanged) {
   ['bgColor', 'cardBgColor', 'cardTextColor'].forEach(function (key) {
     var el = dom[key]; if (!el) return;
     el.addEventListener('input', function () {
-      var m = { bgColor: '--bg-primary', cardBgColor: '--bg-card', cardTextColor: '--text-on-card' };
+      var m = { bgColor: '--topbar-bg', cardBgColor: '--bg-card', cardTextColor: '--topbar-text' };
       var defaults = { bgColor: '#f0f2f5', cardBgColor: '#ffffff', cardTextColor: '#202124' };
       document.documentElement.style.setProperty(m[key], el.value || defaults[key]);
+      if (key === 'cardTextColor') document.documentElement.style.setProperty('--text-on-card', el.value || defaults[key]);
+      if (key === 'bgColor') document.documentElement.style.setProperty('--bg-primary', el.value || defaults[key]);
     });
   });
 
@@ -74,9 +78,41 @@ function bindAppearancePreview(dom, onChanged) {
     if (wsv) wsv.textContent = '270px';
     if (hs) hs.value = 270;
     if (hsv) hsv.textContent = '270px';
+    if (rs) rs.value = 14;
+    if (rsv) rsv.textContent = '14px';
     document.documentElement.style.setProperty('--card-width', '270px');
     document.documentElement.style.setProperty('--card-height', '270px');
+    document.documentElement.style.setProperty('--card-radius', '14px');
     updateGridColumns();
+  });
+
+  var resetTopbar = document.getElementById('btn-reset-topbar');
+  if (resetTopbar) resetTopbar.addEventListener('click', function () {
+    var bc = document.getElementById('setting-bg-color');
+    var tc = document.getElementById('setting-card-text-color');
+    if (bc) bc.value = '#f0f2f5';
+    if (tc) tc.value = '#202124';
+    if (fs) fs.value = 13;
+    if (fsv) fsv.textContent = '13px';
+    document.documentElement.style.setProperty('--topbar-bg', '#f0f2f5');
+    document.documentElement.style.setProperty('--bg-primary', '#f0f2f5');
+    document.documentElement.style.setProperty('--topbar-text', '#202124');
+    document.documentElement.style.setProperty('--text-on-card', '#202124');
+    document.documentElement.style.setProperty('--card-font-size', '13px');
+  });
+
+  var resetSearch = document.getElementById('btn-reset-search-pos');
+  if (resetSearch) resetSearch.addEventListener('click', function () {
+    var st = document.getElementById('setting-search-top');
+    var sg = document.getElementById('setting-search-gap');
+    var stv = document.getElementById('search-top-val');
+    var sgv = document.getElementById('search-gap-val');
+    if (st) st.value = 60;
+    if (sg) sg.value = 48;
+    if (stv) stv.textContent = '60px';
+    if (sgv) sgv.textContent = '48px';
+    document.documentElement.style.setProperty('--search-top', '60px');
+    document.documentElement.style.setProperty('--search-gap', '48px');
   });
 
   if (onChanged) {

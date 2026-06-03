@@ -62,6 +62,8 @@ async function init() {
   if (typeof migrateCardIcons === 'function') await migrateCardIcons();
   // v1.0.9: 为旧卡片补全 visitCount / createdAt 字段
   if (typeof migrateCardFields === 'function') migrateCardFields();
+  // v1.1.0+: 清理 IndexedDB 无主图片
+  if (typeof collectGarbage === 'function') collectGarbage();
 
   renderSpeeddials();
   bindMainEvents();
@@ -82,6 +84,20 @@ async function init() {
   if (!navigator.onLine) document.body.classList.add('offline');
   window.addEventListener('online', function () { document.body.classList.remove('offline'); });
   window.addEventListener('offline', function () { document.body.classList.add('offline'); });
+
+  // v1.1.0: 沉浸模式 — 双击空白隐藏/恢复界面
+  var _immClick = 0;
+  document.addEventListener('click', function (e) {
+    if (e.target.closest('button') || e.target.closest('input') || e.target.closest('select') || e.target.closest('.settings-panel') || e.target.closest('.dialog-overlay')) return;
+    var now = Date.now();
+    if (now - _immClick < 350) {
+      document.body.classList.toggle('immersive');
+      showToast(document.body.classList.contains('immersive') ? '已进入沉浸模式，再次双击恢复界面' : '界面已恢复', 'info');
+      _immClick = 0;
+    } else {
+      _immClick = now;
+    }
+  });
 }
 
 /* ==================== 外部变更监听（v1.0.7 防抖+隐身跳过） ==================== */
