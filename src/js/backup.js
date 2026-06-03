@@ -102,21 +102,8 @@ function importAll() {
 
         if (!hasConfig && !hasImages) throw new Error('备份文件中没有有效数据');
 
-        // 恢复配置（直接 set 覆盖，避免 clear+set 竞态）
-        if (hasConfig) {
-          var config = JSON.parse(fflate.strFromU8(unzipped['config.json']));
-          if (typeof config === 'object' && config !== null) {
-            await new Promise(function (resolve) {
-              chrome.storage.sync.set({
-                settings: config.settings || {},
-                groups: config.groups || [],
-                activeGroup: config.activeGroup || 0
-              }, resolve);
-            });
-          }
-        }
-
-        // 恢复图片
+        // 先恢复图片（IndexedDB），再恢复配置（storage.sync）
+        // 避免 storage.onChanged 触发渲染时 IndexedDB 还没写完
         if (hasImages) {
           var db = await openImgDB();
           var imported = 0;
@@ -135,6 +122,23 @@ function importAll() {
               imported++;
             } catch (e) { console.warn('导入图片失败:', img.key, e); }
           }
+        }
+
+        // 恢复配置（storage.sync 写在图片之后）
+        if (hasConfig) {
+          var config = JSON.parse(fflate.strFromU8(unzipped['config.json']));
+          if (typeof config === 'object' && config !== null) {
+            await new Promise(function (resolve) {
+              chrome.storage.sync.set({
+                settings: config.settings || {},
+                groups: config.groups || [],
+                activeGroup: config.activeGroup || 0
+              }, resolve);
+            });
+          }
+        }
+
+        if (hasImages) {
           showToast('全部导入成功（配置 + ' + imported + '/' + manifest.images.length + ' 张图片），即将刷新...', 'success');
         } else {
           showToast('配置导入成功，即将刷新...', 'success');

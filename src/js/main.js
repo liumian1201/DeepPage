@@ -60,6 +60,8 @@ async function init() {
 
   // v1.0.3: 迁移现有 URL 图标到本地缓存
   if (typeof migrateCardIcons === 'function') await migrateCardIcons();
+  // v1.0.9: 为旧卡片补全 visitCount / createdAt 字段
+  if (typeof migrateCardFields === 'function') migrateCardFields();
 
   renderSpeeddials();
   bindMainEvents();
@@ -149,17 +151,22 @@ function bindMainEvents() {
       openAddDialog();
       return;
     }
-    const card = e.target.closest('.speeddial-card:not(.card-add)');
-    if (card && card.dataset.url) {
+    const cardEl = e.target.closest('.speeddial-card:not(.card-add)');
+    if (cardEl) {
+      var wrapper = cardEl.closest('.card-wrapper');
+      var cardUrl = (wrapper && wrapper.dataset.url) ? wrapper.dataset.url : cardEl.dataset.url;
+      var cardId = (wrapper && wrapper.dataset.id) ? wrapper.dataset.id : cardEl.dataset.id;
+      if (!cardUrl) return;
       // 刚完成拖拽，忽略本次点击
       if (window._justDragged && Date.now() - window._justDragged < 300) return;
+      if (cardId && typeof incrementVisitCount === 'function') incrementVisitCount(cardId);
       var mode = currentSettings ? currentSettings.cardOpenMode : 'current';
       if (mode === 'foreground') {
-        chrome.tabs.create({ url: card.dataset.url, active: true });
+        chrome.tabs.create({ url: cardUrl, active: true });
       } else if (mode === 'background') {
-        chrome.tabs.create({ url: card.dataset.url, active: false });
+        chrome.tabs.create({ url: cardUrl, active: false });
       } else {
-        window.location.href = card.dataset.url;
+        window.location.href = cardUrl;
       }
     }
   });
@@ -167,10 +174,16 @@ function bindMainEvents() {
   // 鼠标中键 → 新标签页打开卡片
   domMain.grid.addEventListener('auxclick', (e) => {
     if (e.button !== 1) return;
-    const card = e.target.closest('.speeddial-card:not(.card-add)');
-    if (card && card.dataset.url) {
-      e.preventDefault();
-      window.open(card.dataset.url, '_blank');
+    const cardEl = e.target.closest('.speeddial-card:not(.card-add)');
+    if (cardEl) {
+      var wrapper = cardEl.closest('.card-wrapper');
+      var cardUrl = (wrapper && wrapper.dataset.url) ? wrapper.dataset.url : cardEl.dataset.url;
+      var cardId = (wrapper && wrapper.dataset.id) ? wrapper.dataset.id : cardEl.dataset.id;
+      if (cardUrl) {
+        e.preventDefault();
+        if (cardId && typeof incrementVisitCount === 'function') incrementVisitCount(cardId);
+        window.open(cardUrl, '_blank');
+      }
     }
   });
 
@@ -178,8 +191,10 @@ function bindMainEvents() {
   domMain.grid.addEventListener('mousedown', function (e) {
     if (!isLocked || e.button !== 0) return;
     if (e.target.closest('.card-actions') || e.target.closest('button')) return;
-    var card = e.target.closest('.speeddial-card:not(.card-add)');
-    if (!card) return;
+    var cardEl = e.target.closest('.speeddial-card:not(.card-add)');
+    if (!cardEl) return;
+    var wrapper = cardEl.closest('.card-wrapper');
+    if (!wrapper) return;
     e.preventDefault();
     var indicator = document.querySelector('.lock-indicator');
     if (indicator) {

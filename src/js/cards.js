@@ -24,6 +24,35 @@ async function migrateCardIcons() {
   }
 }
 
+/** v1.0.9: 为旧卡片补全 visitCount / createdAt 字段 */
+function migrateCardFields() {
+  var changed = false;
+  for (var gi = 0; gi < groups.length; gi++) {
+    var cards = groups[gi].cards || [];
+    for (var ci = 0; ci < cards.length; ci++) {
+      var card = cards[ci];
+      if (card.visitCount === undefined) { card.visitCount = 0; changed = true; }
+      if (card.createdAt === undefined) { card.createdAt = 0; changed = true; }
+    }
+  }
+  if (changed) {
+    saveGroups(groups);
+  }
+}
+
+/* ==================== 卡片排序（v1.0.9） ==================== */
+function getSortedCards(cards, sortMode) {
+  if (!sortMode || sortMode === 'manual') return cards;
+  var sorted = cards.slice();
+  switch (sortMode) {
+    case 'time-asc':   return sorted.sort(function (a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
+    case 'time-desc':  return sorted.sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+    case 'visits-asc':  return sorted.sort(function (a, b) { return (a.visitCount || 0) - (b.visitCount || 0); });
+    case 'visits-desc': return sorted.sort(function (a, b) { return (b.visitCount || 0) - (a.visitCount || 0); });
+    default: return cards;
+  }
+}
+
 /* ==================== 卡片渲染 ==================== */
 function renderSpeeddials() {
   if (!domMain.grid) return;
@@ -33,27 +62,52 @@ function renderSpeeddials() {
     updateGridColumns(cols);
   }
 
+  var sortMode = (groups[activeGroupIndex] && groups[activeGroupIndex].sortMode) ? groups[activeGroupIndex].sortMode : 'manual';
+  var displayCards = getSortedCards(speeddials, sortMode);
+
   var html = '';
 
-  speeddials.forEach((card, index) => {
+  displayCards.forEach((card, index) => {
     const hasCustomImage = card.image && card.image.trim();
     const isLocal = hasCustomImage && card.image.startsWith('idx:');
     const imgSrc = isLocal ? '' : (hasCustomImage ? escapeHtml(card.image.trim()) : '');
-    const faviconUrl = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(card.url) + '&sz=32';
-    const headerIconSrc = hasCustomImage ? imgSrc : faviconUrl;
+    var domain;
+    try { domain = new URL(card.url).hostname.replace(/^www\./, ''); } catch(e) { domain = encodeURIComponent(card.url); }
+    var faviconUrl = 'https://favicon.cccyun.cc/' + domain;
+    var fb1 = 'https://faviconkit.net/favicon/' + domain + '?sz=32';
+    var fb2 = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(card.url) + '&sz=32';
+    // v1.0.9: 三级降级 — cccyun → faviconkit → Google S2
+    var topIconSrc = faviconUrl;
     const firstChar = (card.name || '?').charAt(0).toUpperCase();
     const bgColor = card.color || stringToColor(card.url || card.name);
     const showIcon = !currentSettings || currentSettings.showCardIcon !== false;
     const showTitle = !currentSettings || currentSettings.showCardTitle !== false;
+    const showCounter = currentSettings && currentSettings.showVisitCount === true;
+    const visitCount = card.visitCount || 0;
     const pureText = currentSettings && currentSettings.pureTextCards === true;
 
+    // 顶部信息栏：图标 + 标题 + 计数
+    var topBarHtml = '';
+    if (showIcon || showTitle || showCounter) {
+      topBarHtml = '<div class="card-top-bar">';
+      if (showIcon) {
+        topBarHtml += '<img class="card-top-icon" src="' + topIconSrc + '" alt="" data-fb="' + escapeHtml(fb1) + '" data-fb2="' + escapeHtml(fb2) + '">';
+      }
+      if (showTitle) {
+        topBarHtml += '<span class="card-top-title">' + escapeHtml(card.name) + '</span>';
+      }
+      if (showCounter) {
+        topBarHtml += '<span class="card-top-counter">👁 ' + visitCount + '</span>';
+      }
+      topBarHtml += '</div>';
+    }
+
     if (pureText) {
-      // v1.0.7: 极简纯色文字卡片 — 跳过所有图片加载
-      html += '\n      <div class="speeddial-card card-pure-text"\n           draggable="true"\n           data-index="' + index + '"\n           data-id="' + card.id + '"\n           data-url="' + escapeHtml(card.url) + '"\n           title="' + escapeHtml(card.name) + ' — ' + escapeHtml(card.url) + '">\n        <div class="card-pure-text-inner" style="background:' + bgColor + ';">\n          <span class="card-pure-text-char">' + firstChar + '</span>\n          <span class="card-pure-text-name">' + escapeHtml(card.name) + '</span>\n        </div>\n        <div class="card-actions">\n          <button class="btn-card-edit" data-action="edit" data-id="' + card.id + '" title="编辑">✎</button>\n          <button class="btn-card-delete" data-action="delete" data-id="' + card.id + '" title="删除">✕</button>\n        </div>\n      </div>';
+      html += '\n      <div class="card-wrapper"\n           data-index="' + index + '"\n           data-id="' + card.id + '"\n           data-url="' + escapeHtml(card.url) + '"\n           title="' + escapeHtml(card.name) + ' — ' + escapeHtml(card.url) + '">\n        ' + topBarHtml + '\n        <div class="speeddial-card card-pure-text" draggable="true">\n          <div class="card-pure-text-inner" style="background:' + bgColor + ';">\n            <span class="card-pure-text-char">' + firstChar + '</span>\n            <span class="card-pure-text-name">' + escapeHtml(card.name) + '</span>\n          </div>\n          <div class="card-actions">\n            <button class="btn-card-edit" data-action="edit" data-id="' + card.id + '" title="编辑">✎</button>\n            <button class="btn-card-delete" data-action="delete" data-id="' + card.id + '" title="删除">✕</button>\n          </div>\n        </div>\n      </div>';
       return;
     }
 
-    html += '\n      <div class="speeddial-card"\n           draggable="true"\n           data-index="' + index + '"\n           data-id="' + card.id + '"\n           data-url="' + escapeHtml(card.url) + '"\n           ' + (isLocal ? 'data-local-img="' + card.image + '"' : '') + '\n           title="' + escapeHtml(card.name) + ' — ' + escapeHtml(card.url) + '">\n        ' + ((showIcon || showTitle) ? '\n        <div class="card-header">\n          ' + (showIcon ? '<img class="card-header-icon" src="' + headerIconSrc + '" alt=""' + (isLocal ? ' data-local="1"' : '') + '>' : '') + '\n          ' + (showTitle ? '<span class="card-header-title">' + escapeHtml(card.name) + '</span>' : '') + '\n        </div>' : '') + '\n        <div class="card-thumb">\n          ' + (hasCustomImage ? '\n            <img class="card-thumb-img" src="' + (isLocal ? '' : imgSrc) + '" alt="' + escapeHtml(card.name) + '" loading="lazy"\n                 ' + (isLocal ? 'data-local="1"' : '') + '>\n          ' : '\n            <img class="card-favicon-center" src="' + (imgSrc || 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(card.url) + '&sz=64') + '" alt="' + escapeHtml(card.name) + '" loading="lazy">\n            <div class="card-fallback" style="display:none;background:' + bgColor + ';">' + firstChar + '</div>\n          ') + '\n        </div>\n        <div class="card-actions">\n          <button class="btn-card-edit" data-action="edit" data-id="' + card.id + '" title="编辑">✎</button>\n          <button class="btn-card-delete" data-action="delete" data-id="' + card.id + '" title="删除">✕</button>\n        </div>\n      </div>';
+    html += '\n      <div class="card-wrapper"\n           data-index="' + index + '"\n           data-id="' + card.id + '"\n           data-url="' + escapeHtml(card.url) + '"\n           ' + (isLocal ? 'data-local-img="' + card.image + '"' : '') + '\n           title="' + escapeHtml(card.name) + ' — ' + escapeHtml(card.url) + '">\n        ' + topBarHtml + '\n        <div class="speeddial-card" draggable="true">\n          <div class="card-thumb">\n            ' + (hasCustomImage ? '\n              <img class="card-thumb-img" src="' + (isLocal ? '' : imgSrc) + '" alt="' + escapeHtml(card.name) + '" loading="lazy"\n                   ' + (isLocal ? 'data-local="1"' : '') + '>\n            ' : '\n              <img class="card-favicon-center" src="' + (imgSrc || 'https://favicon.cccyun.cc/' + domain) + '" alt="' + escapeHtml(card.name) + '" loading="lazy">\n              <div class="card-fallback" style="display:none;background:' + bgColor + ';">' + firstChar + '</div>\n            ') + '\n          </div>\n          <div class="card-actions">\n            <button class="btn-card-edit" data-action="edit" data-id="' + card.id + '" title="编辑">✎</button>\n            <button class="btn-card-delete" data-action="delete" data-id="' + card.id + '" title="删除">✕</button>\n          </div>\n        </div>\n      </div>';
   });
 
   var showAdd = (!currentSettings || currentSettings.showAddButton !== false) && !isLocked;
@@ -77,14 +131,43 @@ function renderSpeeddials() {
 /** 加载卡片中的本地 IndexedDB 图片 */
 async function loadLocalCardImages() {
   domMain.grid.querySelectorAll('img[data-local="1"]').forEach(async (img) => {
-    var card = img.closest('.speeddial-card');
-    var key = card ? card.dataset.localImg : null;
+    var wrapper = img.closest('.card-wrapper');
+    var key = wrapper ? wrapper.dataset.localImg : null;
+    if (!key) {
+      // fallback: 检查父级 speeddial-card
+      var card = img.closest('.speeddial-card');
+      var w2 = card ? card.parentElement : null;
+      key = w2 && w2.classList.contains('card-wrapper') ? w2.dataset.localImg : null;
+    }
     if (!key) return;
     key = key.replace('idx:', '');
     var blob = await loadImage(key);
     if (blob) {
       if (img.src && img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
       img.src = URL.createObjectURL(blob);
+    } else {
+      // IndexedDB 中无此 blob（如重置后导入）→ 隐藏破图，显示兜底色块，并清除无效引用
+      img.style.display = 'none';
+      var thumb = img.closest('.card-thumb');
+      if (thumb) {
+        var fallback = thumb.querySelector('.card-fallback');
+        if (fallback) fallback.style.display = 'flex';
+      }
+      // 清除 card 数据中无效的 image 引用
+      var wrapper = img.closest('.card-wrapper');
+      if (wrapper) {
+        var cid = wrapper.dataset.id;
+        for (var gi = 0; gi < groups.length; gi++) {
+          var gcards = groups[gi].cards || [];
+          for (var ci = 0; ci < gcards.length; ci++) {
+            if (gcards[ci].id === cid && gcards[ci].image && gcards[ci].image.startsWith('idx:')) {
+              gcards[ci].image = '';
+              if (typeof saveGroups === 'function') saveGroups(groups);
+              break;
+            }
+          }
+        }
+      }
     }
   });
 }
@@ -100,8 +183,19 @@ function bindFaviconErrors() {
       }
     });
   });
-  domMain.grid.querySelectorAll('.card-header-icon').forEach((img) => {
+  domMain.grid.querySelectorAll('.card-top-icon').forEach((img) => {
     img.addEventListener('error', function () {
+      // 三级降级：cccyun → faviconkit → Google S2
+      if (!this._tried) {
+        this._tried = 1;
+        var fb = this.dataset.fb;
+        if (fb) { this.src = fb; return; }
+      }
+      if (this._tried === 1) {
+        this._tried = 2;
+        var fb2 = this.dataset.fb2;
+        if (fb2) { this.src = fb2; return; }
+      }
       this.style.display = 'none';
     });
   });
@@ -151,7 +245,7 @@ async function addSpeeddial(name, url, image) {
     if (!proceed) return;
   }
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  speeddials.push({ id, name, url, image: image || '', color: stringToColor(url) });
+  speeddials.push({ id, name, url, image: image || '', color: stringToColor(url), visitCount: 0, createdAt: Date.now() });
   await saveSpeeddials(speeddials);
   renderSpeeddials();
 }
@@ -196,6 +290,7 @@ function openEditDialog(id) {
   const card = speeddials.find((c) => c.id === id);
   if (!card) return;
   editingId = id;
+
   domMain.dialogTitle.textContent = '编辑快捷方式';
   domMain.dialogName.value = card.name;
   domMain.dialogUrl.value = card.url;
@@ -203,6 +298,18 @@ function openEditDialog(id) {
   domMain.dialog.classList.remove('hidden');
   if (domMain.dialogDelete) domMain.dialogDelete.classList.remove('hidden');
   domMain.dialogName.focus();
+
+  // v1.0.9: 异步检查 idx 引用是否有效（不阻塞对话框打开）
+  if (card.image && card.image.startsWith('idx:') && typeof loadImage === 'function') {
+    var imgKey = card.image.replace('idx:', '');
+    loadImage(imgKey).then(function (blob) {
+      if (!blob) {
+        card.image = '';
+        domMain.dialogImage.value = '';
+        showToast('自定义图片数据已丢失，已切换为自动图标', 'warning');
+      }
+    });
+  }
 }
 
 function closeDialog() {
@@ -234,11 +341,23 @@ async function saveDialog() {
     }
   }
 
+  // idx: 引用若 IndexedDB 中 blob 已丢失（如重置后导入），清除引用
+  if (image && image.startsWith('idx:')) {
+    var key = image.replace('idx:', '');
+    if (typeof loadImage === 'function') {
+      var blob = await loadImage(key);
+      if (!blob) {
+        image = '';
+        showToast('自定义图片数据已丢失，已切换为自动图标', 'warning');
+      }
+    }
+  }
+
   if (editingId) {
-    // 编辑时清理旧缓存
+    // 编辑时清理旧缓存（仅当图片被更换为新值时）
     if (typeof deleteCardIcon === 'function') {
       var oldCard = speeddials.find(function (c) { return c.id === editingId; });
-      if (oldCard && oldCard.image && oldCard.image.startsWith('idx:')) {
+      if (oldCard && oldCard.image && oldCard.image.startsWith('idx:') && oldCard.image !== image) {
         deleteCardIcon(editingId);
       }
     }
@@ -250,10 +369,31 @@ async function saveDialog() {
   closeDialog();
 }
 
+/* ==================== 访问计数（v1.0.9） ==================== */
+
+/** 对指定卡片访问计数 +1，自动保存并重渲染当前分组 */
+async function incrementVisitCount(cardId) {
+  for (var gi = 0; gi < groups.length; gi++) {
+    var cards = groups[gi].cards || [];
+    for (var ci = 0; ci < cards.length; ci++) {
+      if (cards[ci].id === cardId) {
+        cards[ci].visitCount = (cards[ci].visitCount || 0) + 1;
+        await saveGroups(groups);
+        if (gi === activeGroupIndex) {
+          speeddials = cards;
+          renderSpeeddials();
+        }
+        return;
+      }
+    }
+  }
+}
+
 /* ==================== 卡片点击跳转 ==================== */
 function openCard(index) {
   const card = speeddials[index];
   if (card && card.url) {
+    incrementVisitCount(card.id);
     window.location.href = card.url;
   }
 }

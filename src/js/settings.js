@@ -19,6 +19,7 @@ const domSettings = {
   toggleAddBtn:  document.getElementById('toggle-add-button'),
   toggleCardIcon: document.getElementById('toggle-card-icon'),
   toggleCardTitle: document.getElementById('toggle-card-title'),
+  toggleShowVisitCount: document.getElementById('toggle-show-visit-count'),
   togglePureTextCards: document.getElementById('toggle-pure-text-cards'),
   toggleConfirmDelete: document.getElementById('toggle-confirm-delete'),
   toggleShowGroupIndicator: document.getElementById('toggle-show-group-indicator'),
@@ -112,6 +113,7 @@ function populateSettingsForm(settings) {
   domSettings.toggleAddBtn.checked  = settings.showAddButton !== false;
   domSettings.toggleCardIcon.checked = settings.showCardIcon !== false;
   domSettings.toggleCardTitle.checked = settings.showCardTitle !== false;
+  if (domSettings.toggleShowVisitCount) domSettings.toggleShowVisitCount.checked = settings.showVisitCount !== false;
   if (domSettings.togglePureTextCards) domSettings.togglePureTextCards.checked = settings.pureTextCards === true;
   if (domSettings.toggleConfirmDelete) domSettings.toggleConfirmDelete.checked = settings.confirmDelete !== false;
   if (domSettings.toggleLock) domSettings.toggleLock.checked = settings.isLocked === true;
@@ -346,6 +348,7 @@ function collectSettingsFromForm() {
     showAddButton: domSettings.toggleAddBtn.checked,
     showCardIcon: domSettings.toggleCardIcon.checked,
     showCardTitle: domSettings.toggleCardTitle.checked,
+    showVisitCount: domSettings.toggleShowVisitCount ? domSettings.toggleShowVisitCount.checked : true,
     pureTextCards: domSettings.togglePureTextCards ? domSettings.togglePureTextCards.checked : false,
     confirmDelete: domSettings.toggleConfirmDelete ? domSettings.toggleConfirmDelete.checked : true,
     showGroupName: domSettings.groupNameMode ? domSettings.groupNameMode.value : 'all',
@@ -392,6 +395,7 @@ function openSettingsPanel() {
   domSettings.panel.style.transform = '';
   updateWeatherCacheStatus();
   if (typeof updateImageDBInfo === 'function') updateImageDBInfo();
+  updateSortModeSelect();
 }
 
 function closeSettingsPanel() {
@@ -637,10 +641,16 @@ function bindSettingsEvents() {
     el.addEventListener('change', onSettingChanged);
   });
 
-  [domSettings.toggleClock, domSettings.toggleLunar, domSettings.toggleWeather, domSettings.toggleAddBtn, domSettings.toggleCardIcon, domSettings.toggleCardTitle, domSettings.toggleConfirmDelete, domSettings.toggleShowGroupIndicator, domSettings.bingUHD, domSettings.bingAutoRefresh, domSettings.toggleShowSearch, domSettings.toggleClockSeconds].forEach((el) => {
+  [domSettings.toggleClock, domSettings.toggleLunar, domSettings.toggleWeather, domSettings.toggleAddBtn, domSettings.toggleCardIcon, domSettings.toggleCardTitle, domSettings.toggleShowVisitCount, domSettings.toggleConfirmDelete, domSettings.toggleShowGroupIndicator, domSettings.bingUHD, domSettings.bingAutoRefresh, domSettings.toggleShowSearch, domSettings.toggleClockSeconds].forEach((el) => {
     if (!el) return;
     el.addEventListener('change', onSettingChanged);
   });
+
+  // v1.0.9: 排序下拉 — 保存到当前分组
+  var sortSel = document.getElementById('setting-sort-mode');
+  if (sortSel) {
+    sortSel.addEventListener('change', onSortModeChanged);
+  }
 
   // 搜索引擎管理按钮
   var btnEngMgr = document.getElementById('btn-search-engine-mgr');
@@ -751,6 +761,24 @@ async function updateWeatherCacheStatus() {
   } else {
     span.textContent = '📡 缓存状态：暂无数据';
   }
+}
+
+/** v1.0.9: 按分组更新排序下拉框 */
+function updateSortModeSelect() {
+  var sel = document.getElementById('setting-sort-mode');
+  if (!sel) return;
+  var sm = (typeof groups !== 'undefined' && groups[activeGroupIndex]) ? (groups[activeGroupIndex].sortMode || 'manual') : 'manual';
+  sel.value = sm;
+}
+
+/** v1.0.9: 排序下拉变更时保存到当前分组 */
+async function onSortModeChanged() {
+  var sel = document.getElementById('setting-sort-mode');
+  if (!sel) return;
+  if (!groups[activeGroupIndex]) return;
+  groups[activeGroupIndex].sortMode = sel.value || 'manual';
+  await saveGroups(groups);
+  if (typeof renderSpeeddials === 'function') renderSpeeddials();
 }
 
 /** 同步搜索引擎下拉框选项 */

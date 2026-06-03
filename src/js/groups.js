@@ -66,13 +66,12 @@ async function switchGroup(index) {
   }
   activeGroupIndex = index;
   speeddials = groups[index].cards || [];
-  domMain.grid.classList.add('switching');
-  await new Promise(function (r) { setTimeout(r, 80); });
   renderSpeeddials();
-  domMain.grid.classList.remove('switching');
   saveGroups(groups);
   saveActiveGroup(activeGroupIndex);
   renderGroupDots();
+  // v1.0.9: 更新设置面板中的排序下拉
+  if (typeof updateSortModeSelect === 'function') updateSortModeSelect();
 }
 
 /* ==================== 分组 CRUD ==================== */
@@ -151,7 +150,7 @@ async function saveGroupDialog() {
   if (!name) { showToast('请输入分组名称', 'warning'); return; }
   if (groupDialogMode === 'add') {
     var id = 'g' + Date.now().toString(36);
-    groups.push({ id: id, name: name, cards: [] });
+    groups.push({ id: id, name: name, sortMode: 'manual', cards: [] });
     await saveGroups(groups);
     renderGroupDots();
     switchGroup(groups.length - 1);

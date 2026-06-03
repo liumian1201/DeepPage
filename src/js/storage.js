@@ -12,12 +12,12 @@ var STORAGE_KEYS = {
 
 // 默认分组（首次安装时使用）
 var DEFAULT_GROUPS = [
-  { id: 'g1', name: '常用', cards: [
-    { id: '1', name: 'GitHub',       url: 'https://github.com',        color: '#24292e' },
-    { id: '2', name: '哔哩哔哩',     url: 'https://www.bilibili.com',  color: '#fb7299' },
-    { id: '3', name: 'YouTube',      url: 'https://www.youtube.com',   color: '#ff0000' },
-    { id: '4', name: 'Google 翻译',   url: 'https://translate.google.com', color: '#4285f4' },
-    { id: '5', name: 'Gmail',        url: 'https://mail.google.com',   color: '#ea4335' }
+  { id: 'g1', name: '常用', sortMode: 'manual', cards: [
+    { id: '1', name: 'GitHub',       url: 'https://github.com',        color: '#24292e', visitCount: 0, createdAt: Date.now() },
+    { id: '2', name: '哔哩哔哩',     url: 'https://www.bilibili.com',  color: '#fb7299', visitCount: 0, createdAt: Date.now() },
+    { id: '3', name: 'YouTube',      url: 'https://www.youtube.com',   color: '#ff0000', visitCount: 0, createdAt: Date.now() },
+    { id: '4', name: 'Google 翻译',   url: 'https://translate.google.com', color: '#4285f4', visitCount: 0, createdAt: Date.now() },
+    { id: '5', name: 'Gmail',        url: 'https://mail.google.com',   color: '#ea4335', visitCount: 0, createdAt: Date.now() }
   ]}
 ];
 
@@ -79,7 +79,8 @@ var DEFAULT_SETTINGS = {
   cardWidth: 270,
   cardHeight: 270,
   cardBorderRadius: 14,
-  cardOpenMode: 'current'
+  cardOpenMode: 'current',
+  showVisitCount: true
 };
 
 function loadFromStorage(key, defaultValue) {

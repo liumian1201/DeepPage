@@ -10,10 +10,11 @@ function initContextMenu() {
     // 设置面板、弹窗内不拦截右键，交给浏览器
     if (e.target.closest('.settings-panel') || e.target.closest('.dialog-overlay')) return;
 
-    var card = e.target.closest('.speeddial-card:not(.card-add)');
-    if (card) {
+    var cardEl = e.target.closest('.speeddial-card:not(.card-add)');
+    if (cardEl) {
       e.preventDefault();
-      contextCardId = card.dataset.id;
+      var wrapper = cardEl.closest('.card-wrapper');
+      contextCardId = wrapper ? wrapper.dataset.id : cardEl.dataset.id;
       showContextMenu(e.clientX, e.clientY, 'card');
       return;
     }
@@ -180,6 +181,7 @@ function handleContextAction(action, ds) {
       if (contextCardId) {
         const card = speeddials.find((c) => c.id === contextCardId);
         if (card) {
+          if (typeof incrementVisitCount === 'function') incrementVisitCount(contextCardId);
           var mode = (typeof currentSettings !== 'undefined' && currentSettings) ? currentSettings.cardOpenMode : 'current';
           if (mode === 'foreground') {
             chrome.tabs.create({ url: card.url, active: true });

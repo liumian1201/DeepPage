@@ -10,6 +10,9 @@ var dragOrigIndex = -1;
 
 function bindDragEvents() {
   if (isLocked) return;
+  // v1.0.9: 排序模式下禁用拖拽（按分组读取）
+  var sortMode = (typeof groups !== 'undefined' && groups[activeGroupIndex]) ? (groups[activeGroupIndex].sortMode || 'manual') : 'manual';
+  if (sortMode && sortMode !== 'manual') return;
   domMain.grid.addEventListener('mousedown', onMouseDown);
 }
 
@@ -22,11 +25,13 @@ function onMouseDown(e) {
   if (e.button !== 0) return;
   if (isLocked) return;
   if (e.target.closest('.card-actions') || e.target.closest('button')) return;
-  var card = e.target.closest('.speeddial-card:not(.card-add)');
-  if (!card) return;
+  var cardEl = e.target.closest('.speeddial-card:not(.card-add)');
+  if (!cardEl) return;
+  var wrapper = cardEl.closest('.card-wrapper');
+  if (!wrapper) return;
 
-  dragCard = card;
-  dragOrigIndex = parseInt(card.dataset.index, 10);
+  dragCard = cardEl;
+  dragOrigIndex = parseInt(wrapper.dataset.index, 10);
   dragStartX = e.clientX;
   dragStartY = e.clientY;
   // 按下即拦截滚轮，防止分组切换破坏 DOM
@@ -77,8 +82,9 @@ document.addEventListener('mouseup', function (e) {
   var targetCard = getTargetCard(e);
   if (!targetCard) { dragCard = null; return; }
 
-  var targetIndex = parseInt(targetCard.dataset.index, 10);
-  if (targetIndex === dragOrigIndex) { dragCard = null; return; }
+  var targetWrapper = targetCard.closest('.card-wrapper');
+  var targetIndex = targetWrapper ? parseInt(targetWrapper.dataset.index, 10) : parseInt(targetCard.dataset.index, 10);
+  if (isNaN(targetIndex) || targetIndex === dragOrigIndex) { dragCard = null; return; }
 
   var rect = targetCard.getBoundingClientRect();
   var midX = rect.left + rect.width / 2;
@@ -96,26 +102,35 @@ function getTargetCard(e) {
   if (dragClone) dragClone.style.display = 'none';
   var el = document.elementFromPoint(e.clientX, e.clientY);
   if (dragClone) dragClone.style.display = '';
-  var card = el ? el.closest('.speeddial-card:not(.card-add)') : null;
-  if (!card) {
-    var cards = Array.from(domMain.grid.querySelectorAll('.speeddial-card:not(.card-add)'));
+  var wrapper = el ? el.closest('.card-wrapper') : null;
+  if (!wrapper) {
+    var cardEl = el ? el.closest('.speeddial-card:not(.card-add)') : null;
+    if (cardEl) wrapper = cardEl.closest('.card-wrapper');
+  }
+  if (!wrapper) {
+    // fallback: 找最近的 card-wrapper
+    var wrappers = Array.from(domMain.grid.querySelectorAll('.card-wrapper'));
     var best = null, bestD = Infinity;
-    cards.forEach(function (c) {
-      var r = c.getBoundingClientRect();
+    wrappers.forEach(function (w) {
+      var r = w.getBoundingClientRect();
       var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
       var d = (e.clientX - cx) * (e.clientX - cx) + (e.clientY - cy) * (e.clientY - cy);
-      if (d < bestD) { bestD = d; best = c; }
+      if (d < bestD) { bestD = d; best = w; }
     });
-    return best;
+    return best ? best.querySelector('.speeddial-card') : null;
   }
-  return card;
+  return wrapper.querySelector('.speeddial-card');
 }
 
 function highlightDropTarget(e) {
   domMain.grid.querySelectorAll('.drag-over').forEach(function (el) { el.classList.remove('drag-over'); });
   var target = getTargetCard(e);
-  if (target && parseInt(target.dataset.index, 10) !== dragOrigIndex) {
-    target.classList.add('drag-over');
+  if (target) {
+    var wrapper = target.closest('.card-wrapper');
+    var idx = wrapper ? parseInt(wrapper.dataset.index, 10) : parseInt(target.dataset.index, 10);
+    if (idx !== dragOrigIndex) {
+      target.classList.add('drag-over');
+    }
   }
 }
 
