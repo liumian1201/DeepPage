@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Manifest-V3-blue?logo=googlechrome" alt="Manifest V3">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/Version-1.0.8-brightgreen" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.0.9-brightgreen" alt="Version">
   <img src="https://img.shields.io/badge/PRs-Welcome-orange" alt="PRs Welcome">
 </p>
 
@@ -26,7 +26,9 @@
 
 ### 🧩 FVD 风格快捷导航
 - 大方块卡片网格布局（CSS Grid）
-- 自动抓取网站 Favicon，失败时生成纯色文字兜底卡片
+- 自动抓取网站 Favicon（cccyun → faviconkit → Google S2 三级降级）
+- **访问计数**：卡片显示 👁 打开次数，点击/右键均计入
+- **卡片排序**：5 种排序模式（手动/时间/访问数），按分组独立设置
 - 拖拽排序（纯鼠标事件）、右键菜单、中键新标签页打开
 - 列数/宽高/圆角滑块实时预览，自由调整布局
 
@@ -37,6 +39,7 @@
 
 ### 🎨 视觉与外观
 - 浅色 / 深色 / 跟随系统 三种主题模式
+- **顶部信息栏**：图标+标题+计数独立于卡片上方，缩略图 100% 不挤压
 - Bing 每日壁纸（8 张缓存 + UHD 4K + 多区域 + 自动切换）
 - 自定义壁纸 URL / 本地上传
 - 外观配色 ColorPicker + 实时 CSS 变量预览
