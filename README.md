@@ -79,7 +79,16 @@
 
 > 即将上架
 
-### 方式二：手动加载
+### 方式二：拖拽安装 .crx 文件
+
+1. 下载最新 [Release](https://github.com/liumian1201/DeepPage/releases) 中的 `DeepPage_Release_VX.X.X.crx`
+2. 打开 Chrome，进入 `chrome://extensions/`
+3. 开启右上角 **开发者模式**
+4. 将下载的 `.crx` 文件**直接拖入**浏览器窗口
+5. 点击 **添加扩展程序** 确认安装
+6. 打开新标签页即可看到 DeepPage
+
+### 方式三：手动加载解压版
 
 1. 下载最新 [Release](https://github.com/liumian1201/DeepPage/releases) 中的 `DeepPage_Release_VX.X.X.zip` 并解压
 2. 打开 Chrome，进入 `chrome://extensions/`
@@ -88,7 +97,7 @@
 5. 选择解压后的 `src/` 目录
 6. 打开新标签页即可看到 DeepPage
 
-### 方式三：源码构建
+### 方式四：源码构建
 
 ```bash
 git clone https://github.com/liumian1201/DeepPage.git
