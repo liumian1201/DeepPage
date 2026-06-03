@@ -85,6 +85,14 @@ async function init() {
   window.addEventListener('online', function () { document.body.classList.remove('offline'); });
   window.addEventListener('offline', function () { document.body.classList.add('offline'); });
 
+  // 点击页面空白处自动聚焦搜索框（新标签页焦点在地址栏，需用户先点一下页面）
+  document.body.addEventListener('click', function (e) {
+    if (e.target.closest('button') || e.target.closest('input') || e.target.closest('select') ||
+        e.target.closest('textarea') || e.target.closest('.context-menu') ||
+        e.target.closest('.settings-panel') || e.target.closest('.dialog-overlay')) return;
+    domMain.searchInput.focus();
+  });
+
   // v1.1.0: 沉浸模式 — 双击空白隐藏/恢复界面
   var _immClick = 0;
   document.addEventListener('click', function (e) {
@@ -350,20 +358,22 @@ function bindKeyboardShortcuts() {
     var tag = e.target.tagName;
     var isInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable;
 
-    if (!isInput && (e.key === '/' || (e.key === 'f' && e.ctrlKey && e.shiftKey))) {
+    if (!isInput && e.key === '/') {
       e.preventDefault();
       domMain.searchInput.focus();
       domMain.searchInput.select();
       return;
     }
 
-    if (!isInput && e.key === ',' && e.ctrlKey) {
+    // Alt+, 打开设置面板（全局，不受输入框焦点影响）
+    if (e.key === ',' && e.altKey) {
       e.preventDefault();
       if (typeof openSettingsPanel === 'function') openSettingsPanel();
       return;
     }
 
-    if (!isInput && e.key === 'n' && e.ctrlKey) {
+    // Alt+N 新建卡片（全局，不受输入框焦点影响）
+    if (e.key === 'n' && e.altKey) {
       e.preventDefault();
       if (isLocked) { showToast('界面已锁定，请右键 → 解锁', 'warning'); return; }
       openAddDialog();

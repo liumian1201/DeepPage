@@ -101,7 +101,7 @@ function renderSpeeddials() {
 
   var showAdd = (!currentSettings || currentSettings.showAddButton !== false) && !isLocked;
   if (showAdd) {
-    html += '\n      <div class="card-wrapper card-wrapper-add">\n        <div class="speeddial-card card-add" data-action="add" title="添加快捷方式（Ctrl+N）">\n          <span class="card-add-icon">+</span>\n        </div>\n      </div>';
+    html += '\n      <div class="card-wrapper card-wrapper-add">\n        <div class="speeddial-card card-add" data-action="add" title="添加快捷方式（Alt+N）">\n          <span class="card-add-icon">+</span>\n        </div>\n      </div>';
   }
 
   domMain.grid.innerHTML = html;

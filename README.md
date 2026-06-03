@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Manifest-V3-blue?logo=googlechrome" alt="Manifest V3">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/Version-1.1.1-brightgreen" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.1.2-brightgreen" alt="Version">
   <img src="https://img.shields.io/badge/PRs-Welcome-orange" alt="PRs Welcome">
 </p>
 
@@ -154,10 +154,11 @@ DeepPage/
 
 | 快捷键 | 功能 |
 |--------|------|
-| `/` | 聚焦搜索框 |
-| `Ctrl + ,` | 打开/关闭设置面板 |
-| `Ctrl + N` | 新建卡片 |
-| `ESC` | 关闭弹窗/面板 |
+| 点击页面空白 | 自动聚焦搜索框 |
+| `/` | 聚焦搜索框并全选 |
+| `Alt + ,` | 打开/关闭设置面板 |
+| `Alt + N` | 新建卡片 |
+| `ESC` | 关闭弹窗/面板/右键菜单 |
 
 ---
 
@@ -170,7 +171,7 @@ DeepPage/
 3. 粘贴 FVD JSON → 解析预览 → 生成 `_DeepPage_Backup.zip`
 4. DeepPage → 设置 → 数据 → 导入数据 → 选择该 .zip 文件
 
-> 可迁移：网址、标题、分组结构。FVD 内部截图无法跨扩展读取，DeepPage 会自动用 favicon 替代。
+> 可迁移：网址、标题、分组结构。FVD 内部截图无法跨扩展读取，DeepPage 会自动用首字符+哈希色块替代。
 
 ---
 
