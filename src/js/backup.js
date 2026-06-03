@@ -60,7 +60,7 @@ function importConfig() {
   });
 }
 
-// ==================== 图片库（IndexedDB） ====================
+// ==================== 图片库（IndexedDB → fflate Zip） ====================
 
 async function exportImageDB() {
   try {
@@ -87,66 +87,108 @@ async function exportImageDB() {
       return;
     }
 
-    // Blob → base64
-    var exportData = [];
+    // 构建 zip：manifest.json + 每个 Blob 作为二进制文件
+    var manifest = [];
+    var zipFiles = {};
+
     for (var i = 0; i < items.length; i++) {
-      var base64 = await blobToBase64(items[i].blob);
-      exportData.push({
-        key: items[i].key,
-        type: items[i].blob.type || 'image/png',
-        data: base64
-      });
+      var item = items[i];
+      var buf = await item.blob.arrayBuffer();
+      zipFiles[item.key] = new Uint8Array(buf);
+      manifest.push({ key: item.key, type: item.blob.type || 'image/png', size: buf.byteLength });
     }
 
-    var json = JSON.stringify({ version: 1, images: exportData }, null, 2);
-    var blob = new Blob([json], { type: 'application/json' });
-    downloadFile(blob, getTimestamp() + '_DeepPage_Images.json');
-    showToast('图片库导出成功（' + exportData.length + ' 张）', 'success');
+    zipFiles['manifest.json'] = fflate.strToU8(JSON.stringify({ version: 2, images: manifest }));
+
+    var zipU8 = fflate.zipSync(zipFiles, { level: 6 });
+    var zipBlob = new Blob([zipU8], { type: 'application/zip' });
+    downloadFile(zipBlob, getTimestamp() + '_DeepPage_Images.zip');
+    showToast('图片库导出成功（' + items.length + ' 张）', 'success');
   } catch (err) {
     showToast('导出图片库失败：' + err.message, 'error');
   }
 }
 
 function importImageDB() {
-  pickFile('.json', async function (file) {
+  pickFile('.zip,.json', async function (file) {
     try {
-      var text = await file.text();
-      var data = JSON.parse(text);
+      var isZip = file.name.toLowerCase().endsWith('.zip');
+      var isOldJson = file.name.toLowerCase().endsWith('.json');
 
-      if (!data || !data.images || !Array.isArray(data.images)) {
-        throw new Error('无效的图片库备份文件（缺少 images 数组）');
-      }
+      if (isZip) {
+        // 新格式：fflate zip
+        var zipU8 = new Uint8Array(await file.arrayBuffer());
+        var unzipped = fflate.unzipSync(zipU8);
 
-      var count = data.images.length;
-      if (count === 0) {
-        showToast('备份文件中没有图片', 'info');
-        return;
-      }
-
-      showImportConfirm('将导入 ' + count + ' 张图片到本地图片库，同名图片将被覆盖。确定继续吗？', async function () {
-        var db = await openImgDB();
-        var imported = 0;
-        for (var i = 0; i < data.images.length; i++) {
-          var img = data.images[i];
-          if (!img.key || !img.data) continue;
-          try {
-            var blob = base64ToBlob(img.data, img.type || 'image/png');
-            await new Promise(function (resolve, reject) {
-              var tx = db.transaction('images', 'readwrite');
-              tx.objectStore('images').put(blob, img.key);
-              tx.oncomplete = function () { resolve(); };
-              tx.onerror = function () { reject(tx.error); };
-            });
-            imported++;
-          } catch (e) {
-            console.warn('导入图片失败:', img.key, e);
-          }
+        // 读取 manifest
+        var manifestRaw = unzipped['manifest.json'];
+        if (!manifestRaw) throw new Error('找不到 manifest.json，文件可能已损坏');
+        var manifest = JSON.parse(fflate.strFromU8(manifestRaw));
+        if (!manifest.images || !Array.isArray(manifest.images)) {
+          throw new Error('无效的图片库备份文件');
         }
-        showToast('图片库导入成功（' + imported + '/' + count + ' 张），建议刷新页面。', 'success');
-        // 立即刷新卡片以加载新导入的图片
-        if (typeof renderSpeeddials === 'function') renderSpeeddials();
-        setTimeout(function () { window.location.reload(); }, 1200);
-      });
+
+        var count = manifest.images.length;
+        if (count === 0) { showToast('备份文件中没有图片', 'info'); return; }
+
+        showImportConfirm('将导入 ' + count + ' 张图片到本地图片库，同名图片将被覆盖。确定继续吗？', async function () {
+          var db = await openImgDB();
+          var imported = 0;
+          for (var i = 0; i < manifest.images.length; i++) {
+            var img = manifest.images[i];
+            var raw = unzipped[img.key];
+            if (!img.key || !raw) continue;
+            try {
+              var blob = new Blob([raw], { type: img.type || 'image/png' });
+              await new Promise(function (resolve, reject) {
+                var tx = db.transaction('images', 'readwrite');
+                tx.objectStore('images').put(blob, img.key);
+                tx.oncomplete = function () { resolve(); };
+                tx.onerror = function () { reject(tx.error); };
+              });
+              imported++;
+            } catch (e) { console.warn('导入图片失败:', img.key, e); }
+          }
+          showToast('图片库导入成功（' + imported + '/' + count + ' 张）', 'success');
+          if (typeof renderSpeeddials === 'function') renderSpeeddials();
+          setTimeout(function () { window.location.reload(); }, 1200);
+        });
+
+      } else if (isOldJson) {
+        // 旧格式兼容：base64 JSON（v1.0.5 及之前）
+        var text = await file.text();
+        var data = JSON.parse(text);
+        if (!data || !data.images || !Array.isArray(data.images)) {
+          throw new Error('无效的图片库备份文件（缺少 images 数组）');
+        }
+        var count = data.images.length;
+        if (count === 0) { showToast('备份文件中没有图片', 'info'); return; }
+
+        showImportConfirm('检测到旧格式备份，将导入 ' + count + ' 张图片。确定继续吗？', async function () {
+          var db = await openImgDB();
+          var imported = 0;
+          for (var i = 0; i < data.images.length; i++) {
+            var img = data.images[i];
+            if (!img.key || !img.data) continue;
+            try {
+              var blob = base64ToBlob(img.data, img.type || 'image/png');
+              await new Promise(function (resolve, reject) {
+                var tx = db.transaction('images', 'readwrite');
+                tx.objectStore('images').put(blob, img.key);
+                tx.oncomplete = function () { resolve(); };
+                tx.onerror = function () { reject(tx.error); };
+              });
+              imported++;
+            } catch (e) { console.warn('导入图片失败:', img.key, e); }
+          }
+          showToast('图片库导入成功（' + imported + '/' + count + ' 张）', 'success');
+          if (typeof renderSpeeddials === 'function') renderSpeeddials();
+          setTimeout(function () { window.location.reload(); }, 1200);
+        });
+
+      } else {
+        throw new Error('不支持的文件格式，请选择 .zip 或 .json 文件');
+      }
     } catch (err) {
       showToast('导入图片库失败：' + err.message, 'error');
     }

@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Manifest-V3-blue?logo=googlechrome" alt="Manifest V3">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/Version-1.0.5-brightgreen" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.0.6-brightgreen" alt="Version">
   <img src="https://img.shields.io/badge/PRs-Welcome-orange" alt="PRs Welcome">
 </p>
 
@@ -48,8 +48,8 @@
 
 ### 💾 数据管理
 - 轻量配置 → `chrome.storage.sync`（跨设备自动同步）
-- 图片资源 → IndexedDB（本地存储，无大小限制）
-- 配置 JSON + 图片库 JSON 分体导出/导入 + 一键重置
+- 图片资源 → IndexedDB（本地存储，Blob 直存，无大小限制）
+- 配置 JSON + 图片库 .zip（fflate 二进制打包）分体导出/导入，兼容旧版 .json + 一键重置
 - 卡片图标本地缓存（SW 代理下载，断网可用）
 
 ### �️ 浏览器右键菜单
@@ -131,7 +131,8 @@ DeepPage/
 │   │   ├── backup.js       # 分体导出/导入 + 重置
 │   │   ├── weather.js      # 天气（4 API + SW 代理 + 缓存）
 │   │   ├── clock.js        # 时钟（12/24h + 秒数）
-│   │   └── lunar.js        # 农历转换（1900-2100）
+│   │   ├── lunar.js        # 农历转换（1900-2100）
+│   │   └── fflate.min.js   # 图片库 zip 导入导出
 │   └── assets/
 │       └── icons/          # icon-16/48/128.png
 ├── CHANGELOG.md            ← 更新日志
@@ -158,7 +159,7 @@ DeepPage/
 - **前端**：HTML5 + CSS3（Grid/Flexbox/CSS Variables）+ Vanilla JS
 - **框架**：Chrome Extension API（Manifest V3）
 - **存储**：`chrome.storage.sync` + `chrome.storage.local` + IndexedDB
-- **无依赖**：纯原生实现，零外部库
+- **轻量依赖**：`fflate`（5KB zip 库）用于图片库导入导出
 
 ---
 

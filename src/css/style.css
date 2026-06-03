@@ -158,7 +158,9 @@ body.has-wallpaper::before {
 
 /* 深色模式下的重置按钮 */
 [data-theme="dark"] .btn-reset-small {
-  background: var(--bg-card);
+  background: rgba(231, 76, 60, 0.2);
+  border-color: #c0392b;
+  color: #e74c3c;
 }
 
 [data-theme="dark"] .btn-backup {
@@ -1284,22 +1286,22 @@ body.has-wallpaper::before {
 /* --------------------- 重置小按钮 --------------------- */
 .btn-reset-small {
   padding: 6px 12px;
-  border: 1px solid var(--border-color);
+  border: 1px solid #e74c3c;
   border-radius: var(--btn-radius);
-  background: var(--bg-input);
-  color: var(--text-secondary);
+  background: #fde8e8;
+  color: #c0392b;
   font-size: 12px;
   font-family: var(--font-family);
   cursor: pointer;
   transition: background var(--transition-fast), border-color var(--transition-fast);
   margin-top: 4px;
-  align-self: flex-start;
+  align-self: center;
 }
 
 .btn-reset-small:hover {
-  background: var(--accent-light);
-  border-color: var(--accent);
-  color: var(--accent);
+  background: #e74c3c;
+  border-color: #c0392b;
+  color: #fff;
 }
 
 /* --------------------- API 获取渠道链接 --------------------- */
