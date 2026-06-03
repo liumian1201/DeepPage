@@ -108,7 +108,48 @@ function bindFaviconErrors() {
 }
 
 /* ==================== 卡片 CRUD ==================== */
+
+/** v1.0.8: 检查 URL 域名是否已存在于任意分组，返回 { groupName, cardName } 或 null */
+function findDuplicate(url) {
+  try {
+    var host = new URL(url).hostname.replace('www.', '');
+    for (var gi = 0; gi < groups.length; gi++) {
+      var cards = groups[gi].cards || [];
+      for (var ci = 0; ci < cards.length; ci++) {
+        try {
+          if (new URL(cards[ci].url).hostname.replace('www.', '') === host) {
+            return { groupName: groups[gi].name, cardName: cards[ci].name };
+          }
+        } catch (e) {}
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
+/** 显示重复卡片确认对话框，返回 Promise<boolean> */
+function showDuplicateConfirm(name, url, dup) {
+  return new Promise(function (resolve) {
+    var dlg = document.getElementById('dialog-duplicate');
+    var msg = document.getElementById('duplicate-msg');
+    var okBtn = document.getElementById('duplicate-ok');
+    var cancelBtn = document.getElementById('duplicate-cancel');
+    if (!dlg) { resolve(true); return; }
+    msg.textContent = '「' + name + '」(' + url + ') 已在「' + dup.groupName + '」分组中存在（' + dup.cardName + '），是否继续添加？';
+    dlg.classList.remove('hidden');
+    function cleanup() { dlg.classList.add('hidden'); }
+    okBtn.onclick = function () { cleanup(); resolve(true); };
+    cancelBtn.onclick = function () { cleanup(); resolve(false); };
+    dlg.onclick = function (e) { if (e.target === dlg) { cleanup(); resolve(false); } };
+  });
+}
+
 async function addSpeeddial(name, url, image) {
+  var dup = findDuplicate(url);
+  if (dup) {
+    var proceed = await showDuplicateConfirm(name, url, dup);
+    if (!proceed) return;
+  }
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   speeddials.push({ id, name, url, image: image || '', color: stringToColor(url) });
   await saveSpeeddials(speeddials);

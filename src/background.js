@@ -106,6 +106,42 @@ chrome.contextMenus.onClicked.addListener(async function (info, tab) {
   var groups = result.groups;
   if (!groups || !groups[groupIndex]) return;
 
+  // v1.0.8: 检查重复 → 当前页面弹确认框
+  var hostname = '';
+  try { hostname = new URL(pageUrl).hostname.replace('www.', ''); } catch (e) {}
+  var dupGroup = null, dupCardName = '';
+  if (hostname) {
+    for (var gi = 0; gi < groups.length; gi++) {
+      var cards = groups[gi].cards || [];
+      for (var ci = 0; ci < cards.length; ci++) {
+        try {
+          if (new URL(cards[ci].url).hostname.replace('www.', '') === hostname) {
+            dupGroup = groups[gi].name;
+            dupCardName = cards[ci].name;
+            break;
+          }
+        } catch (e) {}
+      }
+      if (dupGroup) break;
+    }
+  }
+
+  if (dupGroup) {
+    // 在当前网页弹出确认框
+    try {
+      var result = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: function (name, groupName, cardName) {
+          return confirm('「' + name + '」已在「' + groupName + '」分组中存在（' + cardName + '），是否继续添加？');
+        },
+        args: [pageTitle || pageUrl, dupGroup, dupCardName]
+      });
+      if (!result || !result[0] || !result[0].result) return; // 用户取消
+    } catch (e) {
+      // executeScript 失败（如 chrome:// 页面），静默添加
+    }
+  }
+
   var card = {
     id: Date.now().toString(),
     name: pageTitle || pageUrl,

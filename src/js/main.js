@@ -90,7 +90,6 @@ function _debouncedRefresh() {
   clearTimeout(_renderDebounce);
   _renderDebounce = setTimeout(function () {
     if (document.hidden) {
-      // 标签页隐藏：等激活时再渲染
       document.addEventListener('visibilitychange', function onVis() {
         if (!document.hidden) {
           renderSpeeddials();

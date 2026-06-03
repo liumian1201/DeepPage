@@ -1,12 +1,12 @@
 {
   "manifest_version": 3,
   "name": "DeepPage",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "基于 FVD Speed Dial 风格的模块化、可定制的极简高效起始页",
   "chrome_url_overrides": {
     "newtab": "index.html"
   },
-  "permissions": ["storage", "unlimitedStorage", "tabs", "contextMenus"],
+  "permissions": ["storage", "unlimitedStorage", "tabs", "contextMenus", "scripting"],
   "background": {
     "service_worker": "background.js"
   },

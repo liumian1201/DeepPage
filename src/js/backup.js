@@ -102,14 +102,16 @@ function importAll() {
 
         if (!hasConfig && !hasImages) throw new Error('备份文件中没有有效数据');
 
-        // 恢复配置
+        // 恢复配置（直接 set 覆盖，避免 clear+set 竞态）
         if (hasConfig) {
           var config = JSON.parse(fflate.strFromU8(unzipped['config.json']));
           if (typeof config === 'object' && config !== null) {
             await new Promise(function (resolve) {
-              chrome.storage.sync.clear(function () {
-                chrome.storage.sync.set(config, resolve);
-              });
+              chrome.storage.sync.set({
+                settings: config.settings || {},
+                groups: config.groups || [],
+                activeGroup: config.activeGroup || 0
+              }, resolve);
             });
           }
         }
@@ -171,9 +173,11 @@ function importAll() {
           // 旧配置 JSON
           await showImportConfirmAsync('检测到旧格式配置备份，导入将覆盖当前所有数据。');
           await new Promise(function (resolve) {
-            chrome.storage.sync.clear(function () {
-              chrome.storage.sync.set(data, resolve);
-            });
+            chrome.storage.sync.set({
+              settings: data.settings || {},
+              groups: data.groups || [],
+              activeGroup: data.activeGroup || 0
+            }, resolve);
           });
           showToast('配置导入成功，即将刷新...', 'success');
 

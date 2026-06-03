@@ -462,6 +462,7 @@
     </div>
 
     <!-- ===== 导入确认弹窗 ===== -->
+    <!-- 导入确认 -->
     <div id="dialog-import-confirm" class="dialog-overlay hidden">
       <div class="dialog-card dialog-confirm-card">
         <h3>确认导入</h3>
@@ -469,6 +470,18 @@
         <div class="dialog-actions">
           <button id="import-confirm-cancel" class="btn-secondary">取消</button>
           <button id="import-confirm-ok" class="btn-primary">确认导入</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 重复卡片检测 -->
+    <div id="dialog-duplicate" class="dialog-overlay hidden">
+      <div class="dialog-card dialog-confirm-card">
+        <h3>重复卡片</h3>
+        <p id="duplicate-msg"></p>
+        <div class="dialog-actions">
+          <button id="duplicate-cancel" class="btn-secondary">取消</button>
+          <button id="duplicate-ok" class="btn-primary">仍然添加</button>
         </div>
       </div>
     </div>

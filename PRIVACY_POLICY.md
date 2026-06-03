@@ -50,6 +50,7 @@ DeepPage 会向以下第三方服务发起请求：
 | `unlimitedStorage` | 存储壁纸和图标图片（IndexedDB） |
 | `tabs` | 卡片新标签页打开方式控制 |
 | `contextMenus` | 浏览器右键菜单「添加到 DeepPage」 |
+| `scripting` | 重复卡片检测时在当前网页弹出确认框 |
 | `host_permissions` | 获取天气数据、壁纸图片、网站 Favicon |
 
 ## 数据控制
