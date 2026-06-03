@@ -45,8 +45,15 @@ function renderSpeeddials() {
     const bgColor = card.color || stringToColor(card.url || card.name);
     const showIcon = !currentSettings || currentSettings.showCardIcon !== false;
     const showTitle = !currentSettings || currentSettings.showCardTitle !== false;
+    const pureText = currentSettings && currentSettings.pureTextCards === true;
 
-    html += '\n      <div class="speeddial-card"\n           draggable="true"\n           data-index="' + index + '"\n           data-id="' + card.id + '"\n           data-url="' + escapeHtml(card.url) + '"\n           ' + (isLocal ? 'data-local-img="' + card.image + '"' : '') + '\n           title="' + escapeHtml(card.name) + ' — ' + escapeHtml(card.url) + '">\n        ' + ((showIcon || showTitle) ? '\n        <div class="card-header">\n          ' + (showIcon ? '<img class="card-header-icon" src="' + headerIconSrc + '" alt=""' + (isLocal ? ' data-local="1"' : '') + ' onerror="this.style.display=\'none\'">' : '') + '\n          ' + (showTitle ? '<span class="card-header-title">' + escapeHtml(card.name) + '</span>' : '') + '\n        </div>' : '') + '\n        <div class="card-thumb">\n          ' + (hasCustomImage ? '\n            <img class="card-thumb-img" src="' + (isLocal ? '' : imgSrc) + '" alt="' + escapeHtml(card.name) + '" loading="lazy"\n                 ' + (isLocal ? 'data-local="1"' : '') + '>\n          ' : '\n            <img class="card-favicon-center" src="' + (imgSrc || 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(card.url) + '&sz=64') + '" alt="' + escapeHtml(card.name) + '" loading="lazy"\n                 onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">\n            <div class="card-fallback" style="display:none;background:' + bgColor + ';">' + firstChar + '</div>\n          ') + '\n        </div>\n        <div class="card-actions">\n          <button class="btn-card-edit" data-action="edit" data-id="' + card.id + '" title="编辑">✎</button>\n          <button class="btn-card-delete" data-action="delete" data-id="' + card.id + '" title="删除">✕</button>\n        </div>\n      </div>';
+    if (pureText) {
+      // v1.0.7: 极简纯色文字卡片 — 跳过所有图片加载
+      html += '\n      <div class="speeddial-card card-pure-text"\n           draggable="true"\n           data-index="' + index + '"\n           data-id="' + card.id + '"\n           data-url="' + escapeHtml(card.url) + '"\n           title="' + escapeHtml(card.name) + ' — ' + escapeHtml(card.url) + '">\n        <div class="card-pure-text-inner" style="background:' + bgColor + ';">\n          <span class="card-pure-text-char">' + firstChar + '</span>\n          <span class="card-pure-text-name">' + escapeHtml(card.name) + '</span>\n        </div>\n        <div class="card-actions">\n          <button class="btn-card-edit" data-action="edit" data-id="' + card.id + '" title="编辑">✎</button>\n          <button class="btn-card-delete" data-action="delete" data-id="' + card.id + '" title="删除">✕</button>\n        </div>\n      </div>';
+      return;
+    }
+
+    html += '\n      <div class="speeddial-card"\n           draggable="true"\n           data-index="' + index + '"\n           data-id="' + card.id + '"\n           data-url="' + escapeHtml(card.url) + '"\n           ' + (isLocal ? 'data-local-img="' + card.image + '"' : '') + '\n           title="' + escapeHtml(card.name) + ' — ' + escapeHtml(card.url) + '">\n        ' + ((showIcon || showTitle) ? '\n        <div class="card-header">\n          ' + (showIcon ? '<img class="card-header-icon" src="' + headerIconSrc + '" alt=""' + (isLocal ? ' data-local="1"' : '') + '>' : '') + '\n          ' + (showTitle ? '<span class="card-header-title">' + escapeHtml(card.name) + '</span>' : '') + '\n        </div>' : '') + '\n        <div class="card-thumb">\n          ' + (hasCustomImage ? '\n            <img class="card-thumb-img" src="' + (isLocal ? '' : imgSrc) + '" alt="' + escapeHtml(card.name) + '" loading="lazy"\n                 ' + (isLocal ? 'data-local="1"' : '') + '>\n          ' : '\n            <img class="card-favicon-center" src="' + (imgSrc || 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(card.url) + '&sz=64') + '" alt="' + escapeHtml(card.name) + '" loading="lazy">\n            <div class="card-fallback" style="display:none;background:' + bgColor + ';">' + firstChar + '</div>\n          ') + '\n        </div>\n        <div class="card-actions">\n          <button class="btn-card-edit" data-action="edit" data-id="' + card.id + '" title="编辑">✎</button>\n          <button class="btn-card-delete" data-action="delete" data-id="' + card.id + '" title="删除">✕</button>\n        </div>\n      </div>';
   });
 
   var showAdd = (!currentSettings || currentSettings.showAddButton !== false) && !isLocked;
@@ -59,6 +66,8 @@ function renderSpeeddials() {
   if (speeddials.length === 0 && !showAdd) {
     domMain.grid.innerHTML = '<div class="empty-state"><p>📌 还没有快捷方式</p><p class="empty-hint">打开设置面板，开启「+ 添加按钮」来添加快捷导航</p></div>';
   }
+
+  domMain.grid.classList.add('rendered');
 
   loadLocalCardImages();
   bindDragEvents();
@@ -80,7 +89,7 @@ async function loadLocalCardImages() {
   });
 }
 
-/** Favicon 加载失败 → 显示兜底文字 */
+/** 图片加载失败处理（JS 监听替代 inline onerror，符合 CSP） */
 function bindFaviconErrors() {
   domMain.grid.querySelectorAll('.card-favicon-center').forEach((img) => {
     img.addEventListener('error', function () {
@@ -89,6 +98,11 @@ function bindFaviconErrors() {
       if (fallback && fallback.classList.contains('card-fallback')) {
         fallback.style.display = 'flex';
       }
+    });
+  });
+  domMain.grid.querySelectorAll('.card-header-icon').forEach((img) => {
+    img.addEventListener('error', function () {
+      this.style.display = 'none';
     });
   });
 }

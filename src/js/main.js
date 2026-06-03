@@ -75,24 +75,47 @@ async function init() {
   initWallpaper();
   initContextMenu();
   renderGroupDots();
+
+  // v1.0.7: 离线指示器
+  if (!navigator.onLine) document.body.classList.add('offline');
+  window.addEventListener('online', function () { document.body.classList.remove('offline'); });
+  window.addEventListener('offline', function () { document.body.classList.add('offline'); });
 }
 
-/* ==================== 外部变更监听（v1.0.5） ==================== */
-var _savingGroups = false; // 防止本页保存时重复渲染
+/* ==================== 外部变更监听（v1.0.7 防抖+隐身跳过） ==================== */
+var _savingGroups = false;
+var _renderDebounce = null;
+
+function _debouncedRefresh() {
+  clearTimeout(_renderDebounce);
+  _renderDebounce = setTimeout(function () {
+    if (document.hidden) {
+      // 标签页隐藏：等激活时再渲染
+      document.addEventListener('visibilitychange', function onVis() {
+        if (!document.hidden) {
+          renderSpeeddials();
+          renderGroupDots();
+          document.removeEventListener('visibilitychange', onVis);
+        }
+      }, { once: false });
+    } else {
+      renderSpeeddials();
+      renderGroupDots();
+    }
+  }, 300);
+}
+
 chrome.storage.onChanged.addListener(function (changes, areaName) {
   if (areaName !== 'sync') return;
-  // 分组数据被外部修改（如右键菜单添加卡片），自动刷新界面
   if (changes.groups && !_savingGroups) {
     var newGroups = changes.groups.newValue;
     if (newGroups && Array.isArray(newGroups)) {
       groups = newGroups;
       speeddials = (groups[activeGroupIndex] && groups[activeGroupIndex].cards)
         ? groups[activeGroupIndex].cards : [];
-      renderSpeeddials();
-      renderGroupDots();
+      _debouncedRefresh();
     }
   }
-  // 锁定状态变更
   if (changes.settings && changes.settings.newValue) {
     var newLocked = changes.settings.newValue.isLocked;
     if (typeof newLocked === 'boolean') {

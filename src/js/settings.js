@@ -19,6 +19,7 @@ const domSettings = {
   toggleAddBtn:  document.getElementById('toggle-add-button'),
   toggleCardIcon: document.getElementById('toggle-card-icon'),
   toggleCardTitle: document.getElementById('toggle-card-title'),
+  togglePureTextCards: document.getElementById('toggle-pure-text-cards'),
   toggleConfirmDelete: document.getElementById('toggle-confirm-delete'),
   toggleShowGroupIndicator: document.getElementById('toggle-show-group-indicator'),
   groupNameMode:   document.getElementById('setting-group-name-mode'),
@@ -111,6 +112,7 @@ function populateSettingsForm(settings) {
   domSettings.toggleAddBtn.checked  = settings.showAddButton !== false;
   domSettings.toggleCardIcon.checked = settings.showCardIcon !== false;
   domSettings.toggleCardTitle.checked = settings.showCardTitle !== false;
+  if (domSettings.togglePureTextCards) domSettings.togglePureTextCards.checked = settings.pureTextCards === true;
   if (domSettings.toggleConfirmDelete) domSettings.toggleConfirmDelete.checked = settings.confirmDelete !== false;
   if (domSettings.toggleLock) domSettings.toggleLock.checked = settings.isLocked === true;
   if (domSettings.toggleShowGroupIndicator) domSettings.toggleShowGroupIndicator.checked = settings.showGroupIndicator !== false;
@@ -344,6 +346,7 @@ function collectSettingsFromForm() {
     showAddButton: domSettings.toggleAddBtn.checked,
     showCardIcon: domSettings.toggleCardIcon.checked,
     showCardTitle: domSettings.toggleCardTitle.checked,
+    pureTextCards: domSettings.togglePureTextCards ? domSettings.togglePureTextCards.checked : false,
     confirmDelete: domSettings.toggleConfirmDelete ? domSettings.toggleConfirmDelete.checked : true,
     showGroupName: domSettings.groupNameMode ? domSettings.groupNameMode.value : 'all',
     showGroupIndicator: domSettings.toggleShowGroupIndicator ? domSettings.toggleShowGroupIndicator.checked : true,

@@ -40,6 +40,7 @@ var DEFAULT_SETTINGS = {
   showAddButton: true,
   showCardIcon: true,
   showCardTitle: true,
+  pureTextCards: false,
   weatherType: 'openmeteo',
   weatherCity: '',
   weatherApiUrl: '',

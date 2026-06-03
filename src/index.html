@@ -64,7 +64,12 @@
     <!-- ===== 快捷导航区域 ===== -->
     <section class="speeddial-section">
       <div id="speeddial-grid" class="speeddial-grid" data-columns="5">
-        <!-- 卡片由 main.js 动态渲染 -->
+        <!-- 骨架屏占位：数据就绪后由 renderSpeeddials() 替换 -->
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
       </div>
     </section>
 
@@ -108,6 +113,7 @@
           <div class="setting-group">
             <div class="toggle-list">
               <label class="toggle-item"><input type="checkbox" id="toggle-lock"> 锁定界面（禁止拖拽、编辑、删除）</label>
+              <label class="toggle-item"><input type="checkbox" id="toggle-pure-text-cards"> 极简卡片（纯色文字，不加载图片）</label>
             </div>
           </div>
           <div class="setting-group">
@@ -154,8 +160,7 @@
             <div class="toggle-list">
               <label class="toggle-item"><input type="checkbox" id="toggle-clock" checked> 时间显示</label>
               <label class="toggle-item"><input type="checkbox" id="toggle-lunar" checked> 农历信息</label>
-              <label class="toggle-item"><input type="checkbox" id="toggle-weather" checked> 天气预报</label>
-            </div>
+              <label class="toggle-item"><input type="checkbox" id="toggle-weather" checked> 天气预报</label>            </div>
           </div>
           <div class="setting-group">
             <label>布局方向</label>
