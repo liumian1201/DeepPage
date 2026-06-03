@@ -142,11 +142,14 @@ chrome.contextMenus.onClicked.addListener(async function (info, tab) {
     }
   }
 
+  // BUG-010: 补全 visitCount/createdAt；统一 ID 生成策略
   var card = {
-    id: Date.now().toString(),
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     name: pageTitle || pageUrl,
     url: pageUrl,
-    color: stringToColor(pageUrl)
+    color: stringToColor(pageUrl),
+    visitCount: 0,
+    createdAt: Date.now()
   };
 
   if (!groups[groupIndex].cards) groups[groupIndex].cards = [];
@@ -157,6 +160,7 @@ chrome.contextMenus.onClicked.addListener(async function (info, tab) {
   // v1.0.5: 不在此处重建菜单（onChanged 会自动触发）
 });
 
+// ⚠️ BUG-013: stringToColor 两处定义（background.js + main.js），修改时需保持同步
 /** 从 URL 生成稳定的 HSL 颜色（与 main.js 逻辑一致） */
 function stringToColor(str) {
   var hash = 0;

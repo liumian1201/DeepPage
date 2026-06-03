@@ -38,6 +38,7 @@
   --card-font-size: 13px;
   --card-width: auto;
   --card-height: auto;
+  --cards-top: 0px;
   --btn-radius: 8px;
   --input-radius: 28px;
   --panel-radius: 16px;
@@ -673,6 +674,7 @@ body.has-wallpaper::before {
 /* --------------------- 快捷导航卡片网格 --------------------- */
 .speeddial-section {
   width: 100%;
+  margin-top: var(--cards-top, 0px);
   margin-bottom: 40px;
 }
 
@@ -831,6 +833,18 @@ body.has-wallpaper::before {
 }
 
 /* 添加卡片按钮（+ 号占位） */
+.card-wrapper-add {
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  overflow: visible;
+}
+.card-wrapper-add:hover {
+  transform: translateY(-4px) scale(1.03);
+}
+.card-wrapper-add .speeddial-card {
+  height: calc(var(--card-height, 270px) + 28px);
+}
 .speeddial-card.card-add {
   border: 2px dashed var(--border-color);
   background: transparent;
@@ -1184,6 +1198,14 @@ body.has-wallpaper::before {
 .setting-group input[type="range"]::-webkit-slider-thumb:hover {
   transform: scale(1.2);
 }
+.setting-group input[type="range"]:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.setting-group input[type="range"]:disabled::-webkit-slider-thumb {
+  background: var(--text-tertiary);
+  cursor: not-allowed;
+}
 
 /* 颜色选择器所在行：标签与色块同行 */
 .setting-group:has(input[type="color"]) {
@@ -1404,6 +1426,10 @@ body.has-wallpaper::before {
   justify-content: center;
   gap: 8px;
   border-radius: var(--card-radius, 14px);
+}
+/* 信息栏开启时，色块顶部改为直角（圆角由上方信息栏负责） */
+.card-wrapper:has(.card-top-bar) .card-pure-text-inner {
+  border-radius: 0 0 var(--card-radius, 14px) var(--card-radius, 14px);
 }
 
 .card-pure-text-char {

@@ -52,6 +52,7 @@ function renderGroupDots() {
     });
     dot.addEventListener('contextmenu', function (e) {
       e.preventDefault();
+      e.stopPropagation();
       var idx = parseInt(this.dataset.group, 10);
       showGroupContextMenu(e.clientX, e.clientY, idx);
     });
@@ -67,10 +68,10 @@ async function switchGroup(index) {
   activeGroupIndex = index;
   speeddials = groups[index].cards || [];
   renderSpeeddials();
-  saveGroups(groups);
-  saveActiveGroup(activeGroupIndex);
+  // BUG-023: await 确保 _savingGroups 在函数返回前恢复，避免跨标签同步盲区
+  await saveGroups(groups);
+  await saveActiveGroup(activeGroupIndex);
   renderGroupDots();
-  // v1.0.9: 更新设置面板中的排序下拉
   if (typeof updateSortModeSelect === 'function') updateSortModeSelect();
 }
 
@@ -126,10 +127,14 @@ function showGroupContextMenu(x, y, index) {
 /* ==================== 分组名称弹窗 ==================== */
 var groupDialogMode = 'add';
 var groupDialogIndex = -1;
+var _groupMgrWasOpen = false;  // BUG-022: 跟踪管理器是否需在对话框关闭后重开
 
 function openGroupDialog(mode, index) {
   groupDialogMode = mode;
   groupDialogIndex = index;
+  // BUG-022: 记录管理器打开状态
+  var mgr = document.getElementById('dialog-group-manager');
+  _groupMgrWasOpen = mgr && !mgr.classList.contains('hidden');
   var dlg = document.getElementById('dialog-group');
   var title = document.getElementById('dialog-group-title');
   var input = document.getElementById('dialog-group-name');
@@ -151,6 +156,11 @@ function closeGroupDialog() {
   var dlg = document.getElementById('dialog-group');
   if (dlg) dlg.classList.add('hidden');
   groupDialogIndex = -1;
+  // BUG-022: 对话框关闭后，若管理器之前打开则重开
+  if (_groupMgrWasOpen) {
+    _groupMgrWasOpen = false;
+    openGroupManager();
+  }
 }
 
 async function saveGroupDialog() {
@@ -195,7 +205,11 @@ function openGroupManager() {
   var addBtn = document.getElementById('group-mgr-add');
   if (closeBtn) closeBtn.onclick = closeGroupManager;
   if (cancelBtn) cancelBtn.onclick = closeGroupManager;
-  if (addBtn) addBtn.onclick = function () { addGroup(); closeGroupManager(); setTimeout(openGroupManager, 300); };
+  if (addBtn) addBtn.onclick = function () {
+    closeGroupManager();
+    // BUG-022: 在 saveGroupDialog 中重开管理器，替代 setTimeout 盲等
+    addGroup();
+  };
   dlg.onclick = function (e) { if (e.target === dlg) closeGroupManager(); };
 }
 
@@ -245,7 +259,11 @@ function renderGroupManagerList() {
       var name = this.value.trim();
       if (name && groups[idx]) { groups[idx].name = name; saveGroups(groups); }
     });
-    input.addEventListener('click', function () {
+  });
+  // BUG-021: click 绑定在 .group-mgr-item 整行上，排除 input/button
+  list.querySelectorAll('.group-mgr-item').forEach(function (row) {
+    row.addEventListener('click', function (e) {
+      if (e.target.closest('input') || e.target.closest('button')) return;
       var idx = parseInt(this.dataset.index, 10);
       if (idx !== activeGroupIndex) switchGroup(idx);
     });

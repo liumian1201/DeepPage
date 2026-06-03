@@ -282,6 +282,14 @@
             <label for="setting-card-bg-color">卡片背景颜色</label>
             <input type="color" id="setting-card-bg-color" value="#ffffff">
           </div>
+          <div class="settings-section-title">📐 卡片位置</div>
+          <div class="setting-group">
+            <div class="setting-inline-row">
+              <label for="setting-cards-top" class="setting-inline-label">卡片距顶</label>
+              <span id="cards-top-val" class="slider-val">0px</span>
+              <input type="range" id="setting-cards-top" min="4" max="600" value="0" step="2">
+            </div>
+          </div>
           <div class="setting-group">
             <div class="setting-inline-row">
               <label for="setting-columns-slider" class="setting-inline-label">每行列数</label>
@@ -331,7 +339,7 @@
           <div class="setting-group">
             <button id="btn-reset-search-pos" class="btn-reset-small">↺ 重置搜索位置</button>
           </div>
-          <div class="settings-section-title">📍 分组指示器位置</div>
+          <div class="settings-section-title"> 分组指示器位置</div>
           <div class="setting-group">
             <div class="setting-inline-row">
               <label for="setting-group-offset" class="setting-inline-label">指示器边距</label>

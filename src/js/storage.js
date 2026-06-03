@@ -79,7 +79,8 @@ var DEFAULT_SETTINGS = {
   cardHeight: 270,
   cardBorderRadius: 14,
   cardOpenMode: 'current',
-  showVisitCount: true
+  showVisitCount: true,
+  cardsMarginTop: 0
 };
 
 function loadFromStorage(key, defaultValue) {

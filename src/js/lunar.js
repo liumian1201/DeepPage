@@ -148,8 +148,16 @@ function updateLunarDisplay() {
   var dateEl = document.querySelector('.lunar-date');
   var lunar = getLunarDate(new Date());
   var zodiacEmoji = { '鼠':'🐭','牛':'🐮','虎':'🐯','兔':'🐰','龙':'🐲','蛇':'🐍','马':'🐴','羊':'🐑','猴':'🐵','鸡':'🐔','狗':'🐶','猪':'🐷' };
-  if (yearEl) yearEl.textContent = lunar.year + ' · ' + (zodiacEmoji[lunar.zodiac] || '🐲') + lunar.zodiac;
-  if (dateEl) dateEl.textContent = lunar.month + lunar.day;
+  var style = (typeof currentSettings !== 'undefined' && currentSettings.lunarStyle) ? currentSettings.lunarStyle : 'double';
+  if (style === 'single') {
+    // 单行：干支年 月日 · 生肖
+    if (yearEl) yearEl.textContent = lunar.full + ' · ' + (zodiacEmoji[lunar.zodiac] || '🐲') + lunar.zodiac;
+    if (dateEl) dateEl.textContent = '';
+  } else {
+    // 双行：干支年+生肖 / 月日
+    if (yearEl) yearEl.textContent = lunar.year + ' · ' + (zodiacEmoji[lunar.zodiac] || '🐲') + lunar.zodiac;
+    if (dateEl) dateEl.textContent = lunar.month + lunar.day;
+  }
   // 降级
   var lunarEl = document.querySelector('.lunar-text');
   if (lunarEl && !yearEl) lunarEl.textContent = lunar.full + ' · ' + (zodiacEmoji[lunar.zodiac] || '🐲') + lunar.zodiac;

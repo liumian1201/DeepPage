@@ -7,6 +7,17 @@ var dragClone = null;
 var dragStartX = 0;
 var dragStartY = 0;
 var dragOrigIndex = -1;
+var _dragCleanup = null;  // BUG-006: visibilitychange 清理回调
+
+/** 清理所有拖拽状态（mouseup 丢失时的安全网） */
+function cleanupDrag() {
+  document.removeEventListener('wheel', blockWheelDuringDrag);
+  if (_dragCleanup) { _dragCleanup(); _dragCleanup = null; }
+  if (dragClone && dragClone.parentNode) dragClone.parentNode.removeChild(dragClone);
+  if (dragCard) { dragCard.classList.remove('dragging'); dragCard = null; }
+  dragClone = null;
+  domMain.grid.querySelectorAll('.drag-over').forEach(function (el) { el.classList.remove('drag-over'); });
+}
 
 function bindDragEvents() {
   if (isLocked) return;
@@ -34,8 +45,14 @@ function onMouseDown(e) {
   dragOrigIndex = parseInt(wrapper.dataset.index, 10);
   dragStartX = e.clientX;
   dragStartY = e.clientY;
+  // BUG-007: 预计算所有卡片中心坐标，mousemove 期间避免 DOM 查询
+  _cacheCardCenters();
   // 按下即拦截滚轮，防止分组切换破坏 DOM
   document.addEventListener('wheel', blockWheelDuringDrag, { passive: false });
+  // BUG-006: visibilitychange 安全网 — 用户 Alt+Tab 时强制清理
+  var onVisCleanup = function () { if (document.hidden) cleanupDrag(); };
+  document.addEventListener('visibilitychange', onVisCleanup);
+  _dragCleanup = function () { document.removeEventListener('visibilitychange', onVisCleanup); };
   e.preventDefault();
 }
 
@@ -67,7 +84,9 @@ document.addEventListener('mousemove', function (e) {
 });
 
 document.addEventListener('mouseup', function (e) {
+  // 先移除 wheel/vis 监听器（保留 dragCard/dragClone 供后续重排使用）
   document.removeEventListener('wheel', blockWheelDuringDrag);
+  if (_dragCleanup) { _dragCleanup(); _dragCleanup = null; }
   if (!dragCard) return;
   if (!dragClone) { dragCard = null; return; }
 
@@ -107,19 +126,28 @@ function getTargetCard(e) {
     var cardEl = el ? el.closest('.speeddial-card:not(.card-add)') : null;
     if (cardEl) wrapper = cardEl.closest('.card-wrapper');
   }
-  if (!wrapper) {
-    // fallback: 找最近的 card-wrapper
-    var wrappers = Array.from(domMain.grid.querySelectorAll('.card-wrapper'));
+  // BUG-007: fallback 使用预缓存坐标做纯数学计算，避免 getBoundingClientRect 强制重排
+  if (!wrapper && _cardCenters && _cardCenters.length) {
     var best = null, bestD = Infinity;
-    wrappers.forEach(function (w) {
-      var r = w.getBoundingClientRect();
-      var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-      var d = (e.clientX - cx) * (e.clientX - cx) + (e.clientY - cy) * (e.clientY - cy);
-      if (d < bestD) { bestD = d; best = w; }
-    });
-    return best ? best.querySelector('.speeddial-card') : null;
+    for (var ci = 0; ci < _cardCenters.length; ci++) {
+      var c = _cardCenters[ci];
+      var d = (e.clientX - c.cx) * (e.clientX - c.cx) + (e.clientY - c.cy) * (e.clientY - c.cy);
+      if (d < bestD) { bestD = d; best = c.el; }
+    }
+    return best;
   }
-  return wrapper.querySelector('.speeddial-card');
+  return wrapper ? wrapper.querySelector('.speeddial-card') : null;
+}
+
+/** BUG-007: 预缓存所有卡片中心坐标（mousedown 时调用一次） */
+var _cardCenters = null;
+function _cacheCardCenters() {
+  var wrappers = domMain.grid.querySelectorAll('.card-wrapper');
+  _cardCenters = [];
+  for (var i = 0; i < wrappers.length; i++) {
+    var r = wrappers[i].getBoundingClientRect();
+    _cardCenters.push({ el: wrappers[i].querySelector('.speeddial-card'), cx: r.left + r.width / 2, cy: r.top + r.height / 2 });
+  }
 }
 
 function highlightDropTarget(e) {

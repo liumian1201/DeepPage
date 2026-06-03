@@ -101,7 +101,7 @@ function renderSpeeddials() {
 
   var showAdd = (!currentSettings || currentSettings.showAddButton !== false) && !isLocked;
   if (showAdd) {
-    html += '\n      <div class="speeddial-card card-add" data-action="add" title="添加快捷方式（Ctrl+N）">\n        <span class="card-add-icon">+</span>\n      </div>';
+    html += '\n      <div class="card-wrapper card-wrapper-add">\n        <div class="speeddial-card card-add" data-action="add" title="添加快捷方式（Ctrl+N）">\n          <span class="card-add-icon">+</span>\n        </div>\n      </div>';
   }
 
   domMain.grid.innerHTML = html;
@@ -118,39 +118,44 @@ function renderSpeeddials() {
 
 /** 加载卡片中的本地 IndexedDB 图片 */
 async function loadLocalCardImages() {
-  domMain.grid.querySelectorAll('img[data-local="1"]').forEach(async (img) => {
-    var wrapper = img.closest('.card-wrapper');
-    var key = wrapper ? wrapper.dataset.localImg : null;
-    if (!key) {
-      // fallback: 检查父级 speeddial-card
-      var card = img.closest('.speeddial-card');
-      var w2 = card ? card.parentElement : null;
-      key = w2 && w2.classList.contains('card-wrapper') ? w2.dataset.localImg : null;
-    }
-    if (!key) return;
-    key = key.replace('idx:', '');
-    var blob = await loadImage(key);
-    if (blob) {
-      if (img.src && img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
-      img.src = URL.createObjectURL(blob);
-    } else {
-      // IndexedDB 中无此 blob → 隐藏破图并清除无效引用
+  // BUG-009: for...of 串行加载，避免 IndexedDB 并发风暴 + 异常静默丢失
+  var imgs = domMain.grid.querySelectorAll('img[data-local="1"]');
+  for (var i = 0; i < imgs.length; i++) {
+    var img = imgs[i];
+    try {
       var wrapper = img.closest('.card-wrapper');
-      if (wrapper) {
-        var cid = wrapper.dataset.id;
-        for (var gi = 0; gi < groups.length; gi++) {
-          var gcards = groups[gi].cards || [];
-          for (var ci = 0; ci < gcards.length; ci++) {
-            if (gcards[ci].id === cid && gcards[ci].image && gcards[ci].image.startsWith('idx:')) {
-              gcards[ci].image = '';
-              if (typeof saveGroups === 'function') saveGroups(groups);
-              break;
+      var key = wrapper ? wrapper.dataset.localImg : null;
+      if (!key) {
+        var card = img.closest('.speeddial-card');
+        var w2 = card ? card.parentElement : null;
+        key = w2 && w2.classList.contains('card-wrapper') ? w2.dataset.localImg : null;
+      }
+      if (!key) continue;
+      key = key.replace('idx:', '');
+      var blob = await loadImage(key);
+      if (blob) {
+        if (img.src && img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
+        img.src = URL.createObjectURL(blob);
+      } else {
+        var wrapper2 = img.closest('.card-wrapper');
+        if (wrapper2) {
+          var cid = wrapper2.dataset.id;
+          for (var gi = 0; gi < groups.length; gi++) {
+            var gcards = groups[gi].cards || [];
+            for (var ci = 0; ci < gcards.length; ci++) {
+              if (gcards[ci].id === cid && gcards[ci].image && gcards[ci].image.startsWith('idx:')) {
+                gcards[ci].image = '';
+                if (typeof saveGroups === 'function') saveGroups(groups);
+                break;
+              }
             }
           }
         }
       }
+    } catch (e) {
+      console.warn('本地图片加载失败:', img, e);
     }
-  });
+  }
 }
 
 /* ==================== 卡片 CRUD ==================== */

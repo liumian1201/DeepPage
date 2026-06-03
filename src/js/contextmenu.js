@@ -23,6 +23,17 @@ function initContextMenu() {
     showContextMenu(e.clientX, e.clientY, 'grid');
   });
 
+  // BUG-017: 一次性绑定 moveToGroup 悬停，避免每次右键重建匿名函数
+  var moveItem = domMain.contextMenu.querySelector('[data-action="moveToGroup"]');
+  var sub = document.getElementById('move-group-sub');
+  if (moveItem) {
+    moveItem.addEventListener('mouseenter', showMoveSubmenu);
+  }
+  if (sub) {
+    sub.addEventListener('mouseenter', function () { sub.classList.remove('hidden'); });
+    sub.addEventListener('mouseleave', hideMoveSubmenu);
+  }
+
   domMain.contextMenu.addEventListener('click', (e) => {
     const item = e.target.closest('.context-menu-item');
     if (!item) return;
@@ -121,16 +132,7 @@ function buildMoveSubmenu() {
       handleMoveToGroup(targetIdx);
     });
   });
-  // 绑定 hover
-  var moveItem = domMain.contextMenu.querySelector('[data-action="moveToGroup"]');
-  if (moveItem) {
-    moveItem.onmouseenter = function () { showMoveSubmenu(); };
-    moveItem.onmouseleave = function () { /* 稍后由 sub 的 hover 接管 */ };
-  }
-  if (sub) {
-    sub.onmouseenter = function () { sub.classList.remove('hidden'); };
-    sub.onmouseleave = function () { hideMoveSubmenu(); };
-  }
+  // BUG-017: hover 绑定已移至 initContextMenu，此处不再重建
 }
 
 function hideContextMenu() {

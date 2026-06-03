@@ -87,7 +87,9 @@ const domSettings = {
   columnsSliderVal: document.getElementById('columns-slider-val'),
   cardBorderRadius: document.getElementById('setting-card-radius'),
   cardBorderRadiusVal: document.getElementById('radius-val'),
-  cardOpenMode:    document.getElementById('setting-card-open-mode')
+  cardOpenMode:    document.getElementById('setting-card-open-mode'),
+  cardsMarginTop:  document.getElementById('setting-cards-top'),
+  cardsTopVal:     document.getElementById('cards-top-val')
 };
 
 /* ---------- 初始化 ---------- */
@@ -119,6 +121,9 @@ function populateSettingsForm(settings) {
   if (domSettings.groupNameMode) domSettings.groupNameMode.value = settings.showGroupName || 'all';
   domSettings.toggleShowSearch.checked = settings.showSearch !== false;
   if (domSettings.cardOpenMode) domSettings.cardOpenMode.value = settings.cardOpenMode || 'current';
+  var cmt = settings.cardsMarginTop || 0;
+  if (domSettings.cardsMarginTop) domSettings.cardsMarginTop.value = cmt;
+  if (domSettings.cardsTopVal) domSettings.cardsTopVal.textContent = cmt + 'px';
   if (domSettings.groupPosition) domSettings.groupPosition.value = settings.groupPosition || 'left';
   if (domSettings.groupOffset) domSettings.groupOffset.value = settings.groupOffset || 16;
   if (domSettings.groupOffsetVal) domSettings.groupOffsetVal.textContent = (settings.groupOffset || 16) + 'px';
@@ -175,6 +180,7 @@ function applyAllSettings(settings) {
   applyAddButtonVisibility(settings);
   applySearchSectionVisibility(settings);
   applySearchPosition(settings);
+  applyCardsMarginTop(settings);
   applyGroupPosition(settings);
   applyDashboardLayout(settings);
   if (typeof renderGroupDots === 'function') renderGroupDots();
@@ -297,6 +303,11 @@ function applySearchPosition(settings) {
   document.documentElement.style.setProperty('--search-gap', gap);
 }
 
+/** 卡片距顶 */
+function applyCardsMarginTop(settings) {
+  document.documentElement.style.setProperty('--cards-top', (settings.cardsMarginTop || 0) + 'px');
+}
+
 /** 分组指示器位置 */
 function applyGroupPosition(settings) {
   var el = document.getElementById('group-indicator');
@@ -377,6 +388,7 @@ function collectSettingsFromForm() {
     bingAutoRefresh: domSettings.bingAutoRefresh ? domSettings.bingAutoRefresh.checked : true,
     bingRefreshMin: domSettings.bingRefresh ? parseInt(domSettings.bingRefresh.value, 10) * 60 : 360,
     cardOpenMode:  domSettings.cardOpenMode ? domSettings.cardOpenMode.value : 'current',
+    cardsMarginTop: domSettings.cardsMarginTop ? parseInt(domSettings.cardsMarginTop.value, 10) : 0,
     // 外观数据由 appearance.js 的 collectAppearanceForm 收集并合并
     ...collectAppearanceForm(domSettings)
   };
@@ -425,9 +437,13 @@ function bindSettingsEvents() {
       function onUp() {
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
+        document.removeEventListener('visibilitychange', onVis);
       }
+      function onVis() { if (document.hidden) onUp(); }
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
+      // BUG-015: Alt+Tab 安全网，防止 onMove 永久泄漏
+      document.addEventListener('visibilitychange', onVis);
       e.preventDefault();
     });
   }
@@ -535,6 +551,24 @@ function bindSettingsEvents() {
     domSettings.searchMarginBottom.addEventListener('change', onSettingChanged);
   }
 
+  // 搜索栏开关联动：关闭时禁用位置滑块
+  function _syncSearchSliders() {
+    var on = domSettings.toggleShowSearch.checked;
+    if (domSettings.searchMarginTop) domSettings.searchMarginTop.disabled = !on;
+    if (domSettings.searchMarginBottom) domSettings.searchMarginBottom.disabled = !on;
+  }
+  domSettings.toggleShowSearch.addEventListener('change', _syncSearchSliders);
+  _syncSearchSliders();
+
+  // 卡片距顶滑块
+  if (domSettings.cardsMarginTop && domSettings.cardsTopVal) {
+    domSettings.cardsMarginTop.addEventListener('input', function () {
+      domSettings.cardsTopVal.textContent = this.value + 'px';
+      document.documentElement.style.setProperty('--cards-top', this.value + 'px');
+    });
+    domSettings.cardsMarginTop.addEventListener('change', onSettingChanged);
+  }
+
   // 分组指示器边距滑块
   if (domSettings.groupOffset && domSettings.groupOffsetVal) {
     domSettings.groupOffset.addEventListener('input', function () {
@@ -629,16 +663,18 @@ function bindSettingsEvents() {
     domSettings.weatherKey,
     domSettings.wallpaperUrl,
     domSettings.bingRegion,
-    domSettings.bingRegion,
     domSettings.groupPosition,
-    domSettings.groupNameMode
+    domSettings.groupNameMode,
+    domSettings.clockFormat,
+    domSettings.dashboardLayout,
+    domSettings.lunarStyle
   ];
 
   formElements.forEach((el) => {
     el.addEventListener('change', onSettingChanged);
   });
 
-  [domSettings.toggleClock, domSettings.toggleLunar, domSettings.toggleWeather, domSettings.toggleAddBtn, domSettings.toggleCardTitle, domSettings.toggleShowVisitCount, domSettings.toggleConfirmDelete, domSettings.toggleShowGroupIndicator, domSettings.bingUHD, domSettings.bingAutoRefresh, domSettings.toggleShowSearch, domSettings.toggleClockSeconds].forEach((el) => {
+  [domSettings.toggleClock, domSettings.toggleLunar, domSettings.toggleWeather, domSettings.toggleAddBtn, domSettings.toggleCardTitle, domSettings.toggleShowVisitCount, domSettings.togglePureTextCards, domSettings.toggleConfirmDelete, domSettings.toggleShowGroupIndicator, domSettings.bingUHD, domSettings.bingAutoRefresh, domSettings.toggleShowSearch, domSettings.toggleClockSeconds].forEach((el) => {
     if (!el) return;
     el.addEventListener('change', onSettingChanged);
   });

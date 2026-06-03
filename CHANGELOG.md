@@ -2,6 +2,40 @@
 
 ---
 
+## v1.1.1 (2026-06-03)
+
+### 🛡️ 安全加固
+- 移除 `host_permissions` 中 `http://*/*` 明文 HTTP 权限
+- 自定义搜索引擎 URL 输入时强制校验 `https://` + `{q}` 占位符
+
+### 🐛 缺陷修复
+- **修复**（cards.js + style.css）：`+` 添加按钮缺少 `.card-wrapper` 包裹，未适配 v1.1.0 的 28px 信息栏高度，导致 Grid 中偏上不对齐
+- **UX**（settings.js）：搜索栏关闭时自动禁用「搜索边距」「搜索卡距」滑块并灰化
+- **新增**（外观）：卡片距顶滑块（4–600px），控制卡片网格与页面顶部的距离
+- **修复**（groups.js）：分组圆点右键菜单始终不显示——`contextmenu` 事件缺少 `stopPropagation`，被 `document` 空白右键覆盖
+- **修复**（style.css）：极简卡片信息栏开启时色块顶部改为直角（`:has(.card-top-bar)`），消除信息栏圆角与色块圆角视觉冲突
+- **功能**（lunar.js）：农历「显示样式」设置此前从未生效——`updateLunarDisplay` 已支持双行/单行切换
+- **内存**（backup.js）：导入 Zip 时逐张释放解压数据，避免全量驻留内存导致 OOM
+- **内存**（backup.js）：导入完成后自动清理 IndexedDB 孤儿图片
+- **内存**（main.js）：修复 hidden 状态下重复注册 visibilitychange 监听器
+- **内存**（dragdrop.js）：Alt+Tab 时强制清理拖拽状态，防止滚轮永久失效
+- **内存**（dragdrop.js）：预缓存卡片中心坐标，消除 mousemove 每帧 `getBoundingClientRect` 强制重排
+- **性能**（appearance.js）：`updateGridColumns` 增加 rAF 节流，避免 input 事件每帧 Grid 重布局
+- **性能**（cards.js）：`loadLocalCardImages` 改为 `for...of` 串行加载，消除 IndexedDB 并发风暴
+- **性能**（settings.js + appearance.js）：修复双重 `change` 事件绑定导致每次设置变更执行两遍 save+render
+- **性能**（weather.js）：`setWeatherCache` 直接返回 meta，消除冗余 IndexedDB 读取
+- **渲染**（main.js）：`setLocked` silent 模式不再触发 `renderSpeeddials`，消除 onChanged 双次渲染
+- **渲染**（settings.js）：面板拖拽增加 visibilitychange 安全网，防止 mouseup 丢失后持续 DOM 写入
+- **功能**（background.js）：右键添加卡片补全 `visitCount`/`createdAt` 字段，ID 统一为 36 进制+随机后缀
+- **功能**（weather.js）：修复 OpenWeatherMap 图标永远显示 `?` 的问题（新增 OWM→WMO 映射表）
+- **功能**（groups.js）：修复分组管理器中点击名称输入框编辑时意外切换分组
+- **功能**（groups.js）：修复新建分组对话框关闭后管理器提前重开的竞态
+- **功能**（groups.js）：`switchGroup` 增加 `await` 确保存储写入完成
+- **代码质量**（wallpaper.js）：`collectGarbage` → `collectCardImageGarbage`，名实相符
+- **代码质量**（wallpaper.js）：`openImgDB` 增加连接单例缓存
+- **代码质量**（background.js）：`stringToColor` 添加同步警告注释
+- **代码质量**（contextmenu.js）：moveToGroup 悬停绑定移至 `initContextMenu`，消除匿名函数重建
+
 ## v1.1.0 (2026-06-03)
 
 ### 🧹 精简
@@ -20,7 +54,7 @@
 - 仅保留背景壁纸 + 壁纸导航 + 设置按钮
 - 再双击恢复，Toast 提示状态切换
 
-### � 界面一致性调整
+### 🎨 界面一致性调整
 - 设置面板下拉选择器（主题模式/排序/打开方式等）统一改为标签+控件同行
 - 滑块控件统一改为标签+数值徽章+滑条同行，滑条等宽、徽章等宽(56px)
 - 外观颜色选择器改为正方形色块(34px)，标签色块同行
@@ -38,7 +72,7 @@
 ### 📂 导入预览
 - Zip 导入前展示摘要：分组数、卡片数、缓存图片数、导出时间
 - 用户确认后才执行实际写入，防止误覆盖
-### �🎯 信息栏布局
+### 🎯 信息栏布局
 - 标题文字绝对居中（不受计数宽度影响）
 - 访问计数固定最右侧
 

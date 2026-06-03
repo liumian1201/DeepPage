@@ -62,8 +62,8 @@ async function init() {
   if (typeof migrateCardIcons === 'function') await migrateCardIcons();
   // v1.0.9: 为旧卡片补全 visitCount / createdAt 字段
   if (typeof migrateCardFields === 'function') migrateCardFields();
-  // v1.1.0+: 清理 IndexedDB 无主图片
-  if (typeof collectGarbage === 'function') collectGarbage();
+  // v1.1.0+: 清理 IndexedDB 无主卡片图标
+  if (typeof collectCardImageGarbage === 'function') collectCardImageGarbage();
 
   renderSpeeddials();
   bindMainEvents();
@@ -103,18 +103,22 @@ async function init() {
 /* ==================== 外部变更监听（v1.0.7 防抖+隐身跳过） ==================== */
 var _savingGroups = false;
 var _renderDebounce = null;
+var _visPending = false;  // BUG-005: 防止 hidden 状态下重复注册 visibilitychange
 
 function _debouncedRefresh() {
   clearTimeout(_renderDebounce);
   _renderDebounce = setTimeout(function () {
     if (document.hidden) {
+      if (_visPending) return;
+      _visPending = true;
       document.addEventListener('visibilitychange', function onVis() {
         if (!document.hidden) {
+          _visPending = false;
           renderSpeeddials();
           renderGroupDots();
           document.removeEventListener('visibilitychange', onVis);
         }
-      }, { once: false });
+      });
     } else {
       renderSpeeddials();
       renderGroupDots();
@@ -391,8 +395,9 @@ function setLocked(state, silent) {
     currentSettings.isLocked = state;
     saveSettings(currentSettings);
   }
-  renderSpeeddials();
+  // BUG-008: silent 模式跳过渲染，由 _debouncedRefresh 统一控制
   if (!silent) {
+    renderSpeeddials();
     showToast(state ? '🔒 界面已锁定（只读模式）' : '🔓 界面已解锁', 'info');
   }
 }

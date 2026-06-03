@@ -112,8 +112,14 @@ function renderSearchEngineList() {
         showToast('请填写名称和搜索 URL', 'warning');
         return;
       }
+      // BUG-020: 输入时校验 URL 格式
+      var urlVal = urlEl.value.trim();
+      if (!/^https:\/\/.+\{q\}/i.test(urlVal)) {
+        showToast('URL 必须以 https:// 开头且包含 {q} 占位符', 'warning');
+        return;
+      }
       var id = 'custom_' + Date.now().toString(36);
-      engines.push({ id: id, name: nameEl.value.trim(), url: urlEl.value.trim(), enabled: true });
+      engines.push({ id: id, name: nameEl.value.trim(), url: urlVal, enabled: true });
       saveSettings(currentSettings);
       renderSearchEngineList();
       updateSearchEngineSelect();

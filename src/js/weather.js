@@ -42,6 +42,8 @@ var WEATHER_APIS = {
 var HEFENG_ICONS = { '100': '\u2600\uFE0F', '101': '\uD83C\uDF24\uFE0F', '102': '\u26C5', '103': '\uD83C\uDF25\uFE0F', '104': '\u2601\uFE0F', '300': '\uD83C\uDF26\uFE0F', '400': '\uD83C\uDF28\uFE0F', '500': '\uD83C\uDF2B\uFE0F' };
 var WMO_ICONS = { 0: '\u2600\uFE0F', 1: '\uD83C\uDF24\uFE0F', 2: '\u26C5', 3: '\u2601\uFE0F', 45: '\uD83C\uDF2B\uFE0F', 48: '\uD83C\uDF2B\uFE0F', 51: '\uD83C\uDF26\uFE0F', 53: '\uD83C\uDF26\uFE0F', 55: '\uD83C\uDF26\uFE0F', 56: '\uD83C\uDF26\uFE0F', 57: '\uD83C\uDF26\uFE0F', 61: '\uD83C\uDF27\uFE0F', 63: '\uD83C\uDF27\uFE0F', 65: '\uD83C\uDF27\uFE0F', 66: '\uD83C\uDF27\uFE0F', 67: '\uD83C\uDF27\uFE0F', 71: '\uD83C\uDF28\uFE0F', 73: '\uD83C\uDF28\uFE0F', 75: '\uD83C\uDF28\uFE0F', 77: '\uD83C\uDF28\uFE0F', 80: '\uD83C\uDF27\uFE0F', 81: '\uD83C\uDF27\uFE0F', 82: '\uD83C\uDF27\uFE0F', 85: '\uD83C\uDF28\uFE0F', 86: '\uD83C\uDF28\uFE0F', 95: '\u26C8\uFE0F', 96: '\u26C8\uFE0F', 99: '\u26C8\uFE0F' };
 var WMO_TEXT = { 0: '晴', 1: '大部晴', 2: '多云', 3: '阴', 45: '雾', 51: '毛毛雨', 53: '毛毛雨', 55: '毛毛雨', 56: '冻毛毛雨', 57: '冻毛毛雨', 61: '小雨', 63: '中雨', 65: '大雨', 66: '冻雨', 67: '冻雨', 71: '小雪', 73: '中雪', 75: '大雪', 77: '雪粒', 80: '阵雨', 81: '中阵雨', 82: '大阵雨', 85: '小雪阵', 86: '大雪阵', 95: '雷暴', 96: '雷暴+冰雹', 99: '强雷暴+冰雹' };
+// BUG-011: OpenWeatherMap 天气码 → WMO 标准码映射
+var OWM_TO_WMO = { 200:95, 201:95, 202:95, 210:95, 211:95, 212:95, 221:95, 230:95, 231:95, 232:95, 300:51, 301:51, 302:53, 310:51, 311:53, 312:55, 313:55, 314:55, 321:55, 500:61, 501:63, 502:65, 503:65, 504:65, 511:66, 520:80, 521:81, 522:82, 531:82, 600:71, 601:73, 602:75, 611:77, 612:77, 613:77, 615:71, 616:73, 620:71, 621:73, 622:75, 701:45, 711:45, 721:45, 731:45, 741:45, 751:45, 761:45, 762:45, 771:45, 781:45, 800:0, 801:1, 802:2, 803:3, 804:3 };
 
 // ---- 缓存系统 ----
 var WEATHER_CACHE_KEY = 'weather_data_cache';
@@ -57,9 +59,11 @@ async function getWeatherCache() {
 
 async function setWeatherCache(data, type, city) {
   var meta = { type: type, city: city, timestamp: Date.now(), timeStr: new Date().toLocaleTimeString('zh-CN') };
-  return new Promise(function (resolve) {
+  await new Promise(function (resolve) {
     chrome.storage.local.set({ [WEATHER_CACHE_KEY]: data, [WEATHER_CACHE_META]: meta }, resolve);
   });
+  // BUG-012: 返回 meta，调用方无需再读 IndexedDB
+  return meta;
 }
 
 function getCacheMin(settings) {
@@ -100,8 +104,8 @@ async function fetchAndDisplayWeather(settings) {
     weatherStatus('天气加载中...');
     try {
       var data = await fetchOpenMeteoWeather(settings);
-      await setWeatherCache(data, type, settings.weatherCity || data.city || '');
-      renderWeather(data, type, await getWeatherCache().then(function (c) { return c.meta; }));
+      var weatherMeta = await setWeatherCache(data, type, settings.weatherCity || data.city || '');
+      renderWeather(data, type, weatherMeta);
     } catch (err) {
       console.error('Open-Meteo error:', err);
       if (cache.data) { renderWeather(cache.data, type, cache.meta); }
@@ -233,7 +237,12 @@ async function detectCityByIP(key) {
 function renderWeather(data, type, meta) {
   var icon = '?';
   if (data.source === 'openmeteo') { icon = WMO_ICONS[parseInt(data.icon)] || '?'; }
-  else if (String(data.icon).startsWith('owm_')) { icon = '?'; }
+  else if (String(data.icon).startsWith('owm_')) {
+    // BUG-011: 将 OWM 天气码映射到 WMO 标准码再查图标
+    var owmCode = parseInt(String(data.icon).replace('owm_', ''), 10);
+    var wmoCode = OWM_TO_WMO[owmCode];
+    icon = wmoCode !== undefined ? (WMO_ICONS[wmoCode] || '?') : '?';
+  }
   else { icon = HEFENG_ICONS[data.icon] || '?'; }
   var temp = data.temp + '\u00B0C', text = data.text || '', city = data.city || '';
 

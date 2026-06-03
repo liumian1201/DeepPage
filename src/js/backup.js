@@ -144,6 +144,8 @@ function importAll() {
                 tx.onerror = function () { reject(tx.error); };
               });
               imported++;
+              // BUG-001: 写入后立即释放解压数据，降低内存峰值
+              unzipped[img.key] = undefined;
             } catch (e) { console.warn('导入图片失败:', img.key, e); }
           }
         }
@@ -161,6 +163,9 @@ function importAll() {
             });
           }
         }
+
+        // BUG-002: 导入后清理旧卡片残留的孤儿图片
+        if (typeof collectCardImageGarbage === 'function') await collectCardImageGarbage();
 
         if (hasImages) {
           showToast('全部导入成功（配置 + ' + imported + '/' + manifest.images.length + ' 张图片），即将刷新...', 'success');

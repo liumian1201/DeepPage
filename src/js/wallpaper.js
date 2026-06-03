@@ -5,15 +5,22 @@
 
 var BING_WALLPAPERS_KEY = 'bing_wallpapers_cache';
 var IMG_DB = 'DeepPageImages';
+var _imgDB = null;  // BUG-004: IndexedDB 连接单例缓存
 
 /* ========== IndexedDB 通用图片存储 ========== */
 function openImgDB() {
+  if (_imgDB) return Promise.resolve(_imgDB);
   return new Promise(function (resolve, reject) {
     var req = indexedDB.open(IMG_DB, 1);
     req.onupgradeneeded = function () {
       if (!req.result.objectStoreNames.contains('images')) req.result.createObjectStore('images');
     };
-    req.onsuccess = function () { resolve(req.result); };
+    req.onsuccess = function () {
+      _imgDB = req.result;
+      _imgDB.onclose = function () { _imgDB = null; };
+      _imgDB.onversionchange = function () { _imgDB.close(); _imgDB = null; };
+      resolve(_imgDB);
+    };
     req.onerror = function () { reject(req.error); };
   });
 }
@@ -104,10 +111,10 @@ async function deleteCardIcon(cardId) {
 /* ========== IndexedDB 垃圾回收 (GC) ========== */
 
 /**
- * 清理 IndexedDB 中无主图片（已删除卡片/分组的残留图片）
+ * 清理 IndexedDB 中无主卡片图标（已删除卡片/分组的残留 cardimg_* 图片）
  * 静默执行，不影响用户操作
  */
-async function collectGarbage() {
+async function collectCardImageGarbage() {
   try {
     // 收集所有有效卡片的 image 引用
     var validKeys = new Set();

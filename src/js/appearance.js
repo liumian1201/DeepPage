@@ -18,15 +18,21 @@ function applyAppearance(settings) {
 }
 
 function updateGridColumns(cols) {
-  var grid = document.getElementById('speeddial-grid');
-  if (!grid) return;
-  if (cols === undefined) {
-    var s = document.getElementById('setting-columns-slider');
-    cols = s ? parseInt(s.value, 10) : 5;
-  }
-  var ws = document.getElementById('setting-card-width');
-  var w = ws ? ws.value : 270;
-  grid.style.gridTemplateColumns = 'repeat(' + cols + ', ' + w + 'px)';
+  // BUG-016: rAF 节流，避免 input 事件每帧触发 Grid layout 重算
+  if (updateGridColumns._pending) return;
+  updateGridColumns._pending = true;
+  requestAnimationFrame(function () {
+    updateGridColumns._pending = false;
+    var grid = document.getElementById('speeddial-grid');
+    if (!grid) return;
+    if (cols === undefined) {
+      var s = document.getElementById('setting-columns-slider');
+      cols = s ? parseInt(s.value, 10) : 5;
+    }
+    var ws = document.getElementById('setting-card-width');
+    var w = ws ? ws.value : 270;
+    grid.style.gridTemplateColumns = 'repeat(' + cols + ', ' + w + 'px)';
+  });
 }
 
 function bindAppearancePreview(dom, onChanged) {
@@ -116,10 +122,10 @@ function bindAppearancePreview(dom, onChanged) {
   });
 
   if (onChanged) {
-    Object.values(dom).forEach(function (el) {
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'SELECT')) {
-        el.addEventListener('change', onChanged);
-      }
+    // BUG-014: 仅外观专属控件绑定 onChanged，避免与 bindSettingsEvents 双重绑定
+    var appearanceEls = [dom.bgColor, dom.cardBgColor, dom.cardTextColor, dom.cardFontSize, dom.cardWidth, dom.cardHeight, dom.columnsSlider, dom.cardBorderRadius];
+    appearanceEls.forEach(function (el) {
+      if (el) el.addEventListener('change', onChanged);
     });
   }
 }

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DeepPage",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "基于 FVD Speed Dial 风格的模块化、可定制的极简高效起始页",
   "chrome_url_overrides": {
     "newtab": "index.html"
@@ -17,8 +17,7 @@
     "https://api.open-meteo.com/*",
     "https://geocoding-api.open-meteo.com/*",
     "https://api.openweathermap.org/*",
-    "https://*/*",
-    "http://*/*"
+    "https://*/*"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' http: https: data: blob:; connect-src http: https:"
