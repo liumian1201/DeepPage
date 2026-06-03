@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Manifest-V3-blue?logo=googlechrome" alt="Manifest V3">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/Version-1.0.4-brightgreen" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.0.5-brightgreen" alt="Version">
   <img src="https://img.shields.io/badge/PRs-Welcome-orange" alt="PRs Welcome">
 </p>
 
@@ -52,11 +52,16 @@
 - 配置 JSON + 图片库 JSON 分体导出/导入 + 一键重置
 - 卡片图标本地缓存（SW 代理下载，断网可用）
 
+### �️ 浏览器右键菜单
+- 在**任意网页**右键 → 「➕ 添加到 DeepPage」→ 选择分组
+- 自动提取页面 URL 和标题生成卡片
+- 右键菜单分组列表动态更新（含卡片数量统计）
+
 ### 🔒 更多细节
 - 界面锁定（防误操作）+ 红白闪烁警告动画
 - 设置面板可拖拽移动
 - Toast 通知系统 + 键盘快捷键
-- 右键上下文菜单（卡片/空白/分组）
+- 右键上下文菜单（卡片/空白/分组）+ 移动到分组子菜单
 
 ---
 
@@ -99,7 +104,7 @@ cd DeepPage
 DeepPage/
 ├── src/                    ← 开发源码目录
 │   ├── manifest.json       # Manifest V3 配置
-│   ├── background.js       # Service Worker（天气+图片代理）
+│   ├── background.js       # Service Worker（天气+图片代理+右键菜单）
 │   ├── index.html          # 新标签页 + 设置面板 + 对话框
 │   ├── css/
 │   │   └── style.css       # 全局样式 + CSS 变量体系 + 双主题

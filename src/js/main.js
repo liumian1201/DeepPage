@@ -77,6 +77,30 @@ async function init() {
   renderGroupDots();
 }
 
+/* ==================== 外部变更监听（v1.0.5） ==================== */
+var _savingGroups = false; // 防止本页保存时重复渲染
+chrome.storage.onChanged.addListener(function (changes, areaName) {
+  if (areaName !== 'sync') return;
+  // 分组数据被外部修改（如右键菜单添加卡片），自动刷新界面
+  if (changes.groups && !_savingGroups) {
+    var newGroups = changes.groups.newValue;
+    if (newGroups && Array.isArray(newGroups)) {
+      groups = newGroups;
+      speeddials = (groups[activeGroupIndex] && groups[activeGroupIndex].cards)
+        ? groups[activeGroupIndex].cards : [];
+      renderSpeeddials();
+      renderGroupDots();
+    }
+  }
+  // 锁定状态变更
+  if (changes.settings && changes.settings.newValue) {
+    var newLocked = changes.settings.newValue.isLocked;
+    if (typeof newLocked === 'boolean') {
+      setLocked(newLocked, true);
+    }
+  }
+});
+
 /* ==================== 主事件绑定 ==================== */
 function bindMainEvents() {
   domMain.grid.addEventListener('click', (e) => {

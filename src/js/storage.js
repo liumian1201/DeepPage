@@ -131,7 +131,12 @@ async function getGroups() {
 }
 
 async function saveGroups(groups) {
-  return saveToStorage(STORAGE_KEYS.GROUPS, groups);
+  // v1.0.5: 设置标记防止本页 onChanged 重复渲染，同时通知 SW 刷新右键菜单
+  if (typeof _savingGroups !== 'undefined') _savingGroups = true;
+  await saveToStorage(STORAGE_KEYS.GROUPS, groups);
+  if (typeof _savingGroups !== 'undefined') _savingGroups = false;
+  // 通知 Service Worker 刷新右键菜单
+  try { chrome.runtime.sendMessage({ type: 'refresh-context-menus' }); } catch (e) { /* SW 可能未运行 */ }
 }
 
 async function getActiveGroup() {
