@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Manifest-V3-blue?logo=googlechrome" alt="Manifest V3">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/Version-1.0.6-brightgreen" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.0.7-brightgreen" alt="Version">
   <img src="https://img.shields.io/badge/PRs-Welcome-orange" alt="PRs Welcome">
 </p>
 
@@ -52,7 +52,7 @@
 - 一键全部导出/导入：fflate 二进制 zip 打包（`_DeepPage_Backup.zip`），兼容旧版 .json
 - 卡片图标本地缓存（SW 代理下载，断网可用）
 
-### �️ 浏览器右键菜单
+### 🖱️ 浏览器右键菜单
 - 在**任意网页**右键 → 「➕ 添加到 DeepPage」→ 选择分组
 - 自动提取页面 URL 和标题生成卡片
 - 右键菜单分组列表动态更新（含卡片数量统计）
@@ -138,6 +138,8 @@ DeepPage/
 ├── CHANGELOG.md            ← 更新日志
 ├── LICENSE                 ← MIT 许可证
 ├── PRIVACY_POLICY.md       ← 隐私政策
+├── tools/
+│   └── fvd-to-deeppage.html  ← FVD Speed Dial 迁移工具
 └── README.md               ← 本文件
 ```
 
@@ -151,6 +153,19 @@ DeepPage/
 | `Ctrl + ,` | 打开/关闭设置面板 |
 | `Ctrl + N` | 新建卡片 |
 | `ESC` | 关闭弹窗/面板 |
+
+---
+
+## 🔀 从 FVD Speed Dial 迁移
+
+如果你正在从 FVD Speed Dial 迁移到 DeepPage：
+
+1. 在 FVD 设置中导出数据（JSON 格式）
+2. 打开 `tools/fvd-to-deeppage.html`
+3. 粘贴 FVD JSON → 解析预览 → 生成 `_DeepPage_Backup.zip`
+4. DeepPage → 设置 → 数据 → 导入数据 → 选择该 .zip 文件
+
+> 可迁移：网址、标题、分组结构。FVD 内部截图无法跨扩展读取，DeepPage 会自动用 favicon 替代。
 
 ---
 

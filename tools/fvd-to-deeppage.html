@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FVD → DeepPage 数据转换器</title>
+<script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: system-ui, sans-serif; background: #f5f5f5; color: #333; padding: 24px; max-width: 800px; margin: 0 auto; }
+h1 { font-size: 20px; margin-bottom: 16px; }
+.step { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.step h2 { font-size: 14px; color: #666; margin-bottom: 12px; text-transform: uppercase; letter-spacing: .5px; }
+textarea { width: 100%; height: 200px; border: 1px solid #ddd; border-radius: 6px; padding: 12px; font-size: 13px; font-family: monospace; resize: vertical; }
+button { padding: 10px 24px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: 600; }
+.btn-primary { background: #2563eb; color: #fff; }
+.btn-primary:hover { background: #1d4ed8; }
+.btn-success { background: #16a34a; color: #fff; }
+.btn-success:hover { background: #15803d; }
+.btn-row { display: flex; gap: 8px; margin-top: 12px; }
+.preview { margin-top: 12px; }
+.group-block { margin-bottom: 12px; }
+.group-name { font-weight: 700; font-size: 14px; margin-bottom: 4px; color: #2563eb; }
+.card-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.card-badge { background: #e5e7eb; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+.summary { font-size: 13px; color: #666; margin-top: 8px; }
+.hint { font-size: 12px; color: #999; margin-top: 8px; }
+.warn { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px; padding: 10px 14px; font-size: 13px; margin-top: 12px; }
+.hidden { display: none; }
+</style>
+</head>
+<body>
+
+<h1>🔀 FVD Speed Dial → DeepPage 转换器</h1>
+
+<div class="step">
+  <h2>① 粘贴 FVD 导出 JSON</h2>
+  <p class="hint">在 FVD 设置 → 导出数据，复制全部 JSON 粘贴到下方</p>
+  <textarea id="fvd-input" placeholder="粘贴 FVD JSON 数据..."></textarea>
+  <div class="btn-row">
+    <button class="btn-primary" onclick="parseFVD()">解析预览</button>
+  </div>
+</div>
+
+<div id="preview-section" class="step hidden">
+  <h2>② 预览转换结果</h2>
+  <div id="preview-content" class="preview"></div>
+  <div id="preview-summary" class="summary"></div>
+  <div class="btn-row">
+    <button class="btn-success" onclick="generateZip()">⬇ 生成 DeepPage 备份文件 (.zip)</button>
+  </div>
+  <div id="msg-import" class="hint hidden" style="margin-top:8px">
+    ✅ 下载后：打开 DeepPage → 设置 → 数据 → 导入数据 → 选择该 .zip 文件
+  </div>
+</div>
+
+<div id="error-section" class="hidden">
+  <div id="error-msg" class="warn"></div>
+</div>
+
+<script>
+var _converted = null;
+
+function parseFVD() {
+  var el = document.getElementById('fvd-input');
+  var err = document.getElementById('error-section');
+  var errMsg = document.getElementById('error-msg');
+  var preview = document.getElementById('preview-section');
+  err.classList.add('hidden');
+  preview.classList.add('hidden');
+
+  try {
+    var raw = JSON.parse(el.value.trim());
+  } catch (e) {
+    showError('JSON 解析失败：' + e.message);
+    return;
+  }
+
+  if (!raw.db || !raw.db.dials) {
+    showError('这不是有效的 FVD 导出格式（缺少 db.dials）');
+    return;
+  }
+
+  var dials = raw.db.dials || [];
+  var groups = raw.db.groups || [];
+
+  // 构建 group_id → name 映射
+  var groupMap = {};
+  groups.forEach(function (g) {
+    groupMap[g.id] = g.name || ('分组 ' + g.id);
+  });
+
+  // 按 group_id 分组
+  var dpGroups = {};
+  dials.forEach(function (d) {
+    var gid = d.group_id;
+    if (!dpGroups[gid]) dpGroups[gid] = [];
+    var name = d.title || d.auto_title || '';
+    name = name.trim();
+    if (!name && d.url) {
+      try { name = new URL(d.url).hostname.replace('www.', ''); } catch (e) {}
+    }
+
+    var image = null;
+    if (d.thumb_source_type === 'url' && d.thumb_url && /^https?:\/\//i.test(d.thumb_url)) {
+      image = d.thumb_url;
+    }
+
+    dpGroups[gid].push({
+      name: name || d.url,
+      url: d.url,
+      image: image
+    });
+  });
+
+  // 转为 DeepPage 分组格式，保持 position 排序
+  var dpGroupList = [];
+  Object.keys(dpGroups).forEach(function (gid) {
+    var name = groupMap[gid] || ('分组 ' + gid);
+    var cards = dpGroups[gid].map(function (c, i) {
+      return {
+        id: 'fvd_' + Date.now().toString(36) + '_' + i,
+        name: c.name,
+        url: c.url,
+        image: c.image || '',
+        color: stringToColor(c.url)
+      };
+    });
+    dpGroupList.push({ name: name, cards: cards });
+  });
+
+  if (dpGroupList.length === 0) {
+    showError('没有转换出任何卡片');
+    return;
+  }
+
+  _converted = {
+    groups: dpGroupList,
+    activeGroup: 0,
+    settings: getDefaultSettings()
+  };
+
+  // 渲染预览
+  var previewHTML = '';
+  var totalCards = 0;
+  dpGroupList.forEach(function (g) {
+    previewHTML += '<div class="group-block"><div class="group-name">📂 ' + escapeHtml(g.name) + ' (' + g.cards.length + ' 个卡片)</div><div class="card-list">';
+    g.cards.slice(0, 5).forEach(function (c) {
+      previewHTML += '<span class="card-badge">' + escapeHtml(c.name) + '</span>';
+    });
+    if (g.cards.length > 5) previewHTML += '<span class="card-badge">... +' + (g.cards.length - 5) + '</span>';
+    previewHTML += '</div></div>';
+    totalCards += g.cards.length;
+  });
+
+  document.getElementById('preview-content').innerHTML = previewHTML;
+  document.getElementById('preview-summary').textContent = '共 ' + dpGroupList.length + ' 个分组，' + totalCards + ' 个卡片';
+  preview.classList.remove('hidden');
+}
+
+async function generateZip() {
+  if (!_converted) return;
+
+  var config = {
+    groups: _converted.groups,
+    activeGroup: _converted.activeGroup,
+    settings: _converted.settings
+  };
+
+  var zipFiles = {};
+  zipFiles['config.json'] = fflate.strToU8(JSON.stringify(config));
+  zipFiles['manifest.json'] = fflate.strToU8(JSON.stringify({
+    version: 3, type: 'backup',
+    hasConfig: true, imageCount: 0, images: []
+  }));
+
+  var zipU8 = fflate.zipSync(zipFiles, { level: 6 });
+  var blob = new Blob([zipU8], { type: 'application/zip' });
+
+  var now = new Date();
+  var ts = [now.getFullYear(), pad(now.getMonth() + 1), pad(now.getDate()),
+    '_', pad(now.getHours()), pad(now.getMinutes()), pad(now.getSeconds())].join('');
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = ts + '_DeepPage_Backup.zip';
+  a.click();
+  URL.revokeObjectURL(a.href);
+
+  document.getElementById('msg-import').classList.remove('hidden');
+}
+
+function showError(msg) {
+  var err = document.getElementById('error-section');
+  var errMsg = document.getElementById('error-msg');
+  errMsg.textContent = msg;
+  err.classList.remove('hidden');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function pad(n) { return String(n).padStart(2, '0'); }
+
+function stringToColor(str) {
+  var hash = 0;
+  for (var i = 0; i < str.length; i++) { hash = str.charCodeAt(i) + ((hash << 5) - hash); }
+  var h = Math.abs(hash) % 360;
+  var s = 55 + (Math.abs(hash) % 25);
+  var l = 35 + (Math.abs(hash >> 8) % 20);
+  return 'hsl(' + h + ', ' + s + '%, ' + l + '%)';
+}
+
+function getDefaultSettings() {
+  return {
+    columns: 5, showClock: true, showLunar: true, showWeather: true,
+    theme: 'light', showAddButton: true, showCardIcon: true, showCardTitle: true,
+    pureTextCards: false, weatherType: 'openmeteo', weatherCity: '',
+    weatherRefreshMin: 15, wallpaperMode: 'bing', wallpaperUrl: '',
+    showSearch: true, searchTop: 60, searchGap: 48, groupPosition: 'left',
+    groupOffset: 16, showGroupName: 'all', showGroupIndicator: true,
+    cardOpenMode: 'current', confirmDelete: true, dashboardLayout: 'row',
+    dashOffsetX: 0, dashOffsetY: 0, dashWidth: 200, dashHeight: 60, dashGap: 12,
+    clock24h: true, clockShowSeconds: true, lunarDoubleLine: true
+  };
+}
+</script>
+
+</body>
+</html>
