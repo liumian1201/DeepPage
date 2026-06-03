@@ -81,7 +81,7 @@
 
 ### 方式二：拖拽安装 .crx 文件
 
-1. 下载最新 [Release](https://github.com/liumian1201/DeepPage/releases) 中的 `DeepPage_Release_VX.X.X.crx`
+1. 下载最新 [Release](https://github.com/liumian1201/DeepPage/releases) 中的 `DeepPage_vX.X.X.crx`
 2. 打开 Chrome，进入 `chrome://extensions/`
 3. 开启右上角 **开发者模式**
 4. 将下载的 `.crx` 文件**直接拖入**浏览器窗口
@@ -90,7 +90,7 @@
 
 ### 方式三：手动加载解压版
 
-1. 下载最新 [Release](https://github.com/liumian1201/DeepPage/releases) 中的 `DeepPage_Release_VX.X.X.zip` 并解压
+1. 下载最新 [Release](https://github.com/liumian1201/DeepPage/releases) 中的 `DeepPage_vX.X.X.zip` 并解压
 2. 打开 Chrome，进入 `chrome://extensions/`
 3. 开启右上角 **开发者模式**
 4. 点击 **加载已解压的扩展程序**
