@@ -31,10 +31,20 @@ function showImportConfirmAsync(msg) {
 
 async function exportAll() {
   try {
-    // 1. 读取配置
+    // 1. 读取配置（sync + local 回退，确保超限数据也被导出）
     var config = await new Promise(function (resolve) {
       chrome.storage.sync.get(null, function (result) { resolve(result); });
     });
+    // 如果 sync 中的分组为空（可能因为超限存在 local），从 local 补充
+    if (!config.groups || (Array.isArray(config.groups) && config.groups.length === 0)) {
+      var localData = await new Promise(function (resolve) {
+        chrome.storage.local.get(['groups', 'activeGroup'], function (result) { resolve(result); });
+      });
+      if (localData.groups && Array.isArray(localData.groups) && localData.groups.length > 0) {
+        config.groups = localData.groups;
+        config.activeGroup = localData.activeGroup;
+      }
+    }
     // 写入导出时间戳，供导入预览使用
     if (config.settings) {
       config.settings._exportTime = new Date().toLocaleString('zh-CN');
@@ -176,10 +186,22 @@ function importAll() {
                   activeGroup: config.activeGroup || 0
                 }, resolve);
               });
-              // settings 小数据仍走 sync
+              // settings 尝试走 sync，失败则回退到 local
+              var settingsSyncFailed = false;
               await new Promise(function (resolve) {
-                chrome.storage.sync.set({ settings: config.settings || {}, groups: [], activeGroup: 0 }, resolve);
+                chrome.storage.sync.set({ settings: config.settings || {}, groups: [], activeGroup: 0 }, function () {
+                  if (chrome.runtime.lastError) {
+                    console.warn('settings sync.set 也失败，回退到 local:', chrome.runtime.lastError.message);
+                    settingsSyncFailed = true;
+                  }
+                  resolve();
+                });
               });
+              if (settingsSyncFailed) {
+                await new Promise(function (resolve) {
+                  chrome.storage.local.set({ settings: config.settings || {} }, resolve);
+                });
+              }
             }
           }
         }
@@ -242,9 +264,18 @@ function importAll() {
             await new Promise(function (resolve) {
               chrome.storage.local.set({ groups: data.groups || [], activeGroup: data.activeGroup || 0 }, resolve);
             });
+            var oldSettingsFailed = false;
             await new Promise(function (resolve) {
-              chrome.storage.sync.set({ settings: data.settings || {}, groups: [], activeGroup: 0 }, resolve);
+              chrome.storage.sync.set({ settings: data.settings || {}, groups: [], activeGroup: 0 }, function () {
+                if (chrome.runtime.lastError) oldSettingsFailed = true;
+                resolve();
+              });
             });
+            if (oldSettingsFailed) {
+              await new Promise(function (resolve) {
+                chrome.storage.local.set({ settings: data.settings || {} }, resolve);
+              });
+            }
             showToast('导入成功（数据量较大，使用本地存储），即将刷新...', 'success');
           } else {
             showToast('配置导入成功，即将刷新...', 'success');
@@ -280,7 +311,9 @@ function resetAll() {
 function doResetAll() {
   var fallback = setTimeout(function () { window.location.reload(); }, 5000);
 
+  // 清理 sync + local（大容量回退数据在 local）
   chrome.storage.sync.clear(function () {
+    chrome.storage.local.clear(function () {
     var req = indexedDB.deleteDatabase('DeepPageImages');
     req.onsuccess = function () {
       clearTimeout(fallback);
@@ -297,7 +330,8 @@ function doResetAll() {
       showToast('配置已重置（图片库被占用），页面将刷新。', 'warning');
       setTimeout(function () { window.location.reload(); }, 600);
     };
-  });
+    }); // local.clear
+  }); // sync.clear
 }
 
 // ==================== 图片库信息 ====================

@@ -329,6 +329,9 @@ function bindConfirmDialogEvents() {
     if (confirmDeleteId) {
       deleteSpeeddialById(confirmDeleteId);
     }
+    if (typeof _pendingDeleteGroup !== 'undefined' && _pendingDeleteGroup >= 0) {
+      if (typeof doDeleteGroup === 'function') doDeleteGroup();
+    }
     closeConfirmDialog();
   });
   domMain.confirmCancel.addEventListener('click', closeConfirmDialog);
@@ -354,6 +357,7 @@ function handleDeleteClick(id) {
 function closeConfirmDialog() {
   if (domMain.confirmDialog) domMain.confirmDialog.classList.add('hidden');
   confirmDeleteId = null;
+  if (typeof _pendingDeleteGroup !== 'undefined') _pendingDeleteGroup = -1;
 }
 
 /* ==================== 分组事件（滚轮切换 + 按钮） ==================== */

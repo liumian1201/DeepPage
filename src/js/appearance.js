@@ -4,11 +4,11 @@
 
 function applyAppearance(settings) {
   var root = document.documentElement;
-  root.style.setProperty('--bg-primary', settings.bgColor || '#f0f2f5');
-  root.style.setProperty('--topbar-bg', settings.bgColor || '#f0f2f5');
-  root.style.setProperty('--bg-card', settings.cardBgColor || '#ffffff');
-  root.style.setProperty('--topbar-text', settings.cardTextColor || '#202124');
-  root.style.setProperty('--text-on-card', settings.cardTextColor || '#202124');
+  // 颜色类：仅在用户自定义时覆盖，否则交由主题 CSS 变量控制
+  if (settings.bgColor) { root.style.setProperty('--bg-primary', settings.bgColor); root.style.setProperty('--topbar-bg', settings.bgColor); }
+  if (settings.cardBgColor) root.style.setProperty('--bg-card', settings.cardBgColor);
+  if (settings.cardTextColor) { root.style.setProperty('--topbar-text', settings.cardTextColor); root.style.setProperty('--text-on-card', settings.cardTextColor); }
+  // 尺寸类：始终应用
   root.style.setProperty('--card-font-size', (settings.cardFontSize || 13) + 'px');
   root.style.setProperty('--card-width', (settings.cardWidth || 270) + 'px');
   root.style.setProperty('--card-height', (settings.cardHeight || 270) + 'px');
@@ -40,10 +40,12 @@ function bindAppearancePreview(dom, onChanged) {
     var el = dom[key]; if (!el) return;
     el.addEventListener('input', function () {
       var m = { bgColor: '--topbar-bg', cardBgColor: '--bg-card', cardTextColor: '--topbar-text' };
-      var defaults = { bgColor: '#f0f2f5', cardBgColor: '#ffffff', cardTextColor: '#202124' };
-      document.documentElement.style.setProperty(m[key], el.value || defaults[key]);
-      if (key === 'cardTextColor') document.documentElement.style.setProperty('--text-on-card', el.value || defaults[key]);
-      if (key === 'bgColor') document.documentElement.style.setProperty('--bg-primary', el.value || defaults[key]);
+      var v = el.value;
+      if (v) {
+        document.documentElement.style.setProperty(m[key], v);
+        if (key === 'cardTextColor') document.documentElement.style.setProperty('--text-on-card', v);
+        if (key === 'bgColor') document.documentElement.style.setProperty('--bg-primary', v);
+      }
     });
   });
 
@@ -96,14 +98,14 @@ function bindAppearancePreview(dom, onChanged) {
   if (resetTopbar) resetTopbar.addEventListener('click', function () {
     var bc = document.getElementById('setting-bg-color');
     var tc = document.getElementById('setting-card-text-color');
-    if (bc) bc.value = '#f0f2f5';
-    if (tc) tc.value = '#202124';
+    if (bc) bc.value = '';
+    if (tc) tc.value = '';
     if (fs) fs.value = 13;
     if (fsv) fsv.textContent = '13px';
-    document.documentElement.style.setProperty('--topbar-bg', '#f0f2f5');
-    document.documentElement.style.setProperty('--bg-primary', '#f0f2f5');
-    document.documentElement.style.setProperty('--topbar-text', '#202124');
-    document.documentElement.style.setProperty('--text-on-card', '#202124');
+    document.documentElement.style.removeProperty('--topbar-bg');
+    document.documentElement.style.removeProperty('--bg-primary');
+    document.documentElement.style.removeProperty('--topbar-text');
+    document.documentElement.style.removeProperty('--text-on-card');
     document.documentElement.style.setProperty('--card-font-size', '13px');
   });
 
@@ -151,10 +153,12 @@ function initAppearance(dom, settings, cb) {
 
 function collectAppearanceForm(dom) {
   var dc = { bgColor: '#f0f2f5', cardBgColor: '#ffffff', cardTextColor: '#202124' };
+  // 未自定义时返回空，避免 fallback 值覆盖主题 CSS 变量
+  function val(el, d) { var v = (el && el.value) || ''; return v === d ? '' : v; }
   return {
-    bgColor: (dom.bgColor && dom.bgColor.value) || dc.bgColor,
-    cardBgColor: (dom.cardBgColor && dom.cardBgColor.value) || dc.cardBgColor,
-    cardTextColor: (dom.cardTextColor && dom.cardTextColor.value) || dc.cardTextColor,
+    bgColor: val(dom.bgColor, dc.bgColor),
+    cardBgColor: val(dom.cardBgColor, dc.cardBgColor),
+    cardTextColor: val(dom.cardTextColor, dc.cardTextColor),
     cardFontSize: dom.cardFontSize ? parseInt(dom.cardFontSize.value, 10) : 13,
     cardWidth: dom.cardWidth ? parseInt(dom.cardWidth.value, 10) : 270,
     cardHeight: dom.cardHeight ? parseInt(dom.cardHeight.value, 10) : 270,

@@ -84,10 +84,24 @@ async function renameGroup(index) {
   openGroupDialog('rename', index);
 }
 
+var _pendingDeleteGroup = -1;
+
 async function deleteGroup(index) {
   if (groups.length <= 1) { showToast('至少保留一个分组', 'warning'); return; }
+  _pendingDeleteGroup = index;
   var g = groups[index];
-  if (!confirm('确定删除分组「' + g.name + '」及其所有卡片？')) return;
+  if (domMain.confirmName) {
+    domMain.confirmName.textContent = '确定删除分组「' + g.name + '」及其所有卡片？';
+  }
+  if (domMain.confirmNoAsk) domMain.confirmNoAsk.checked = false;
+  domMain.confirmDialog.classList.remove('hidden');
+}
+
+async function doDeleteGroup() {
+  var index = _pendingDeleteGroup;
+  _pendingDeleteGroup = -1;
+  if (index < 0 || !groups[index]) return;
+  var g = groups[index];
 
   // 删除该分组所有卡片的缓存图片
   var cards = g.cards || [];

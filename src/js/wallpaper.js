@@ -304,6 +304,9 @@ function setBackgroundImage(url) {
   img.onload = function () {
     body.style.backgroundImage = 'url("' + url.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '') + '")';
     body.classList.add('has-wallpaper');
+    // 同步当前遮罩透明度到新壁纸
+    var opacity = (currentSettings && currentSettings.wallpaperOpacity !== undefined) ? currentSettings.wallpaperOpacity : 30;
+    document.documentElement.style.setProperty('--wallpaper-opacity', opacity / 100);
     // CSS 已内部持有图片，Blob URL 可安全释放
     if (url.startsWith('blob:')) _currentBlobUrl = url;
     else _currentBlobUrl = null;

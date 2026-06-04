@@ -40,6 +40,8 @@ const domSettings = {
   customWallpaperGroup: document.getElementById('custom-wallpaper-group'),
   noneWallpaperGroup: document.getElementById('none-wallpaper-group'),
   wallpaperColor: document.getElementById('setting-wallpaper-color'),
+  wallpaperOpacity: document.getElementById('setting-wallpaper-opacity'),
+  wallpaperOpacityVal: document.getElementById('wallpaper-opacity-val'),
   bingWallpaperGroup: document.getElementById('bing-wallpaper-group'),
   bingRegion:    document.getElementById('setting-bing-region'),
   bingUHD:       document.getElementById('toggle-bing-uhd'),
@@ -156,6 +158,9 @@ function populateSettingsForm(settings) {
   domSettings.wallpaperMode.value = settings.wallpaperMode || 'bing';
   domSettings.wallpaperUrl.value  = settings.wallpaperUrl || '';
   if (domSettings.wallpaperColor) domSettings.wallpaperColor.value = settings.wallpaperColor || '#1a1a2e';
+  var wo = settings.wallpaperOpacity !== undefined ? settings.wallpaperOpacity : 30;
+  if (domSettings.wallpaperOpacity) domSettings.wallpaperOpacity.value = wo;
+  if (domSettings.wallpaperOpacityVal) domSettings.wallpaperOpacityVal.textContent = wo + '%';
   if (domSettings.bingRegion) domSettings.bingRegion.value = settings.bingRegion || 'zh-CN';
   if (domSettings.bingUHD) domSettings.bingUHD.checked = settings.bingUHD === true;
   if (domSettings.bingAutoRefresh) domSettings.bingAutoRefresh.checked = settings.bingAutoRefresh !== false;
@@ -194,6 +199,7 @@ function applyAllSettings(settings) {
   applySearchPosition(settings);
   applyCardsMarginTop(settings);
   applyWallpaperColor(settings);
+  applyWallpaperOpacity(settings);
   applyGroupPosition(settings);
   applyDashboardLayout(settings);
   if (typeof renderGroupDots === 'function') renderGroupDots();
@@ -341,6 +347,11 @@ function applyWallpaperColor(settings) {
   }
 }
 
+/** 壁纸遮罩透明度 */
+function applyWallpaperOpacity(settings) {
+  document.documentElement.style.setProperty('--wallpaper-opacity', (settings.wallpaperOpacity || 30) / 100);
+}
+
 /** 分组指示器位置 */
 function applyGroupPosition(settings) {
   var el = document.getElementById('group-indicator');
@@ -427,6 +438,7 @@ function collectSettingsFromForm() {
     wallpaperMode: domSettings.wallpaperMode.value,
     wallpaperUrl:  domSettings.wallpaperUrl.value.trim(),
     wallpaperColor: domSettings.wallpaperColor ? domSettings.wallpaperColor.value : '#1a1a2e',
+    wallpaperOpacity: domSettings.wallpaperOpacity ? parseInt(domSettings.wallpaperOpacity.value, 10) : 30,
     bingRegion:    domSettings.bingRegion ? domSettings.bingRegion.value : 'zh-CN',
     bingUHD:       domSettings.bingUHD ? domSettings.bingUHD.checked : false,
     bingAutoRefresh: domSettings.bingAutoRefresh ? domSettings.bingAutoRefresh.checked : true,
@@ -567,6 +579,15 @@ function bindSettingsEvents() {
       document.body.style.backgroundColor = this.value;
     });
     domSettings.wallpaperColor.addEventListener('change', onSettingChanged);
+  }
+
+  // 壁纸遮罩透明度
+  if (domSettings.wallpaperOpacity && domSettings.wallpaperOpacityVal) {
+    domSettings.wallpaperOpacity.addEventListener('input', function () {
+      domSettings.wallpaperOpacityVal.textContent = this.value + '%';
+      document.documentElement.style.setProperty('--wallpaper-opacity', (parseInt(this.value, 10) || 0) / 100);
+    });
+    domSettings.wallpaperOpacity.addEventListener('change', onSettingChanged);
   }
 
   // Bing 刷新间隔滑块

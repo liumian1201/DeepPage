@@ -48,6 +48,7 @@ var DEFAULT_SETTINGS = {
   wallpaperMode: 'bing',
   wallpaperUrl: '',
   wallpaperColor: '#1a1a2e',
+  wallpaperOpacity: 30,
   bingIdx: 0,
   bingUHD: false,
   bingRegion: 'zh-CN',
@@ -181,7 +182,11 @@ async function saveSpeeddials(cards) {
 
 // ---- 设置 ----
 async function getSettings() {
-  var stored = await loadFromStorage(STORAGE_KEYS.SETTINGS, {});
+  var stored = await loadFromStorage(STORAGE_KEYS.SETTINGS, null);
+  // 如果 sync 读取不到，尝试从 local 回退（与 getGroups/getActiveGroup 行为一致）
+  if (!stored || Object.keys(stored).length === 0) {
+    stored = await loadFromLocal(STORAGE_KEYS.SETTINGS, {});
+  }
   var merged = { ...DEFAULT_SETTINGS, ...stored };
   // 迁移旧版 searchEngine
   if (merged.searchEngine && !merged.activeSearchEngine) {
