@@ -40,7 +40,55 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     });
     return true;
   }
+
+  // v1.1.5: 网页截图 — 后台弹出窗口截图后关闭
+  if (request.type === 'capture-screenshot') {
+    var url = request.url;
+    if (!url || !/^https?:\/\//i.test(url)) {
+      sendResponse({ ok: false, error: 'invalid url' });
+      return;
+    }
+    captureScreenshot(url).then(function (dataUrl) {
+      sendResponse({ ok: true, dataUrl: dataUrl });
+    }).catch(function (err) {
+      sendResponse({ ok: false, error: err.message });
+    });
+    return true;
+  }
 });
+
+// ---- 网页截图（v1.1.5） ----
+
+async function captureScreenshot(url) {
+  // 后台开 popup 窗口（不聚焦，隐藏在后面）
+  var win = await chrome.windows.create({
+    url: url,
+    type: 'popup',
+    width: 1024,
+    height: 768,
+    focused: false
+  });
+  var tabId = win.tabs[0].id;
+
+  await new Promise(function (resolve, reject) {
+    var timeout = setTimeout(function () { reject(new Error('页面加载超时')); }, 30000);
+    chrome.tabs.onUpdated.addListener(function onUpdated(tid, info) {
+      if (tid === tabId && info.status === 'complete') {
+        clearTimeout(timeout);
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        resolve();
+      }
+    });
+  });
+
+  // 短暂聚焦窗口 → 截图 → 关闭
+  await chrome.windows.update(win.id, { focused: true });
+  await new Promise(function (r) { setTimeout(r, 500); });
+  var dataUrl = await chrome.tabs.captureVisibleTab(win.id, { format: 'png' });
+  chrome.windows.remove(win.id);
+
+  return dataUrl;
+}
 
 // ---- 浏览器右键菜单（v1.0.5） ----
 

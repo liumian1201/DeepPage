@@ -279,6 +279,36 @@ function bindMainEvents() {
     });
   }
 
+  // v1.1.5: 编辑弹窗「截取网页」按钮
+  var captureBtn = document.getElementById('dialog-image-capture');
+  if (captureBtn) {
+    captureBtn.addEventListener('click', function () {
+      var url = domMain.dialogUrl.value.trim();
+      if (!url || !/^https?:\/\//i.test(url)) {
+        showToast('请先填写有效的网站地址', 'warning');
+        return;
+      }
+      var cardId = editingId || ('new_' + Date.now());
+      showToast('正在截取网页...', 'info');
+      chrome.runtime.sendMessage({ type: 'capture-screenshot', url: url }, async function (resp) {
+        if (chrome.runtime.lastError || !resp || !resp.ok) {
+          showToast('截图失败: ' + ((resp && resp.error) || 'unknown'), 'error');
+          return;
+        }
+        var parts = resp.dataUrl.split(',');
+        var byteStr = atob(parts.length > 1 ? parts[1] : parts[0]);
+        var bytes = new Uint8Array(byteStr.length);
+        for (var i = 0; i < byteStr.length; i++) { bytes[i] = byteStr.charCodeAt(i); }
+        var blob = new Blob([bytes], { type: 'image/png' });
+        var key = 'cardimg_' + cardId;
+        await saveImage(key, blob);
+        domMain.dialogImage.value = 'idx:' + key;
+        if (typeof updateImageDBInfo === 'function') updateImageDBInfo();
+        showToast('截图完成', 'success');
+      });
+    });
+  }
+
   bindConfirmDialogEvents();
   bindGroupEvents();
   bindGroupDialogEvents();

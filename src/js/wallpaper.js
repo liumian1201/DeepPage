@@ -214,10 +214,10 @@ async function fetchBingWallpapers(settings) {
 async function applyWallpaper(settings) {
   var body = document.body;
   body.style.backgroundImage = '';
-  body.classList.remove('has-wallpaper');
+  body.classList.remove('has-wallpaper', 'wallpaper-bing');
   var mode = settings.wallpaperMode || 'bing';
   try {
-    if (mode === 'bing') await applyBingWallpaper(settings);
+    if (mode === 'bing') { body.classList.add('wallpaper-bing'); await applyBingWallpaper(settings); }
     else if (mode === 'custom') await applyCustomWallpaper(settings.wallpaperUrl);
   } catch (e) {
     console.warn('壁纸加载失败:', e);

@@ -64,7 +64,7 @@ function showContextMenu(x, y, source) {
   items.forEach((item) => {
     const action = item.dataset.action;
     if (source === 'card') {
-      var allowed = ['open', 'copyurl', 'edit', 'moveToGroup', 'delete'];
+      var allowed = ['open', 'copyurl', 'edit', 'capture', 'moveToGroup', 'delete'];
       if (action === 'lock' || action === 'unlock') {
         item.classList.toggle('hidden', true);
       } else {
@@ -209,6 +209,9 @@ function handleContextAction(action, ds) {
       break;
     case 'edit':
       if (contextCardId) openEditDialog(contextCardId);
+      break;
+    case 'capture':
+      if (contextCardId) refreshCardCapture(contextCardId);
       break;
     case 'delete':
       if (contextCardId) handleDeleteClick(contextCardId);

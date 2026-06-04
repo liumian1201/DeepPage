@@ -454,9 +454,10 @@
         <h3 id="dialog-title">添加快捷方式</h3>
         <input type="text" id="dialog-name" placeholder="网站名称" autocomplete="off">
         <input type="text" id="dialog-url" placeholder="网站地址 (https://...)" autocomplete="off">
-        <input type="text" id="dialog-image" placeholder="自定义图标 URL（可选，留空使用网站 Favicon）" autocomplete="off">
+        <input type="text" id="dialog-image" placeholder="自定义图标 URL（可选，留空使用默认图标）" autocomplete="off">
         <div class="upload-row">
           <button id="dialog-image-upload" class="btn-upload">📁 上传本地图片</button>
+          <button id="dialog-image-capture" class="btn-upload">📸 网页截图</button>
           <input type="file" id="dialog-image-file" accept="image/*" class="hidden">
         </div>
         <div class="dialog-actions">
@@ -472,6 +473,7 @@
       <div class="context-menu-item" data-action="open">🔗 打开</div>
       <div class="context-menu-item" data-action="copyurl">📋 复制 URL</div>
       <div class="context-menu-item" data-action="edit">✏️ 编辑</div>
+      <div class="context-menu-item" data-action="capture">📸 刷新截图</div>
       <div class="context-menu-item has-sub" data-action="moveToGroup">📂 移动到分组 ▸</div>
       <div class="context-menu-item danger" data-action="delete">🗑️ 删除</div>
       <div class="context-menu-separator"></div>

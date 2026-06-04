@@ -1,6 +1,6 @@
 # DeepPage 隐私政策
 
-> 最后更新：2026年6月2日
+> 最后更新：2026年6月4日
 
 ## 概述
 
@@ -16,6 +16,7 @@ DeepPage 在您的设备本地存储以下数据：
 |----------|----------|------|----------|
 | 快捷导航卡片（URL、名称、图标） | `chrome.storage.sync` | 跨设备同步您的书签配置 | 通过 Google 账号同步 |
 | 设置偏好（主题、布局、外观） | `chrome.storage.sync` | 跨设备同步您的个性化设置 | 通过 Google 账号同步 |
+| 大量卡片数据（超 100KB 时） | `chrome.storage.local` | 本地兜底存储 | ❌ 不支持跨设备同步 |
 | 天气缓存数据 | `chrome.storage.local` | 减少 API 请求频率 | ❌ 不上传 |
 | 壁纸图片缓存 | `chrome.storage.local` | 快速加载壁纸 | ❌ 不上传 |
 | 卡片图标图片 | IndexedDB | 断网时正常显示图标 | ❌ 不上传 |
@@ -32,7 +33,8 @@ DeepPage 会向以下第三方服务发起请求：
 | **和风天气** (`devapi.qweather.com`) | 天气数据（可选） | 城市名称/坐标 + API Key |
 | **OpenWeatherMap** (`api.openweathermap.org`) | 天气数据（可选） | 城市名称/坐标 + API Key |
 | **自定义天气 API** | 天气数据（可选） | 取决于您的配置 |
-| **卡片网站 Favicon** | 自动获取网站图标 | 目标网站 URL |
+| **卡片网站图标缓存** | 自动下载网站图标存 IndexedDB | 目标网站 URL |
+| **网页截图** | 用户主动触发截图时，后台加载目标页面并截取 | 目标网站 URL |
 
 ### ❌ 我们不收集的数据
 
@@ -48,10 +50,10 @@ DeepPage 会向以下第三方服务发起请求：
 |------|------|
 | `storage` | 保存您的卡片和设置 |
 | `unlimitedStorage` | 存储壁纸和图标图片（IndexedDB） |
-| `tabs` | 卡片新标签页打开方式控制 |
+| `tabs` | 卡片打开方式控制 + 网页截图窗口管理 |
 | `contextMenus` | 浏览器右键菜单「添加到 DeepPage」 |
-| `scripting` | 重复卡片检测时在当前网页弹出确认框 |
-| `host_permissions` | 获取天气数据、壁纸图片、网站 Favicon |
+| `scripting` | 重复卡片检测弹出确认框 |
+| `host_permissions (<all_urls>)` | 天气 API、Bing 壁纸、网页截图、图片下载代理 |
 
 ## 数据控制
 

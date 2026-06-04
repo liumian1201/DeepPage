@@ -274,6 +274,34 @@ function closeDialog() {
   editingId = null;
 }
 
+/* ==================== 网页截图（v1.1.5） ==================== */
+
+async function refreshCardCapture(cardId) {
+  var card = speeddials.find(function (c) { return c.id === cardId; });
+  if (!card || !card.url) { showToast('卡片无效', 'error'); return; }
+  showToast('正在截取 ' + card.name + ' ...', 'info');
+
+  chrome.runtime.sendMessage({ type: 'capture-screenshot', url: card.url }, async function (resp) {
+    if (chrome.runtime.lastError || !resp || !resp.ok) {
+      showToast('截图失败: ' + ((resp && resp.error) || 'unknown'), 'error');
+      return;
+    }
+    // 将 base64 dataUrl 转 blob 存入 IndexedDB
+    var parts = resp.dataUrl.split(',');
+    var byteStr = atob(parts.length > 1 ? parts[1] : parts[0]);
+    var bytes = new Uint8Array(byteStr.length);
+    for (var i = 0; i < byteStr.length; i++) { bytes[i] = byteStr.charCodeAt(i); }
+    var blob = new Blob([bytes], { type: 'image/png' });
+    var key = 'cardimg_' + cardId;
+    await saveImage(key, blob);
+    card.image = 'idx:' + key;
+    await saveSpeeddials(speeddials);
+    renderSpeeddials();
+    if (typeof updateImageDBInfo === 'function') updateImageDBInfo();
+    showToast('截图已更新', 'success');
+  });
+}
+
 async function saveDialog() {
   const name = domMain.dialogName.value.trim();
   let url = domMain.dialogUrl.value.trim();

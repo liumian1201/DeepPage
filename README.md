@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Manifest-V3-blue?logo=googlechrome" alt="Manifest V3">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/Version-1.1.2-brightgreen" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.1.5-brightgreen" alt="Version">
   <img src="https://img.shields.io/badge/PRs-Welcome-orange" alt="PRs Welcome">
 </p>
 
@@ -30,6 +30,7 @@
 - **卡片排序**：5 种排序模式（手动/时间/访问数），按分组独立设置
 - 拖拽排序（纯鼠标事件）、右键菜单、中键新标签页打开
 - 列数/宽高/圆角滑块实时预览，自由调整布局
+- **网页截图**：右键「刷新截图」或编辑弹窗「网页截图」自动截取目标页面作为卡片图标
 
 ### 📊 多功能信息看板
 - **数字时钟**：12/24 小时制 + 秒数开关

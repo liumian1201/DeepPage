@@ -1986,7 +1986,7 @@ body.immersive .container {
 }
 
 /* 非 Bing 壁纸模式隐藏导航栏 */
-body:not(.has-wallpaper) .wallpaper-info {
+body:not(.wallpaper-bing) .wallpaper-info {
   display: none;
 }
 
