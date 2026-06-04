@@ -60,13 +60,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 // ---- 网页截图（v1.1.5） ----
 
 async function captureScreenshot(url) {
-  // 后台开 popup 窗口加载页面
   var win = await chrome.windows.create({
     url: url,
     type: 'popup',
     width: 1400,
     height: 900,
-    focused: false
+    focused: true
   });
   var tabId = win.tabs[0].id;
 
@@ -81,13 +80,48 @@ async function captureScreenshot(url) {
     });
   });
 
-  // 短暂聚焦窗口 → 截图 → 关闭
-  await chrome.windows.update(win.id, { focused: true });
-  await new Promise(function (r) { setTimeout(r, 500); });
-  var dataUrl = await chrome.tabs.captureVisibleTab(win.id, { format: 'png' });
-  chrome.windows.remove(win.id);
+  // 注入浮动截图按钮
+  await chrome.scripting.executeScript({
+    target: { tabId: tabId },
+    func: function () {
+      var btn = document.createElement('div');
+      btn.textContent = '📸 截图';
+      btn.style.cssText = 'position:fixed;bottom:16px;right:16px;z-index:999999;padding:10px 20px;background:#2563eb;color:#fff;border-radius:8px;font-size:15px;font-family:system-ui,sans-serif;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.3);user-select:none;';
+      btn.onclick = function () {
+        btn.textContent = '⏳ 截图中...';
+        btn.style.background = '#666';
+        btn.onclick = null;
+        document.body.style.overflow = 'hidden';
+        setTimeout(function () { btn.style.display = 'none'; }, 50);
+        setTimeout(function () { chrome.runtime.sendMessage({ type: 'capture-done' }); }, 100);
+      };
+      document.body.appendChild(btn);
+    }
+  });
 
-  return dataUrl;
+  // 等待用户点击截图按钮
+  return new Promise(function (resolve, reject) {
+    var timeout = setTimeout(function () {
+      chrome.runtime.onMessage.removeListener(onCaptureDone);
+      try { chrome.windows.remove(win.id); } catch (e) {}
+      reject(new Error('用户超时未截图'));
+    }, 120000);
+
+    function onCaptureDone(request) {
+      if (request.type === 'capture-done') {
+        clearTimeout(timeout);
+        chrome.runtime.onMessage.removeListener(onCaptureDone);
+        chrome.tabs.captureVisibleTab(win.id, { format: 'png' }).then(function (dataUrl) {
+          chrome.windows.remove(win.id);
+          resolve(dataUrl);
+        }).catch(function (err) {
+          chrome.windows.remove(win.id);
+          reject(err);
+        });
+      }
+    }
+    chrome.runtime.onMessage.addListener(onCaptureDone);
+  });
 }
 
 // ---- 浏览器右键菜单（v1.0.5） ----
