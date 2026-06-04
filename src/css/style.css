@@ -268,7 +268,7 @@ body.has-wallpaper::before {
 .group-tab {
   padding: 4px 12px;
   border-radius: 16px;
-  font-size: 13px;
+  font-size: var(--group-tab-size, 13px);
   color: var(--text-tertiary);
   cursor: pointer;
   transition: all var(--transition-fast);
@@ -293,8 +293,8 @@ body.has-wallpaper::before {
 }
 
 .group-dot {
-  width: 10px;
-  height: 10px;
+  width: var(--group-dot-size, 10px);
+  height: var(--group-dot-size, 10px);
   border-radius: 50%;
   background: var(--text-tertiary);
   cursor: pointer;
@@ -309,8 +309,8 @@ body.has-wallpaper::before {
 
 .group-dot.active {
   background: var(--accent);
-  width: 12px;
-  height: 12px;
+  width: calc(var(--group-dot-size, 10px) + 2px);
+  height: calc(var(--group-dot-size, 10px) + 2px);
   box-shadow: 0 0 6px var(--accent);
 }
 

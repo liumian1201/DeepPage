@@ -324,6 +324,9 @@ function closeConfirmDialog() {
 }
 
 /* ==================== 分组事件（滚轮切换 + 按钮） ==================== */
+var _scrollEdge = 0;      // 0=正常, 1=向上到底, -1=向下到底
+var _scrollEdgeTimer = null;
+
 function bindGroupEvents() {
   document.addEventListener('wheel', function (e) {
     if (!groups || groups.length <= 1) return;
@@ -332,14 +335,41 @@ function bindGroupEvents() {
         e.target.closest('.context-menu')) return;
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
 
-    if (e.deltaY > 0) {
-      var next = activeGroupIndex + 1;
-      if (next >= groups.length) next = 0;
-      switchGroup(next);
-    } else if (e.deltaY < 0) {
-      var prev = activeGroupIndex - 1;
-      if (prev < 0) prev = groups.length - 1;
-      switchGroup(prev);
+    var dir = e.deltaY > 0 ? 1 : -1;
+    var grid = document.getElementById('speeddial-grid');
+    var atEdge = false;
+    if (grid) {
+      var bottom = grid.scrollHeight - grid.scrollTop - grid.clientHeight;
+      if (dir > 0 && bottom < 8) atEdge = true;   // 向下到底
+      if (dir < 0 && grid.scrollTop < 8) atEdge = true;  // 向上到顶
+    }
+
+    // 未到底 → 正常滚动卡片，重置状态
+    if (!atEdge) {
+      _scrollEdge = 0;
+      clearTimeout(_scrollEdgeTimer);
+      return;
+    }
+
+    // 到底部 → 需要两次同方向滚轮才切换分组
+    if (_scrollEdge === dir) {
+      // 第二次同方向：切换分组
+      _scrollEdge = 0;
+      clearTimeout(_scrollEdgeTimer);
+      if (dir > 0) {
+        var next = activeGroupIndex + 1;
+        if (next >= groups.length) next = 0;
+        switchGroup(next);
+      } else {
+        var prev = activeGroupIndex - 1;
+        if (prev < 0) prev = groups.length - 1;
+        switchGroup(prev);
+      }
+    } else {
+      // 第一次到底：标记方向，2 秒后自动重置
+      _scrollEdge = dir;
+      clearTimeout(_scrollEdgeTimer);
+      _scrollEdgeTimer = setTimeout(function () { _scrollEdge = 0; }, 2000);
     }
   }, { passive: true });
 

@@ -277,12 +277,11 @@
           <div class="setting-group">
             <button id="btn-reset-topbar" class="btn-reset-small">↺ 重置信息栏</button>
           </div>
-          <div class="settings-section-title">📐 卡片布局</div>
+          <div class="settings-section-title">📐 卡片设置</div>
           <div class="setting-group">
             <label for="setting-card-bg-color">卡片背景颜色</label>
             <input type="color" id="setting-card-bg-color" value="#ffffff">
           </div>
-          <div class="settings-section-title">📐 卡片位置</div>
           <div class="setting-group">
             <div class="setting-inline-row">
               <label for="setting-cards-top" class="setting-inline-label">卡片距顶</label>
@@ -347,6 +346,20 @@
               <input type="range" id="setting-group-offset" min="2" max="80" value="16" step="2">
             </div>
           </div>
+          <div class="setting-group" id="group-size-dot-row">
+            <div class="setting-inline-row">
+              <label for="setting-group-dot-size" class="setting-inline-label">指示器大小</label>
+              <span id="group-dot-size-val" class="slider-val">10px</span>
+              <input type="range" id="setting-group-dot-size" min="6" max="24" value="10" step="1">
+            </div>
+          </div>
+          <div class="setting-group hidden" id="group-size-tab-row">
+            <div class="setting-inline-row">
+              <label for="setting-group-tab-size" class="setting-inline-label">指示器大小</label>
+              <span id="group-tab-size-val" class="slider-val">13px</span>
+              <input type="range" id="setting-group-tab-size" min="10" max="22" value="13" step="1">
+            </div>
+          </div>
         </div>
 
         <!-- ===== 壁纸 ===== -->
@@ -373,6 +386,10 @@
               <button id="btn-wallpaper-upload" class="btn-upload">📁 上传本地壁纸</button>
               <input type="file" id="wallpaper-file-input" accept="image/*" class="hidden">
             </div>
+          </div>
+          <div id="none-wallpaper-group" class="setting-group hidden">
+            <label for="setting-wallpaper-color">纯色背景</label>
+            <input type="color" id="setting-wallpaper-color" value="#1a1a2e">
           </div>
         </div>
 

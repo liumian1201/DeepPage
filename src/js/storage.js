@@ -47,6 +47,7 @@ var DEFAULT_SETTINGS = {
   weatherRefreshMin: 15,
   wallpaperMode: 'bing',
   wallpaperUrl: '',
+  wallpaperColor: '#1a1a2e',
   bingIdx: 0,
   bingUHD: false,
   bingRegion: 'zh-CN',
@@ -80,7 +81,9 @@ var DEFAULT_SETTINGS = {
   cardBorderRadius: 14,
   cardOpenMode: 'current',
   showVisitCount: true,
-  cardsMarginTop: 0
+  cardsMarginTop: 0,
+  groupDotSize: 10,
+  groupTabSize: 13
 };
 
 function loadFromStorage(key, defaultValue) {

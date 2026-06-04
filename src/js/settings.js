@@ -38,6 +38,8 @@ const domSettings = {
   wallpaperMode: document.getElementById('setting-wallpaper-mode'),
   wallpaperUrl:  document.getElementById('setting-wallpaper-url'),
   customWallpaperGroup: document.getElementById('custom-wallpaper-group'),
+  noneWallpaperGroup: document.getElementById('none-wallpaper-group'),
+  wallpaperColor: document.getElementById('setting-wallpaper-color'),
   bingWallpaperGroup: document.getElementById('bing-wallpaper-group'),
   bingRegion:    document.getElementById('setting-bing-region'),
   bingUHD:       document.getElementById('toggle-bing-uhd'),
@@ -54,6 +56,10 @@ const domSettings = {
   groupPosition:    document.getElementById('setting-group-position'),
   groupOffset:      document.getElementById('setting-group-offset'),
   groupOffsetVal:   document.getElementById('group-offset-val'),
+  groupDotSize:     document.getElementById('setting-group-dot-size'),
+  groupDotSizeVal:  document.getElementById('group-dot-size-val'),
+  groupTabSize:     document.getElementById('setting-group-tab-size'),
+  groupTabSizeVal:  document.getElementById('group-tab-size-val'),
 
   // 看板
   dashboardLayout:  document.getElementById('setting-dashboard-layout'),
@@ -127,6 +133,10 @@ function populateSettingsForm(settings) {
   if (domSettings.groupPosition) domSettings.groupPosition.value = settings.groupPosition || 'left';
   if (domSettings.groupOffset) domSettings.groupOffset.value = settings.groupOffset || 16;
   if (domSettings.groupOffsetVal) domSettings.groupOffsetVal.textContent = (settings.groupOffset || 16) + 'px';
+  if (domSettings.groupDotSize) domSettings.groupDotSize.value = settings.groupDotSize || 10;
+  if (domSettings.groupDotSizeVal) domSettings.groupDotSizeVal.textContent = (settings.groupDotSize || 10) + 'px';
+  if (domSettings.groupTabSize) domSettings.groupTabSize.value = settings.groupTabSize || 13;
+  if (domSettings.groupTabSizeVal) domSettings.groupTabSizeVal.textContent = (settings.groupTabSize || 13) + 'px';
   if (domSettings.dashboardLayout) domSettings.dashboardLayout.value = settings.dashboardLayout || 'row';
   if (domSettings.dashLeft) domSettings.dashLeft.value = settings.dashLeft || 0;
   if (domSettings.dashLeftVal) domSettings.dashLeftVal.textContent = (settings.dashLeft || 0) === 0 ? '居中' : ((settings.dashLeft || 0) > 0 ? '右' : '左') + Math.abs(settings.dashLeft || 0) + 'px';
@@ -145,6 +155,7 @@ function populateSettingsForm(settings) {
   domSettings.weatherKey.value    = settings.weatherApiKey || '';
   domSettings.wallpaperMode.value = settings.wallpaperMode || 'bing';
   domSettings.wallpaperUrl.value  = settings.wallpaperUrl || '';
+  if (domSettings.wallpaperColor) domSettings.wallpaperColor.value = settings.wallpaperColor || '#1a1a2e';
   if (domSettings.bingRegion) domSettings.bingRegion.value = settings.bingRegion || 'zh-CN';
   if (domSettings.bingUHD) domSettings.bingUHD.checked = settings.bingUHD === true;
   if (domSettings.bingAutoRefresh) domSettings.bingAutoRefresh.checked = settings.bingAutoRefresh !== false;
@@ -169,6 +180,7 @@ function populateSettingsForm(settings) {
   // 根据 wallpaperMode 显示/隐藏对应控件
   toggleCustomWallpaperGroup(settings.wallpaperMode || 'bing');
   toggleBingWallpaperGroup(settings.wallpaperMode || 'bing');
+  toggleNoneWallpaperGroup(settings.wallpaperMode || 'bing');
 }
 
 /** 应用所有设置到 UI */
@@ -181,6 +193,7 @@ function applyAllSettings(settings) {
   applySearchSectionVisibility(settings);
   applySearchPosition(settings);
   applyCardsMarginTop(settings);
+  applyWallpaperColor(settings);
   applyGroupPosition(settings);
   applyDashboardLayout(settings);
   if (typeof renderGroupDots === 'function') renderGroupDots();
@@ -241,6 +254,17 @@ function toggleBingWallpaperGroup(mode) {
       domSettings.bingWallpaperGroup.classList.remove('hidden');
     } else {
       domSettings.bingWallpaperGroup.classList.add('hidden');
+    }
+  }
+}
+
+/** 切换纯色背景颜色选择器显隐 */
+function toggleNoneWallpaperGroup(mode) {
+  if (domSettings.noneWallpaperGroup) {
+    if (mode === 'none') {
+      domSettings.noneWallpaperGroup.classList.remove('hidden');
+    } else {
+      domSettings.noneWallpaperGroup.classList.add('hidden');
     }
   }
 }
@@ -308,6 +332,15 @@ function applyCardsMarginTop(settings) {
   document.documentElement.style.setProperty('--cards-top', (settings.cardsMarginTop || 0) + 'px');
 }
 
+/** 纯色背景 */
+function applyWallpaperColor(settings) {
+  if (settings.wallpaperMode === 'none') {
+    document.body.style.backgroundColor = settings.wallpaperColor || '#1a1a2e';
+  } else {
+    document.body.style.backgroundColor = '';
+  }
+}
+
 /** 分组指示器位置 */
 function applyGroupPosition(settings) {
   var el = document.getElementById('group-indicator');
@@ -315,6 +348,14 @@ function applyGroupPosition(settings) {
   var pos = settings.groupPosition || 'left';
   el.setAttribute('data-position', pos);
   document.documentElement.style.setProperty('--group-offset', (settings.groupOffset || 16) + 'px');
+  document.documentElement.style.setProperty('--group-dot-size', (settings.groupDotSize || 10) + 'px');
+  document.documentElement.style.setProperty('--group-tab-size', (settings.groupTabSize || 13) + 'px');
+  // 指示器大小行：根据位置显示对应滑块
+  var isTab = pos === 'top' || pos === 'bottom';
+  var dotRow = document.getElementById('group-size-dot-row');
+  var tabRow = document.getElementById('group-size-tab-row');
+  if (dotRow) dotRow.classList.toggle('hidden', isTab);
+  if (tabRow) tabRow.classList.toggle('hidden', !isTab);
 }
 
 /** 看板布局 */
@@ -375,6 +416,8 @@ function collectSettingsFromForm() {
     showSearch: domSettings.toggleShowSearch ? domSettings.toggleShowSearch.checked : true,
     groupPosition: domSettings.groupPosition ? domSettings.groupPosition.value : 'left',
     groupOffset: domSettings.groupOffset ? parseInt(domSettings.groupOffset.value, 10) : 16,
+    groupDotSize: domSettings.groupDotSize ? parseInt(domSettings.groupDotSize.value, 10) : 10,
+    groupTabSize: domSettings.groupTabSize ? parseInt(domSettings.groupTabSize.value, 10) : 13,
     theme:         domSettings.theme.value,
     weatherType:   domSettings.weatherType.value,
     weatherCity:   domSettings.weatherCity.value.trim(),
@@ -383,6 +426,7 @@ function collectSettingsFromForm() {
     weatherRefreshMin: domSettings.weatherRefresh ? parseInt(domSettings.weatherRefresh.value, 10) : 15,
     wallpaperMode: domSettings.wallpaperMode.value,
     wallpaperUrl:  domSettings.wallpaperUrl.value.trim(),
+    wallpaperColor: domSettings.wallpaperColor ? domSettings.wallpaperColor.value : '#1a1a2e',
     bingRegion:    domSettings.bingRegion ? domSettings.bingRegion.value : 'zh-CN',
     bingUHD:       domSettings.bingUHD ? domSettings.bingUHD.checked : false,
     bingAutoRefresh: domSettings.bingAutoRefresh ? domSettings.bingAutoRefresh.checked : true,
@@ -513,8 +557,17 @@ function bindSettingsEvents() {
   domSettings.wallpaperMode.addEventListener('change', () => {
     toggleCustomWallpaperGroup(domSettings.wallpaperMode.value);
     toggleBingWallpaperGroup(domSettings.wallpaperMode.value);
+    toggleNoneWallpaperGroup(domSettings.wallpaperMode.value);
     onSettingChanged();
   });
+
+  // 纯色背景颜色选择
+  if (domSettings.wallpaperColor) {
+    domSettings.wallpaperColor.addEventListener('input', function () {
+      document.body.style.backgroundColor = this.value;
+    });
+    domSettings.wallpaperColor.addEventListener('change', onSettingChanged);
+  }
 
   // Bing 刷新间隔滑块
   if (domSettings.bingRefresh && domSettings.bingRefreshVal) {
@@ -576,6 +629,24 @@ function bindSettingsEvents() {
       document.documentElement.style.setProperty('--group-offset', this.value + 'px');
     });
     domSettings.groupOffset.addEventListener('change', onSettingChanged);
+  }
+
+  // 分组指示器圆点大小（左右模式）
+  if (domSettings.groupDotSize && domSettings.groupDotSizeVal) {
+    domSettings.groupDotSize.addEventListener('input', function () {
+      domSettings.groupDotSizeVal.textContent = this.value + 'px';
+      document.documentElement.style.setProperty('--group-dot-size', this.value + 'px');
+    });
+    domSettings.groupDotSize.addEventListener('change', onSettingChanged);
+  }
+
+  // 分组指示器标签字号（上下模式）
+  if (domSettings.groupTabSize && domSettings.groupTabSizeVal) {
+    domSettings.groupTabSize.addEventListener('input', function () {
+      domSettings.groupTabSizeVal.textContent = this.value + 'px';
+      document.documentElement.style.setProperty('--group-tab-size', this.value + 'px');
+    });
+    domSettings.groupTabSize.addEventListener('change', onSettingChanged);
   }
 
   // 看板位置滑块（实时预览）
