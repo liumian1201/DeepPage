@@ -336,13 +336,12 @@ function bindGroupEvents() {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
 
     var dir = e.deltaY > 0 ? 1 : -1;
-    var grid = document.getElementById('speeddial-grid');
     var atEdge = false;
-    if (grid) {
-      var bottom = grid.scrollHeight - grid.scrollTop - grid.clientHeight;
-      if (dir > 0 && bottom < 8) atEdge = true;   // 向下到底
-      if (dir < 0 && grid.scrollTop < 8) atEdge = true;  // 向上到顶
-    }
+    var st = document.documentElement.scrollTop;
+    var sh = document.documentElement.scrollHeight;
+    var ch = document.documentElement.clientHeight;
+    if (dir > 0 && st + ch >= sh - 8) atEdge = true;
+    if (dir < 0 && st < 8) atEdge = true;
 
     // 未到底 → 正常滚动卡片，重置状态
     if (!atEdge) {
