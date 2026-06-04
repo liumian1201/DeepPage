@@ -60,12 +60,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 // ---- 网页截图（v1.1.5） ----
 
 async function captureScreenshot(url) {
-  // 后台开 popup 窗口（不聚焦，隐藏在后面）
+  // 后台开 popup 窗口加载页面
   var win = await chrome.windows.create({
     url: url,
     type: 'popup',
-    width: 1024,
-    height: 768,
+    width: 1400,
+    height: 900,
     focused: false
   });
   var tabId = win.tabs[0].id;
