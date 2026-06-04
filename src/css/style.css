@@ -695,7 +695,7 @@ body.has-wallpaper::before {
   overflow: hidden;
   transition: transform var(--transition-normal),
     box-shadow var(--transition-normal);
-  cursor: grab;
+  cursor: pointer;
   user-select: none;
   color: var(--text-on-card, #202124);
   will-change: transform;

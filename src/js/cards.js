@@ -286,7 +286,6 @@ async function refreshCardCapture(cardId) {
       showToast('截图失败: ' + ((resp && resp.error) || 'unknown'), 'error');
       return;
     }
-    // 将 base64 dataUrl 转 blob 存入 IndexedDB
     var parts = resp.dataUrl.split(',');
     var byteStr = atob(parts.length > 1 ? parts[1] : parts[0]);
     var bytes = new Uint8Array(byteStr.length);
@@ -294,11 +293,26 @@ async function refreshCardCapture(cardId) {
     var blob = new Blob([bytes], { type: 'image/png' });
     var key = 'cardimg_' + cardId;
     await saveImage(key, blob);
-    card.image = 'idx:' + key;
-    await saveSpeeddials(speeddials);
-    renderSpeeddials();
-    if (typeof updateImageDBInfo === 'function') updateImageDBInfo();
-    showToast('截图已更新', 'success');
+
+    // 重读最新分组数据，避免覆盖期间发生的删除/移动
+    var latestGroups = await getGroups();
+    for (var gi = 0; gi < latestGroups.length; gi++) {
+      var gcards = latestGroups[gi].cards || [];
+      for (var ci = 0; ci < gcards.length; ci++) {
+        if (gcards[ci].id === cardId) {
+          gcards[ci].image = 'idx:' + key;
+          if (gi === activeGroupIndex) { speeddials = gcards; }
+          groups = latestGroups;
+          await saveGroups(groups);
+          renderSpeeddials();
+          if (typeof updateImageDBInfo === 'function') updateImageDBInfo();
+          showToast('截图已更新', 'success');
+          return;
+        }
+      }
+    }
+    // 卡片已被删除
+    showToast('截图完成但卡片已被删除', 'warning');
   });
 }
 

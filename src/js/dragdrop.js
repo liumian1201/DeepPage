@@ -12,6 +12,7 @@ var _dragCleanup = null;  // BUG-006: visibilitychange 清理回调
 /** 清理所有拖拽状态（mouseup 丢失时的安全网） */
 function cleanupDrag() {
   document.removeEventListener('wheel', blockWheelDuringDrag);
+  document.body.style.cursor = '';
   if (_dragCleanup) { _dragCleanup(); _dragCleanup = null; }
   if (dragClone && dragClone.parentNode) dragClone.parentNode.removeChild(dragClone);
   if (dragCard) { dragCard.classList.remove('dragging'); dragCard = null; }
@@ -65,6 +66,7 @@ document.addEventListener('mousemove', function (e) {
 
   if (!dragClone) {
     dragCard.classList.add('dragging');
+    document.body.style.cursor = 'grabbing';
     dragClone = dragCard.cloneNode(true);
     dragClone.style.position = 'fixed';
     dragClone.style.zIndex = '999';
@@ -96,6 +98,7 @@ document.addEventListener('mouseup', function (e) {
   dragCard.classList.remove('dragging');
   dragClone.parentNode.removeChild(dragClone);
   dragClone = null;
+  document.body.style.cursor = '';
   domMain.grid.querySelectorAll('.drag-over').forEach(function (el) { el.classList.remove('drag-over'); });
 
   var targetCard = getTargetCard(e);
