@@ -154,13 +154,33 @@ function importAll() {
         if (hasConfig) {
           var config = JSON.parse(fflate.strFromU8(unzipped['config.json']));
           if (typeof config === 'object' && config !== null) {
+            var syncFailed = false;
             await new Promise(function (resolve) {
               chrome.storage.sync.set({
                 settings: config.settings || {},
                 groups: config.groups || [],
                 activeGroup: config.activeGroup || 0
-              }, resolve);
+              }, function () {
+                if (chrome.runtime.lastError) {
+                  console.warn('storage.sync.set 超限，回退到本地存储:', chrome.runtime.lastError.message);
+                  syncFailed = true;
+                }
+                resolve();
+              });
             });
+            // 超限回退：将分组数据存到 chrome.storage.local
+            if (syncFailed) {
+              await new Promise(function (resolve) {
+                chrome.storage.local.set({
+                  groups: config.groups || [],
+                  activeGroup: config.activeGroup || 0
+                }, resolve);
+              });
+              // settings 小数据仍走 sync
+              await new Promise(function (resolve) {
+                chrome.storage.sync.set({ settings: config.settings || {}, groups: [], activeGroup: 0 }, resolve);
+              });
+            }
           }
         }
 
@@ -169,6 +189,8 @@ function importAll() {
 
         if (hasImages) {
           showToast('全部导入成功（配置 + ' + imported + '/' + manifest.images.length + ' 张图片），即将刷新...', 'success');
+        } else if (syncFailed) {
+          showToast('导入成功（数据量较大，使用本地存储，不支持跨设备同步），即将刷新...', 'success');
         } else {
           showToast('配置导入成功，即将刷新...', 'success');
         }
@@ -205,14 +227,28 @@ function importAll() {
         } else if (typeof data === 'object' && data !== null) {
           // 旧配置 JSON
           await showImportConfirmAsync('检测到旧格式配置备份，导入将覆盖当前所有数据。');
+          var oldSyncFailed = false;
           await new Promise(function (resolve) {
             chrome.storage.sync.set({
               settings: data.settings || {},
               groups: data.groups || [],
               activeGroup: data.activeGroup || 0
-            }, resolve);
+            }, function () {
+              if (chrome.runtime.lastError) oldSyncFailed = true;
+              resolve();
+            });
           });
-          showToast('配置导入成功，即将刷新...', 'success');
+          if (oldSyncFailed) {
+            await new Promise(function (resolve) {
+              chrome.storage.local.set({ groups: data.groups || [], activeGroup: data.activeGroup || 0 }, resolve);
+            });
+            await new Promise(function (resolve) {
+              chrome.storage.sync.set({ settings: data.settings || {}, groups: [], activeGroup: 0 }, resolve);
+            });
+            showToast('导入成功（数据量较大，使用本地存储），即将刷新...', 'success');
+          } else {
+            showToast('配置导入成功，即将刷新...', 'success');
+          }
 
         } else {
           throw new Error('无法识别的备份文件格式');

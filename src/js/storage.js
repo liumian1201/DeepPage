@@ -116,13 +116,15 @@ function saveToLocal(key, value) {
 async function getGroups() {
   var groups = await loadFromStorage(STORAGE_KEYS.GROUPS, null);
   if (groups && Array.isArray(groups) && groups.length > 0) return groups;
+  // 大容量回退：sync 为空时检查 local（导入超限场景）
+  groups = await loadFromLocal(STORAGE_KEYS.GROUPS, null);
+  if (groups && Array.isArray(groups) && groups.length > 0) return groups;
   // 尝试从旧版 speeddials 迁移
   var oldCards = await loadFromStorage(STORAGE_KEYS.SPEEDDIALS, null);
   if (oldCards && Array.isArray(oldCards) && oldCards.length > 0) {
     var migrated = [{ id: 'g1', name: '常用', cards: oldCards }];
     await saveToStorage(STORAGE_KEYS.GROUPS, migrated);
     await saveToStorage(STORAGE_KEYS.ACTIVE_GROUP, 0);
-    // 清除旧数据
     chrome.storage.sync.remove(STORAGE_KEYS.SPEEDDIALS);
     return migrated;
   }
@@ -133,20 +135,29 @@ async function getGroups() {
 }
 
 async function saveGroups(groups) {
-  // v1.0.5: 设置标记防止本页 onChanged 重复渲染，同时通知 SW 刷新右键菜单
   if (typeof _savingGroups !== 'undefined') _savingGroups = true;
   await saveToStorage(STORAGE_KEYS.GROUPS, groups);
   if (typeof _savingGroups !== 'undefined') _savingGroups = false;
-  // 通知 Service Worker 刷新右键菜单
-  try { chrome.runtime.sendMessage({ type: 'refresh-context-menus' }); } catch (e) { /* SW 可能未运行 */ }
+  // 同步存储超限时自动回退到本地存储
+  await new Promise(function (resolve) {
+    chrome.storage.sync.get([STORAGE_KEYS.GROUPS], function (result) {
+      if (!result[STORAGE_KEYS.GROUPS] || (Array.isArray(result[STORAGE_KEYS.GROUPS]) && result[STORAGE_KEYS.GROUPS].length === 0)) {
+        chrome.storage.local.set({ [STORAGE_KEYS.GROUPS]: groups }, resolve);
+      } else { resolve(); }
+    });
+  });
+  try { chrome.runtime.sendMessage({ type: 'refresh-context-menus' }); } catch (e) {}
 }
 
 async function getActiveGroup() {
-  return loadFromStorage(STORAGE_KEYS.ACTIVE_GROUP, 0);
+  var idx = await loadFromStorage(STORAGE_KEYS.ACTIVE_GROUP, 0);
+  if (idx !== 0) return idx;
+  return loadFromLocal(STORAGE_KEYS.ACTIVE_GROUP, 0);
 }
 
 async function saveActiveGroup(index) {
-  return saveToStorage(STORAGE_KEYS.ACTIVE_GROUP, index);
+  await saveToStorage(STORAGE_KEYS.ACTIVE_GROUP, index);
+  saveToLocal(STORAGE_KEYS.ACTIVE_GROUP, index);
 }
 
 // 兼容旧代码
