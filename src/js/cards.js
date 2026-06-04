@@ -371,7 +371,8 @@ async function saveDialog() {
 /* ==================== 访问计数（v1.0.9） ==================== */
 
 /** 对指定卡片访问计数 +1，自动保存并重渲染当前分组 */
-async function incrementVisitCount(cardId) {
+async function incrementVisitCount(cardId, render) {
+  if (render === undefined) render = true;
   for (var gi = 0; gi < groups.length; gi++) {
     var cards = groups[gi].cards || [];
     for (var ci = 0; ci < cards.length; ci++) {
@@ -380,7 +381,7 @@ async function incrementVisitCount(cardId) {
         await saveGroups(groups);
         if (gi === activeGroupIndex) {
           speeddials = cards;
-          renderSpeeddials();
+          if (render) renderSpeeddials();
         }
         return;
       }

@@ -187,8 +187,11 @@ function bindMainEvents() {
       if (!cardUrl) return;
       // 刚完成拖拽，忽略本次点击
       if (window._justDragged && Date.now() - window._justDragged < 300) return;
-      if (cardId && typeof incrementVisitCount === 'function') incrementVisitCount(cardId);
-      var mode = currentSettings ? currentSettings.cardOpenMode : 'current';
+      if (cardId && typeof incrementVisitCount === 'function') {
+        var mode = currentSettings ? currentSettings.cardOpenMode : 'current';
+        // 'current' 模式不渲染，避免导航前重建 DOM 导致图片破图
+        incrementVisitCount(cardId, mode !== 'current');
+      }
       if (mode === 'foreground') {
         chrome.tabs.create({ url: cardUrl, active: true });
       } else if (mode === 'background') {
