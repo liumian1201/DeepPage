@@ -68,40 +68,42 @@ async function captureScreenshot(url) {
     focused: true
   });
   var tabId = win.tabs[0].id;
+  var closed = false;
 
-  await new Promise(function (resolve, reject) {
-    var timeout = setTimeout(function () { reject(new Error('页面加载超时')); }, 30000);
-    chrome.tabs.onUpdated.addListener(function onUpdated(tid, info) {
-      if (tid === tabId && info.status === 'complete') {
-        clearTimeout(timeout);
-        chrome.tabs.onUpdated.removeListener(onUpdated);
-        resolve();
+  function injectButton() {
+    chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      func: function () {
+        if (document.getElementById('dp-capture-btn')) return;
+        var btn = document.createElement('div');
+        btn.id = 'dp-capture-btn';
+        btn.textContent = '📸 截图';
+        btn.style.cssText = 'position:fixed;bottom:16px;right:16px;z-index:999999;padding:10px 20px;background:#2563eb;color:#fff;border-radius:8px;font-size:15px;font-family:system-ui,sans-serif;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.3);user-select:none;';
+        btn.onclick = function () {
+          btn.textContent = '⏳ 截图中...';
+          btn.style.background = '#666';
+          btn.onclick = null;
+          document.body.style.overflow = 'hidden';
+          setTimeout(function () { btn.style.display = 'none'; }, 50);
+          setTimeout(function () { chrome.runtime.sendMessage({ type: 'capture-done' }); }, 100);
+        };
+        document.body.appendChild(btn);
       }
-    });
-  });
+    }).catch(function () {});
+  }
 
-  // 注入浮动截图按钮
-  await chrome.scripting.executeScript({
-    target: { tabId: tabId },
-    func: function () {
-      var btn = document.createElement('div');
-      btn.textContent = '📸 截图';
-      btn.style.cssText = 'position:fixed;bottom:16px;right:16px;z-index:999999;padding:10px 20px;background:#2563eb;color:#fff;border-radius:8px;font-size:15px;font-family:system-ui,sans-serif;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.3);user-select:none;';
-      btn.onclick = function () {
-        btn.textContent = '⏳ 截图中...';
-        btn.style.background = '#666';
-        btn.onclick = null;
-        document.body.style.overflow = 'hidden';
-        setTimeout(function () { btn.style.display = 'none'; }, 50);
-        setTimeout(function () { chrome.runtime.sendMessage({ type: 'capture-done' }); }, 100);
-      };
-      document.body.appendChild(btn);
+  // 页面每次导航完成后重新注入按钮
+  chrome.tabs.onUpdated.addListener(function onNav(tid, info) {
+    if (closed) { chrome.tabs.onUpdated.removeListener(onNav); return; }
+    if (tid === tabId && info.status === 'complete') {
+      injectButton();
     }
   });
 
   // 等待用户点击截图按钮
   return new Promise(function (resolve, reject) {
     var timeout = setTimeout(function () {
+      closed = true;
       chrome.runtime.onMessage.removeListener(onCaptureDone);
       try { chrome.windows.remove(win.id); } catch (e) {}
       reject(new Error('用户超时未截图'));
@@ -109,6 +111,7 @@ async function captureScreenshot(url) {
 
     function onCaptureDone(request) {
       if (request.type === 'capture-done') {
+        closed = true;
         clearTimeout(timeout);
         chrome.runtime.onMessage.removeListener(onCaptureDone);
         chrome.tabs.captureVisibleTab(win.id, { format: 'png' }).then(function (dataUrl) {
