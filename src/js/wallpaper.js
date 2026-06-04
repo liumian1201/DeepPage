@@ -116,12 +116,18 @@ async function deleteCardIcon(cardId) {
  */
 async function collectCardImageGarbage() {
   try {
-    // 收集所有有效卡片的 image 引用
     var validKeys = new Set();
+    // 检查 sync 和 local 两处存储（大容量数据在 local）
     var result = await new Promise(function (resolve) {
       chrome.storage.sync.get(['groups'], function (data) { resolve(data); });
     });
-    var groups = result.groups || [];
+    var groups = result.groups;
+    if (!groups || !Array.isArray(groups) || groups.length === 0) {
+      var localResult = await new Promise(function (resolve) {
+        chrome.storage.local.get(['groups'], function (data) { resolve(data); });
+      });
+      groups = localResult.groups || [];
+    }
     for (var i = 0; i < groups.length; i++) {
       var cards = groups[i].cards || [];
       for (var j = 0; j < cards.length; j++) {
