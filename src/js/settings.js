@@ -888,6 +888,9 @@ async function onSettingChanged() {
   if (typeof applyWallpaper === 'function') {
     applyWallpaper(currentSettings);
   }
+
+  // v1.2.2: 备份模式切换时刷新数据标签页状态
+  if (typeof updateImageDBInfo === 'function') updateImageDBInfo();
 }
 
 /** 外观变更回调（由 appearance.js 的 change 事件触发） */

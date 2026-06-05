@@ -350,6 +350,43 @@ async function updateImageDBInfo() {
   } catch (e) {
     el.textContent = '无法读取图片库';
   }
+
+  // v1.2.2: 备份状态与下次提醒时间
+  var statusEl = document.getElementById('backup-status-info');
+  var nextEl = document.getElementById('backup-next-info');
+  if (!statusEl || !nextEl) return;
+  chrome.storage.sync.get(['settings'], function (sr) {
+    var mode = (sr.settings && sr.settings.backupMode) || 'off';
+    if (mode === 'off') { statusEl.style.display = 'none'; nextEl.style.display = 'none'; return; }
+    statusEl.style.display = ''; nextEl.style.display = '';
+    var timeStr = function (ts) { return new Date(ts).toLocaleString('zh-CN'); };
+    if (mode === 'webdav') {
+      chrome.storage.local.get(['webdav_last_backup'], function (r) {
+        if (r.webdav_last_backup) {
+          statusEl.textContent = '☁️ 上次云端备份：' + timeStr(r.webdav_last_backup);
+        } else {
+          statusEl.textContent = '☁️ 尚未进行云端备份';
+        }
+        nextEl.style.display = 'none';
+      });
+    } else if (mode === 'remind') {
+      chrome.storage.local.get(['remind_last_backup','remind_backup_skipped'], function (r) {
+        if (r.remind_last_backup) {
+          if (r.remind_backup_skipped) {
+            statusEl.textContent = '⚠️ 上次备份已跳过（计时已开始）';
+          } else {
+            statusEl.textContent = '📥 上次本地备份：' + timeStr(r.remind_last_backup);
+          }
+          var days = (sr.settings && sr.settings.backupRemindDays) || 7;
+          var next = new Date(new Date(r.remind_last_backup).getTime() + days * 86400 * 1000);
+          nextEl.textContent = '⏰ 下次提醒时间：' + timeStr(next.toISOString());
+        } else {
+          statusEl.textContent = '📥 尚未进行本地备份';
+          nextEl.textContent = '⏰ 开启后首次打开页面时将引导备份';
+        }
+      });
+    }
+  });
 }
 
 // ==================== v1.2.0 WebDAV 辅助 ====================

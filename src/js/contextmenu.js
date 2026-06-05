@@ -194,7 +194,7 @@ function handleContextAction(action, ds) {
       if (contextCardId) {
         const card = speeddials.find((c) => c.id === contextCardId);
         if (card) {
-          if (typeof incrementVisitCount === 'function') incrementVisitCount(contextCardId);
+          if (typeof incrementVisitCount === 'function') incrementVisitCount(contextCardId, false);
           var mode = (typeof currentSettings !== 'undefined' && currentSettings) ? currentSettings.cardOpenMode : 'current';
           if (mode === 'foreground') {
             chrome.tabs.create({ url: card.url, active: true });

@@ -458,6 +458,8 @@
               </select>
             </div>
             <span id="image-db-info" class="setting-hint">暂无图片数据</span>
+            <span id="backup-status-info" class="setting-hint" style="display:none"></span>
+            <span id="backup-next-info" class="setting-hint" style="display:none"></span>
           </div>
           <div class="setting-group" id="webdav-config-group" style="margin-top:12px;display:none">
             <span class="setting-label">☁️ WebDAV 云备份</span>
@@ -583,6 +585,22 @@
         <div class="dialog-actions">
           <button id="confirm-cancel" class="btn-secondary">否</button>
           <button id="confirm-ok" class="btn-primary btn-danger">是</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 首次备份引导弹窗 ===== -->
+    <div id="dialog-backup-guide" class="dialog-overlay hidden">
+      <div class="dialog-card dialog-confirm-card">
+        <h3>📥 首次备份引导</h3>
+        <p style="font-size:14px;color:var(--text-secondary);line-height:1.8;text-align:left;padding:0 8px">
+          你已开启<strong>定时提醒模式</strong>。<br>
+          DeepPage 需要一次初始备份来<strong>开始计时</strong>，之后会按你设定的周期自动提醒。<br><br>
+          👉 点击下方按钮导出数据即可完成首次备份。
+        </p>
+        <div class="dialog-actions">
+          <button id="backup-guide-later" class="btn-secondary">稍后再说</button>
+          <button id="backup-guide-export" class="btn-primary">📥 立即导出备份</button>
         </div>
       </div>
     </div>

@@ -93,7 +93,6 @@ function initWebdavSection() {
       var zipBlob = await _buildZipBlob(config);
       await webdavUpload(zipBlob);
       setWebdavLastBackup(new Date().toISOString());
-      if (typeof updateWebdavStatus === 'function') updateWebdavStatus();
       _showWStatus('备份成功 ✅', true);
       if (typeof showToast === 'function') showToast('☁️ 已备份到 WebDAV', 'success');
     } catch (e) { _showWStatus('备份失败: ' + e.message, false); }
@@ -128,7 +127,6 @@ function initWebdavSection() {
         if (loading) loading.classList.add('hidden');
       }
       if (remoteTime) setWebdavLastBackup(new Date(remoteTime).toISOString());
-      if (typeof updateWebdavStatus === 'function') updateWebdavStatus();
       _showWStatus('恢复成功，即将刷新...', true);
       if (typeof showToast === 'function') showToast('☁️ 已从 WebDAV 恢复，即将刷新...', 'success');
       setTimeout(function () { window.location.reload(); }, 1500);
@@ -154,6 +152,5 @@ function initWebdavSection() {
     if (webdavUserEl) webdavUserEl.value = r.webdav_user || '';
     if (webdavPassEl) webdavPassEl.value = r.webdav_pass ? atob(r.webdav_pass) : '';
     if (typeof _updateBackupModeUI === 'function') _updateBackupModeUI();
-    if (typeof updateWebdavStatus === 'function') updateWebdavStatus();
   });
 }

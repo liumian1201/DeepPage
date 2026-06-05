@@ -112,7 +112,7 @@ async function init() {
   // v1.1.0: 沉浸模式 — 双击空白隐藏/恢复界面
   var _immClick = 0;
   document.addEventListener('click', function (e) {
-    if (e.target.closest('button') || e.target.closest('input') || e.target.closest('select') || e.target.closest('.settings-panel') || e.target.closest('.dialog-overlay')) return;
+    if (e.target.closest('button') || e.target.closest('input') || e.target.closest('select') || e.target.closest('.settings-panel') || e.target.closest('.dialog-overlay') || e.target.closest('.toast')) return;
     var now = Date.now();
     if (now - _immClick < 350) {
       document.body.classList.toggle('immersive');
@@ -156,40 +156,69 @@ async function _autoBackupIfNeeded() {
   var mode = currentSettings ? currentSettings.backupMode : 'off';
   if (!mode || mode === 'off') return;
 
-  if (document.activeElement && document.activeElement.id === 'search-input') {
-    setTimeout(function () { _autoBackupIfNeeded(); }, 30000);
-    return;
-  }
-
-  var cfg = await new Promise(function (r) { chrome.storage.local.get(['webdav_url','webdav_last_backup'], r); });
-  var lastTs = cfg.webdav_last_backup ? new Date(cfg.webdav_last_backup).getTime() : 0;
-  var neverBackedUp = !cfg.webdav_last_backup;
-
   if (mode === 'webdav') {
-    if (!cfg.webdav_url) return;
-    if (!neverBackedUp && Date.now() - lastTs < 12 * 3600 * 1000) return;
+    var wcfg = await new Promise(function (r) { chrome.storage.local.get(['webdav_url','webdav_last_backup'], r); });
+    if (!wcfg.webdav_url) return;
+    var wLastTs = wcfg.webdav_last_backup ? new Date(wcfg.webdav_last_backup).getTime() : 0;
+    if (Date.now() - wLastTs < 12 * 3600 * 1000) return;
     var remoteTime = null;
     try { remoteTime = await webdavCheckConflict(); } catch (e) { return; }
-    if (remoteTime && new Date(remoteTime).getTime() > lastTs) return;
+    if (remoteTime && new Date(remoteTime).getTime() > wLastTs) return;
     try {
       var data = await _collectAllData();
       var zipBlob = await _buildZipBlob(data);
       await webdavUpload(zipBlob);
       setWebdavLastBackup(new Date().toISOString());
     } catch (e) { /* 静默 */ }
-  } else if (mode === 'remind') {
-    var days = (currentSettings && currentSettings.backupRemindDays) || 7;
-    if (neverBackedUp || Date.now() - lastTs > days * 86400 * 1000) {
-      var msg = neverBackedUp ? '📥 尚未进行过备份，点击此处开始第一次备份' : '📥 已超 ' + days + ' 天未备份，点击此处导出数据';
-      showToast(msg, 'warning');
-      var toast = document.querySelector('.toast');
-      if (toast) {
-        toast.style.cursor = 'pointer';
-        toast.onclick = function () {
+    return;
+  }
+
+  // remind 模式：使用独立时间戳 remind_last_backup，不与 WebDAV 共用
+  var rcfg = await new Promise(function (r) { chrome.storage.local.get(['remind_last_backup'], r); });
+  var rLastTs = rcfg.remind_last_backup ? new Date(rcfg.remind_last_backup).getTime() : 0;
+  var neverReminded = !rcfg.remind_last_backup;
+
+  // 首次引导：弹出自定义对话框，清晰说明原因
+  if (neverReminded) {
+    var dialog = document.getElementById('dialog-backup-guide');
+    if (dialog) {
+      dialog.classList.remove('hidden');
+      var exportBtn = document.getElementById('backup-guide-export');
+      var laterBtn = document.getElementById('backup-guide-later');
+      var closeDialog = function () { dialog.classList.add('hidden'); };
+      if (exportBtn) {
+        exportBtn.onclick = function () {
           if (typeof exportAll === 'function') exportAll();
-          setWebdavLastBackup(new Date().toISOString());
+          chrome.storage.local.set({ remind_last_backup: new Date().toISOString(), remind_backup_skipped: false });
+          closeDialog();
+          showToast('✅ 首次备份完成，计时已开始', 'success');
         };
       }
+      if (laterBtn) {
+        laterBtn.onclick = function () {
+          chrome.storage.local.set({ remind_last_backup: new Date().toISOString(), remind_backup_skipped: true });
+          closeDialog();
+        };
+      }
+    }
+    return;
+  }
+
+  if (document.activeElement && document.activeElement.id === 'search-input') {
+    setTimeout(function () { _autoBackupIfNeeded(); }, 30000);
+    return;
+  }
+
+  var days = (currentSettings && currentSettings.backupRemindDays) || 7;
+  if (Date.now() - rLastTs > days * 86400 * 1000) {
+    showToast('📥 已超 ' + days + ' 天未备份，点击此处导出数据', 'warning');
+    var toast2 = document.querySelector('.toast');
+    if (toast2) {
+      toast2.style.cursor = 'pointer';
+      toast2.onclick = function () {
+        if (typeof exportAll === 'function') exportAll();
+        chrome.storage.local.set({ remind_last_backup: new Date().toISOString() });
+      };
     }
   }
 }
@@ -249,8 +278,8 @@ function bindMainEvents() {
       if (window._justDragged && Date.now() - window._justDragged < 300) return;
       if (cardId && typeof incrementVisitCount === 'function') {
         var mode = currentSettings ? currentSettings.cardOpenMode : 'current';
-        // 'current' 模式不渲染，避免导航前重建 DOM 导致图片破图
-        incrementVisitCount(cardId, mode !== 'current');
+        // 仅在切换标签页（foreground）时重渲染；current/background 用户仍在本页，不重建 DOM
+        incrementVisitCount(cardId, mode === 'foreground');
       }
       if (mode === 'foreground') {
         chrome.tabs.create({ url: cardUrl, active: true });
@@ -272,7 +301,7 @@ function bindMainEvents() {
       var cardId = (wrapper && wrapper.dataset.id) ? wrapper.dataset.id : cardEl.dataset.id;
       if (cardUrl) {
         e.preventDefault();
-        if (cardId && typeof incrementVisitCount === 'function') incrementVisitCount(cardId);
+        if (cardId && typeof incrementVisitCount === 'function') incrementVisitCount(cardId, false);
         window.open(cardUrl, '_blank');
       }
     }
