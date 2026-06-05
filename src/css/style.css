@@ -1121,7 +1121,8 @@ body.has-wallpaper::before {
 }
 
 .setting-group select,
-.setting-group input[type="text"] {
+.setting-group input[type="text"],
+.setting-group input[type="password"] {
   padding: 10px 12px;
   border: 1px solid var(--border-color);
   border-radius: var(--btn-radius);
@@ -1133,7 +1134,8 @@ body.has-wallpaper::before {
 }
 
 .setting-group select:focus,
-.setting-group input[type="text"]:focus {
+.setting-group input[type="text"]:focus,
+.setting-group input[type="password"]:focus {
   outline: none;
   border-color: var(--accent);
 }

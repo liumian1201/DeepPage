@@ -91,6 +91,19 @@ async function init() {
     });
   }
 
+  // v1.2.0: 关闭页面前静默备份到 WebDAV
+  window.addEventListener('beforeunload', function () {
+    chrome.storage.local.get(['webdav_auto_backup','webdav_url'], function (r) {
+      if (!r.webdav_auto_backup || !r.webdav_url) return;
+      _collectAllData().then(function (data) {
+        return _buildZipBlob(data);
+      }).then(function (zipBlob) {
+        webdavSilentPut(zipBlob);
+        setWebdavLastBackup(new Date().toISOString());
+      }).catch(function () {});
+    });
+  });
+
   // v1.0.7: 离线指示器
   if (!navigator.onLine) document.body.classList.add('offline');
   window.addEventListener('online', function () { document.body.classList.remove('offline'); });

@@ -442,6 +442,22 @@
             <span id="image-db-info" class="setting-hint">暂无图片数据</span>
           </div>
           <div class="setting-group" style="margin-top:12px">
+            <span class="setting-label">☁️ WebDAV 云备份</span>
+            <div class="btn-row" style="margin-bottom:8px">
+              <button id="btn-webdav-backup" class="btn-backup">⬆ 立即备份</button>
+              <button id="btn-webdav-restore" class="btn-backup">⬇ 从云端恢复</button>
+            </div>
+            <input type="text" id="webdav-url" class="setting-input" placeholder="WebDAV 地址 (如 https://dav.jianguoyun.com/dav/DeepPage)" style="width:100%;box-sizing:border-box">
+            <input type="text" id="webdav-user" class="setting-input" placeholder="账号" style="margin-top:4px;width:100%;box-sizing:border-box">
+            <input type="password" id="webdav-pass" class="setting-input" placeholder="密码（坚果云请用应用专用密码）" style="margin-top:4px;width:100%;box-sizing:border-box"><span id="webdav-pass-toggle" style="margin-left:-34px;cursor:pointer;user-select:none;font-size:16px;opacity:0.5;vertical-align:middle" title="显示/隐藏密码">👁</span>
+            <div class="btn-row" style="margin-top:4px">
+              <button id="btn-webdav-test" class="btn-backup btn-backup-sm">🔗 测试连接</button>
+              <button id="btn-webdav-save" class="btn-backup btn-backup-sm">💾 保存配置</button>
+            </div>
+            <label class="toggle-item"><input type="checkbox" id="toggle-webdav-auto"> 关闭页面前自动备份</label>
+            <span id="webdav-status" class="setting-hint"></span>
+          </div>
+          <div class="setting-group" style="margin-top:12px">
             <button id="btn-reset-all" class="btn-reset-danger">⚠️ 重置全部数据</button>
           </div>
           <!-- 导入 loading 遮罩 -->
@@ -627,6 +643,7 @@
   <script src="js/wallpaper.js"></script>
   <script src="js/appearance.js"></script>
   <script src="js/fflate.min.js"></script>
+  <script src="js/webdav.js"></script>
   <script src="js/backup.js"></script>
   <script src="js/cards.js"></script>
   <script src="js/groups.js"></script>

@@ -2,6 +2,29 @@
 
 ---
 
+## v1.2.0 (2026-06-05)
+
+### ☁️ WebDAV 云备份
+
+- 设置面板 → 数据 → 新增 WebDAV 配置区（地址/账号/密码+👁显隐切换）
+- 支持标准 WebDAV 协议（坚果云/NextCloud/ownCloud/NAS），Basic Auth 认证
+- 所有网络请求由 `background.js` Service Worker 代理，彻底免疫 CORS
+- 密码 `btoa` 混淆后存 `chrome.storage.local`，不与 Google 账号同步
+- **手动备份**：一键导出 zip（`ArrayBuffer`→数组传输防丢失）→MKCOL 建目录→PUT 上传
+- **手动恢复**：PROPFIND 读取云端时间→自定义确认弹窗显示时间→下载→走现有导入流程
+- **自动备份**：`beforeunload` 静默上传（`ArrayBuffer` 转移至 SW，不阻塞关闭）
+- **冲突检测**：正则提取 `getlastmodified`（SW 无 `DOMParser`），对比本地时间
+- **测试连接**：一键验证 WebDAV 地址和凭据（先静默保存再测试）
+- 恢复后自动更新本地备份时间戳
+
+### 🛡️ 安全
+
+- 凭据独占 `chrome.storage.local`，不参与 sync 跨设备同步
+- 密码 `btoa` Base64 混淆防明文泄露
+- 静默备份失败静默忽略，不打扰用户
+
+---
+
 ## v1.1.9 (2026-06-05)
 
 ### 🐛 修复截图窗口关闭后死锁

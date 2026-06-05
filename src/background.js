@@ -41,6 +41,13 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     return true;
   }
 
+  // v1.2.0: WebDAV 代理 — 所有云请求走 SW 绕过 CORS
+  if (request.type === 'webdav:put') { webdavProxy('PUT', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
+  if (request.type === 'webdav:get') { webdavProxy('GET').then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
+  if (request.type === 'webdav:propfind') { webdavProxy('PROPFIND').then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
+  if (request.type === 'webdav:test') { webdavProxy('OPTIONS').then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
+  if (request.type === 'webdav:silent-put') { webdavProxy('PUT', request.payload).catch(function (e) { console.warn('silent-put:', e.message); }); sendResponse({ ok: true }); return false; }
+
   // v1.1.5: 网页截图 — 后台弹出窗口截图后关闭
   if (request.type === 'capture-screenshot') {
     var url = request.url;
@@ -56,6 +63,68 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     return true;
   }
 });
+
+// ---- WebDAV 云备份代理（v1.2.0） ----
+
+var WEBDAV_BACKUP_FILE = 'DeepPage_Backup.zip';
+
+async function webdavProxy(method, payload) {
+  payload = payload || {};
+  // 支持直接传凭据（测试连接等场景），回退到 storage.local
+  var url = payload._url, user = payload._user, pass = payload._pass;
+  if (!url || !user || !pass) {
+    var cfg = await new Promise(function (r) { chrome.storage.local.get(['webdav_url','webdav_user','webdav_pass'], r); });
+    url = cfg.webdav_url; user = cfg.webdav_user; pass = cfg.webdav_pass;
+  }
+  if (!url || !user || !pass) {
+    return { ok: false, error: 'WebDAV 未配置' };
+  }
+  var baseUrl = url.replace(/\/$/, '');
+  var auth = 'Basic ' + btoa(user + ':' + atob(pass));
+  var headers = { Authorization: auth };
+
+  if (method === 'PROPFIND') {
+    headers.Depth = '1';
+    var res = await fetch(baseUrl, { method: 'PROPFIND', headers: headers });
+    if (!res.ok) return { ok: false, error: 'PROPFIND ' + res.status };
+    var text = await res.text();
+    // SW 无 DOMParser，正则提取 getlastmodified
+    var m = text.match(/<[^>]*getlastmodified[^>]*>([^<]+)<\/[^>]*getlastmodified[^>]*>/i);
+    return { ok: true, data: m ? m[1] : null };
+  }
+
+  if (method === 'GET') {
+    var url = baseUrl + '/' + WEBDAV_BACKUP_FILE;
+    var res = await fetch(url, { method: 'GET', headers: headers });
+    if (!res.ok) return { ok: false, error: 'GET ' + res.status };
+    var ab = await res.arrayBuffer();
+    return { ok: true, data: Array.from(new Uint8Array(ab)) };
+  }
+
+  if (method === 'PUT') {
+    try { await fetch(baseUrl, { method: 'MKCOL', headers: headers }); } catch (e) {}
+    var url = baseUrl + '/' + WEBDAV_BACKUP_FILE;
+    var body = payload.body;
+    if (Array.isArray(body)) body = new Uint8Array(body);
+    if (!body || !body.byteLength) return { ok: false, error: 'empty body' };
+    var putHeaders = Object.assign({}, headers, { 'Content-Type': 'application/zip' });
+    var res = await fetch(url, { method: 'PUT', headers: putHeaders, body: body });
+    if (!res.ok) {
+      var errText = '';
+      try { errText = ' ' + (await res.text()).slice(0, 200); } catch (e) {}
+      return { ok: false, error: 'PUT ' + res.status + ' ' + res.statusText + errText };
+    }
+    return { ok: true, data: new Date().toISOString() };
+  }
+
+  if (method === 'OPTIONS') {
+    var res = await fetch(baseUrl, { method: 'OPTIONS', headers: headers });
+    if (!res.ok) return { ok: false, error: '连接失败 ' + res.status };
+    return { ok: true, data: 'connected' };
+  }
+
+  return { ok: false, error: 'unknown method' };
+}
 
 // ---- 网页截图（v1.1.5） ----
 

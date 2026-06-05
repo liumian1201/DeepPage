@@ -179,69 +179,17 @@ function importAll() {
 
         // 先恢复图片（IndexedDB），再恢复配置（storage.sync）
         // 避免 storage.onChanged 触发渲染时 IndexedDB 还没写完
+        var imported = 0;
         if (hasImages) {
-          var db = await openImgDB();
-          var imported = 0;
-          for (var i = 0; i < manifest.images.length; i++) {
-            var img = manifest.images[i];
-            var raw = unzipped[img.key];
-            if (!img.key || !raw) continue;
-            try {
-              var blob = new Blob([raw], { type: img.type || 'image/png' });
-              await new Promise(function (resolve, reject) {
-                var tx = db.transaction('images', 'readwrite');
-                tx.objectStore('images').put(blob, img.key);
-                tx.oncomplete = function () { resolve(); };
-                tx.onerror = function () { reject(tx.error); };
-              });
-              imported++;
-              // BUG-001: 写入后立即释放解压数据，降低内存峰值
-              unzipped[img.key] = undefined;
-            } catch (e) { console.warn('导入图片失败:', img.key, e); }
-          }
+          imported = await _importImages(unzipped, manifest);
         }
 
         // 恢复配置（storage.sync 写在图片之后）
+        var dupCount = 0, syncFailed = false;
         if (hasConfig) {
-          var config = JSON.parse(fflate.strFromU8(unzipped['config.json']));
-          if (typeof config === 'object' && config !== null) {
-            // 去重：同 ID 出现在多个分组时生成唯一 ID，同时重映射 IndexedDB key
-            var dupCount = dedupCardIds(config.groups, manifest, unzipped);
-            var syncFailed = false;
-            await new Promise(function (resolve) {
-              chrome.storage.sync.set({
-                settings: config.settings || {},
-                groups: config.groups || [],
-                activeGroup: config.activeGroup || 0
-              }, function () {
-                if (chrome.runtime.lastError) { syncFailed = true; }
-                resolve();
-              });
-            });
-            // 超限回退：将分组数据存到 chrome.storage.local
-            if (syncFailed) {
-              var fSettings = config.settings || {};
-              fSettings.storageFallback = 'local';
-              await new Promise(function (resolve) {
-                chrome.storage.local.set({
-                  groups: config.groups || [],
-                  activeGroup: config.activeGroup || 0
-                }, resolve);
-              });
-              var settingsSyncFailed = false;
-              await new Promise(function (resolve) {
-                chrome.storage.sync.set({ settings: fSettings, groups: [], activeGroup: 0 }, function () {
-                  if (chrome.runtime.lastError) { settingsSyncFailed = true; }
-                  resolve();
-                });
-              });
-              if (settingsSyncFailed) {
-                await new Promise(function (resolve) {
-                  chrome.storage.local.set({ settings: fSettings }, resolve);
-                });
-              }
-            }
-          }
+          var cfgResult = await _importConfig(unzipped, manifest);
+          dupCount = cfgResult.dupCount;
+          syncFailed = cfgResult.syncFailed;
         }
 
         // BUG-002: 导入后清理旧卡片残留的孤儿图片
@@ -402,6 +350,143 @@ async function updateImageDBInfo() {
   } catch (e) {
     el.textContent = '无法读取图片库';
   }
+}
+
+// ==================== v1.2.0 WebDAV 辅助 ====================
+
+/** 导入图片到 IndexedDB */
+async function _importImages(unzipped, manifest) {
+  var db = await openImgDB();
+  var imported = 0;
+  for (var i = 0; i < manifest.images.length; i++) {
+    var img = manifest.images[i];
+    var raw = unzipped[img.key];
+    if (!img.key || !raw) continue;
+    try {
+      var blob = new Blob([raw], { type: img.type || 'image/png' });
+      await new Promise(function (resolve, reject) {
+        var tx = db.transaction('images', 'readwrite');
+        tx.objectStore('images').put(blob, img.key);
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { reject(tx.error); };
+      });
+      imported++;
+      unzipped[img.key] = undefined;
+    } catch (e) { console.warn('导入图片失败:', img.key, e); }
+  }
+  return imported;
+}
+
+/** 导入配置到 storage */
+async function _importConfig(unzipped, manifest) {
+  var config = JSON.parse(fflate.strFromU8(unzipped['config.json']));
+  if (typeof config !== 'object' || config === null) return 0;
+  var dupCount = dedupCardIds(config.groups, manifest, unzipped);
+  var syncFailed = false;
+  await new Promise(function (resolve) {
+    chrome.storage.sync.set({
+      settings: config.settings || {},
+      groups: config.groups || [],
+      activeGroup: config.activeGroup || 0
+    }, function () {
+      if (chrome.runtime.lastError) { syncFailed = true; }
+      resolve();
+    });
+  });
+  if (syncFailed) {
+    var fSettings = config.settings || {};
+    fSettings.storageFallback = 'local';
+    await new Promise(function (resolve) {
+      chrome.storage.local.set({ groups: config.groups || [], activeGroup: config.activeGroup || 0 }, resolve);
+    });
+    var ssf = false;
+    await new Promise(function (resolve) {
+      chrome.storage.sync.set({ settings: fSettings, groups: [], activeGroup: 0 }, function () {
+        if (chrome.runtime.lastError) ssf = true;
+        resolve();
+      });
+    });
+    if (ssf) {
+      await new Promise(function (resolve) { chrome.storage.local.set({ settings: fSettings }, resolve); });
+    }
+  }
+  return { dupCount: dupCount, syncFailed: syncFailed };
+}
+
+/** 供 WebDAV 恢复使用的统一入口 */
+async function doImportFromUnzipped(unzipped, showToastResult) {
+  var manifestRaw = unzipped['manifest.json'];
+  var manifest = manifestRaw ? JSON.parse(fflate.strFromU8(manifestRaw)) : null;
+  var hasConfig = manifest && manifest.hasConfig && unzipped['config.json'];
+  var hasImages = manifest && manifest.images && manifest.images.length > 0;
+  var imported = 0, dupCount = 0;
+  if (hasImages) imported = await _importImages(unzipped, manifest);
+  if (hasConfig) { var r = await _importConfig(unzipped, manifest); dupCount = r.dupCount; }
+  if (typeof collectCardImageGarbage === 'function') await collectCardImageGarbage();
+  if (showToastResult && typeof showToast === 'function') {
+    var msg = '全部导入成功（配置 + ' + imported + '/' + (manifest ? manifest.images.length : 0) + ' 张图片）';
+    if (dupCount > 0) msg += '，修复 ' + dupCount + ' 个重复 ID';
+    showToast(msg + '，即将刷新...', 'success');
+  }
+}
+
+/** 更新 WebDAV 状态显示 */
+function updateWebdavStatus() {
+  var el = document.getElementById('webdav-status');
+  if (!el) return;
+  getWebdavLastBackup(function (t) {
+    if (t) {
+      el.textContent = '上次备份: ' + new Date(t).toLocaleString('zh-CN');
+    } else {
+      el.textContent = '尚未备份';
+    }
+  });
+}
+
+/** 收集全量数据（供 WebDAV 备份复用 exportAll 逻辑） */
+async function _collectAllData() {
+  var config = await new Promise(function (resolve) {
+    chrome.storage.sync.get(null, function (result) { resolve(result); });
+  });
+  if (!config.groups || (Array.isArray(config.groups) && config.groups.length === 0)) {
+    var localData = await new Promise(function (resolve) {
+      chrome.storage.local.get(['groups', 'activeGroup'], function (result) { resolve(result); });
+    });
+    if (localData.groups && Array.isArray(localData.groups) && localData.groups.length > 0) {
+      config.groups = localData.groups;
+      config.activeGroup = localData.activeGroup;
+    }
+  }
+  if (config.settings) config.settings._exportTime = new Date().toLocaleString('zh-CN');
+
+  var db = await openImgDB();
+  var images = await new Promise(function (resolve) {
+    var tx = db.transaction('images', 'readonly');
+    var result = [];
+    tx.objectStore('images').openCursor().onsuccess = function (e) {
+      var cursor = e.target.result;
+      if (cursor) { result.push({ key: cursor.key, blob: cursor.value }); cursor.continue(); }
+      else resolve(result);
+    };
+  });
+  return { config: config, images: images };
+}
+
+/** 构建 zip Blob */
+async function _buildZipBlob(data) {
+  var zipFiles = {};
+  var imageManifest = [];
+  for (var i = 0; i < data.images.length; i++) {
+    var img = data.images[i];
+    var buf = await img.blob.arrayBuffer();
+    zipFiles[img.key] = new Uint8Array(buf);
+    imageManifest.push({ key: img.key, type: img.blob.type || 'image/png', size: buf.byteLength });
+  }
+  zipFiles['config.json'] = fflate.strToU8(JSON.stringify(data.config));
+  zipFiles['manifest.json'] = fflate.strToU8(JSON.stringify({
+    version: 3, type: 'backup', hasConfig: true, imageCount: imageManifest.length, images: imageManifest
+  }));
+  return new Blob([fflate.zipSync(zipFiles, { level: 6 })], { type: 'application/zip' });
 }
 
 // ==================== 工具函数 ====================

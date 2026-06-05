@@ -85,7 +85,8 @@ var DEFAULT_SETTINGS = {
   showVisitCount: true,
   cardsMarginTop: 0,
   groupDotSize: 10,
-  groupTabSize: 13
+  groupTabSize: 13,
+  webdavAutoBackup: false
 };
 
 function loadFromStorage(key, defaultValue) {
