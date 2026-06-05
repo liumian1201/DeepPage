@@ -60,7 +60,7 @@ async function webdavTestConnection(creds) {
   return _wdSend(WEBDAV_MSG.TEST, null, creds);
 }
 
-/** 静默备份（beforeunload 调用） */
+/** 静默备份（beforeunload 调用，保留兼容） */
 function webdavSilentPut(zipBlob) {
   _wdGetCreds().then(function (c) {
     return zipBlob.arrayBuffer().then(function (buf) {

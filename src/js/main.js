@@ -91,18 +91,10 @@ async function init() {
     });
   }
 
-  // v1.2.0: 关闭页面前静默备份到 WebDAV
-  window.addEventListener('beforeunload', function () {
-    chrome.storage.local.get(['webdav_auto_backup','webdav_url'], function (r) {
-      if (!r.webdav_auto_backup || !r.webdav_url) return;
-      _collectAllData().then(function (data) {
-        return _buildZipBlob(data);
-      }).then(function (zipBlob) {
-        webdavSilentPut(zipBlob);
-        setWebdavLastBackup(new Date().toISOString());
-      }).catch(function () {});
-    });
-  });
+  // v1.2.1: 打开页面后延迟自动备份（12h 限频 + 冲突检测）
+  setTimeout(function () {
+    _autoBackupIfNeeded();
+  }, 5000);
 
   // v1.0.7: 离线指示器
   if (!navigator.onLine) document.body.classList.add('offline');
@@ -156,6 +148,48 @@ function _debouncedRefresh() {
       renderGroupDots();
     }
   }, 300);
+}
+
+/* ==================== 自动备份调度（v1.2.1） ==================== */
+
+async function _autoBackupIfNeeded() {
+  var mode = currentSettings ? currentSettings.backupMode : 'off';
+  if (!mode || mode === 'off') return;
+
+  if (document.activeElement && document.activeElement.id === 'search-input') {
+    setTimeout(function () { _autoBackupIfNeeded(); }, 30000);
+    return;
+  }
+
+  var cfg = await new Promise(function (r) { chrome.storage.local.get(['webdav_url','webdav_last_backup'], r); });
+  var lastTs = cfg.webdav_last_backup ? new Date(cfg.webdav_last_backup).getTime() : 0;
+
+  if (mode === 'webdav') {
+    if (!cfg.webdav_url) return;
+    if (Date.now() - lastTs < 12 * 3600 * 1000) return;
+    var remoteTime = null;
+    try { remoteTime = await webdavCheckConflict(); } catch (e) { return; }
+    if (remoteTime && new Date(remoteTime).getTime() > lastTs) return;
+    try {
+      var data = await _collectAllData();
+      var zipBlob = await _buildZipBlob(data);
+      await webdavUpload(zipBlob);
+      setWebdavLastBackup(new Date().toISOString());
+    } catch (e) { /* 静默 */ }
+  } else if (mode === 'remind') {
+    var days = (currentSettings && currentSettings.backupRemindDays) || 7;
+    if (Date.now() - lastTs > days * 86400 * 1000) {
+      showToast('📥 已超 ' + days + ' 天未备份，点击此处导出数据', 'warning');
+      var toast = document.querySelector('.toast');
+      if (toast) {
+        toast.style.cursor = 'pointer';
+        toast.onclick = function () {
+          if (typeof exportAll === 'function') exportAll();
+          setWebdavLastBackup(new Date().toISOString());
+        };
+      }
+    }
+  }
 }
 
 chrome.storage.onChanged.addListener(function (changes, areaName) {

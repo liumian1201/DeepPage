@@ -439,9 +439,25 @@
               <button id="btn-export-all" class="btn-backup">📥 导出数据</button>
               <button id="btn-import-all" class="btn-backup">📤 导入数据</button>
             </div>
+            <div class="setting-inline-row" style="margin-top:8px">
+              <label class="setting-inline-label">自动备份模式</label>
+              <select id="setting-backup-mode">
+                <option value="off">关闭</option>
+                <option value="remind">本地定时提醒</option>
+                <option value="webdav">WebDAV 自动同步</option>
+              </select>
+            </div>
+            <div class="setting-inline-row" id="backup-remind-row" style="display:none">
+              <label class="setting-inline-label">提醒周期</label>
+              <select id="setting-backup-remind-days">
+                <option value="7">7 天</option>
+                <option value="14">14 天</option>
+                <option value="30">30 天</option>
+              </select>
+            </div>
             <span id="image-db-info" class="setting-hint">暂无图片数据</span>
           </div>
-          <div class="setting-group" style="margin-top:12px">
+          <div class="setting-group" id="webdav-config-group" style="margin-top:12px;display:none">
             <span class="setting-label">☁️ WebDAV 云备份</span>
             <div class="btn-row" style="margin-bottom:8px">
               <button id="btn-webdav-backup" class="btn-backup">⬆ 立即备份</button>
@@ -454,10 +470,11 @@
               <button id="btn-webdav-test" class="btn-backup btn-backup-sm">🔗 测试连接</button>
               <button id="btn-webdav-save" class="btn-backup btn-backup-sm">💾 保存配置</button>
             </div>
-            <label class="toggle-item"><input type="checkbox" id="toggle-webdav-auto"> 关闭页面前自动备份</label>
             <span id="webdav-status" class="setting-hint"></span>
           </div>
           <div class="setting-group" style="margin-top:12px">
+            <button id="btn-restore-bak" class="btn-backup" style="margin-top:8px;text-align:center">↩️ 恢复上一次改动</button>
+            <div style="margin-top:8px"></div>
             <button id="btn-reset-all" class="btn-reset-danger">⚠️ 重置全部数据</button>
           </div>
           <!-- 导入 loading 遮罩 -->

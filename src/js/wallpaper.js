@@ -128,8 +128,14 @@ async function collectCardImageGarbage() {
       });
       groups = localResult.groups || [];
     }
-    for (var i = 0; i < groups.length; i++) {
-      var cards = groups[i].cards || [];
+    // v1.2.1: 同时检查 local_bak 中的图片引用，避免误删恢复数据
+    var bakResult = await new Promise(function (resolve) {
+      chrome.storage.local.get(['groups_local_bak'], function (data) { resolve(data); });
+    });
+    var bakGroups = bakResult.groups_local_bak || [];
+    var allGroups = groups.concat(bakGroups);
+    for (var i = 0; i < allGroups.length; i++) {
+      var cards = allGroups[i].cards || [];
       for (var j = 0; j < cards.length; j++) {
         var img = cards[j].image;
         if (img && img.startsWith('idx:')) {

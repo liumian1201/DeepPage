@@ -86,7 +86,10 @@ var DEFAULT_SETTINGS = {
   cardsMarginTop: 0,
   groupDotSize: 10,
   groupTabSize: 13,
-  webdavAutoBackup: false
+  webdavAutoBackup: false,
+  backupRemind: true,
+  backupMode: 'off',
+  backupRemindDays: 7
 };
 
 function loadFromStorage(key, defaultValue) {
@@ -144,6 +147,15 @@ async function getGroups() {
 }
 
 async function saveGroups(groups) {
+  // v1.2.1: 写入前保存上一版快照到 local（后悔药）
+  if (typeof getGroups === 'function') {
+    try {
+      var prev = await getGroups();
+      if (prev && Array.isArray(prev) && prev.length > 0) {
+        await new Promise(function (r) { chrome.storage.local.set({ groups_local_bak: prev, bak_timestamp: Date.now() }, r); });
+      }
+    } catch (e) { console.error('local_bak save failed:', e); }
+  }
   if (typeof _savingGroups !== 'undefined') _savingGroups = true;
   await saveToStorage(STORAGE_KEYS.GROUPS, groups);
   if (typeof _savingGroups !== 'undefined') _savingGroups = false;

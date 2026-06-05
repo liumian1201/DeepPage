@@ -94,6 +94,9 @@ const domSettings = {
   webdavPass:     document.getElementById('webdav-pass'),
   webdavStatus:   document.getElementById('webdav-status'),
   toggleWebdavAuto: document.getElementById('toggle-webdav-auto'),
+  toggleBackupRemind: document.getElementById('toggle-backup-remind'),
+  backupMode: document.getElementById('setting-backup-mode'),
+  backupRemindDays: document.getElementById('setting-backup-remind-days'),
 
   cardWidth:     document.getElementById('setting-card-width'),
   cardWidthVal:  document.getElementById('card-width-val'),
@@ -132,7 +135,9 @@ function populateSettingsForm(settings) {
   if (domSettings.toggleShowVisitCount) domSettings.toggleShowVisitCount.checked = settings.showVisitCount !== false;
   if (domSettings.togglePureTextCards) domSettings.togglePureTextCards.checked = settings.pureTextCards === true;
   if (domSettings.toggleConfirmDelete) domSettings.toggleConfirmDelete.checked = settings.confirmDelete !== false;
-  if (domSettings.toggleDisableWheelSwitch) domSettings.toggleDisableWheelSwitch.checked = settings.disableWheelSwitch === true;
+  if (domSettings.backupMode) domSettings.backupMode.value = settings.backupMode || 'off';
+  if (domSettings.backupRemindDays) domSettings.backupRemindDays.value = settings.backupRemindDays || 7;
+  _updateBackupModeUI();
   if (domSettings.toggleLock) domSettings.toggleLock.checked = settings.isLocked === true;
   if (domSettings.toggleShowGroupIndicator) domSettings.toggleShowGroupIndicator.checked = settings.showGroupIndicator !== false;
   if (domSettings.groupNameMode) domSettings.groupNameMode.value = settings.showGroupName || 'all';
@@ -421,6 +426,8 @@ function collectSettingsFromForm() {
     pureTextCards: domSettings.togglePureTextCards ? domSettings.togglePureTextCards.checked : false,
     confirmDelete: domSettings.toggleConfirmDelete ? domSettings.toggleConfirmDelete.checked : true,
     disableWheelSwitch: domSettings.toggleDisableWheelSwitch ? domSettings.toggleDisableWheelSwitch.checked : false,
+    backupMode: domSettings.backupMode ? domSettings.backupMode.value : 'off',
+    backupRemindDays: domSettings.backupRemindDays ? parseInt(domSettings.backupRemindDays.value, 10) : 7,
     showGroupName: domSettings.groupNameMode ? domSettings.groupNameMode.value : 'all',
     showGroupIndicator: domSettings.toggleShowGroupIndicator ? domSettings.toggleShowGroupIndicator.checked : true,
     dashboardLayout: domSettings.dashboardLayout ? domSettings.dashboardLayout.value : 'row',
@@ -871,11 +878,45 @@ function bindSettingsEvents() {
     });
   });
 
+  // v1.2.1: 恢复上一次改动（local_bak 快照）
+  var btnRestoreBak = document.getElementById('btn-restore-bak');
+  if (btnRestoreBak) btnRestoreBak.addEventListener('click', function () {
+    chrome.storage.local.get(['groups_local_bak','bak_timestamp'], function (r) {
+      if (!r.groups_local_bak || !Array.isArray(r.groups_local_bak)) {
+        if (typeof showToast === 'function') showToast('没有可恢复的备份', 'warning');
+        return;
+      }
+      var msg = '恢复到上一次改动';
+      if (r.bak_timestamp) msg += '\n🕐 备份时间：' + new Date(r.bak_timestamp).toLocaleString('zh-CN');
+      msg += '\n当前数据将被覆盖，是否继续？';
+      showImportConfirmAsync(msg).then(function () {
+        // 写 local + 清 sync groups，确保 getGroups() 回退到 local
+        chrome.storage.sync.set({ groups: [], activeGroup: 0 }, function () {
+          chrome.storage.local.set({ groups: r.groups_local_bak, activeGroup: 0 }, function () {
+            if (typeof collectCardImageGarbage === 'function') collectCardImageGarbage();
+            if (typeof showToast === 'function') showToast('已恢复，即将刷新...', 'success');
+            setTimeout(function () { window.location.reload(); }, 1000);
+          });
+        });
+      }).catch(function () {});
+    });
+  });
+
   var btnBackup = document.getElementById('btn-webdav-backup');
   if (btnBackup) btnBackup.addEventListener('click', async function () {
     _showWStatus('正在备份...');
     try {
-      // 复用现有导出流程生成 zip
+      // v1.2.1: 手动备份前 PROPFIND 冲突检测
+      var remoteTime = null;
+      try { remoteTime = await webdavCheckConflict(); } catch (e) {}
+      if (remoteTime) {
+        var rd = new Date(remoteTime);
+        getWebdavLastBackup(function (lt) {
+          if (lt && rd.getTime() > new Date(lt).getTime()) {
+            _showWStatus('⚠️ 云端有更新的备份 (' + rd.toLocaleString('zh-CN') + ')，已覆盖', false);
+          }
+        });
+      }
       var config = await _collectAllData();
       var zipBlob = await _buildZipBlob(config);
       await webdavUpload(zipBlob);
@@ -922,6 +963,17 @@ function bindSettingsEvents() {
     } catch (e) { _showWStatus('恢复失败: ' + e.message, false); }
   });
 
+  // 备份模式切换
+  if (domSettings.backupMode) {
+    domSettings.backupMode.addEventListener('change', function () {
+      _updateBackupModeUI();
+      onSettingChanged();
+    });
+  }
+  if (domSettings.backupRemindDays) {
+    domSettings.backupRemindDays.addEventListener('change', onSettingChanged);
+  }
+
   // 密码显隐切换
   var passToggle = document.getElementById('webdav-pass-toggle');
   var passInput = document.getElementById('webdav-pass');
@@ -940,9 +992,17 @@ function bindSettingsEvents() {
     if (domSettings.webdavUrl) domSettings.webdavUrl.value = r.webdav_url || '';
     if (domSettings.webdavUser) domSettings.webdavUser.value = r.webdav_user || '';
     if (domSettings.webdavPass) domSettings.webdavPass.value = r.webdav_pass ? atob(r.webdav_pass) : '';
-    if (domSettings.toggleWebdavAuto) domSettings.toggleWebdavAuto.checked = r.webdav_auto_backup === true;
+    _updateBackupModeUI();
     updateWebdavStatus();
   });
+}
+
+function _updateBackupModeUI() {
+  var mode = domSettings.backupMode ? domSettings.backupMode.value : 'off';
+  var row = document.getElementById('backup-remind-row');
+  if (row) row.style.display = mode === 'remind' ? '' : 'none';
+  var wd = document.getElementById('webdav-config-group');
+  if (wd) wd.style.display = mode === 'webdav' ? '' : 'none';
 }
 
 /** 设置变更处理 */

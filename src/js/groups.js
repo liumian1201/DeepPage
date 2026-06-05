@@ -104,13 +104,20 @@ async function doDeleteGroup() {
   if (index < 0 || !groups[index]) return;
   var g = groups[index];
 
-  // 删除该分组所有卡片的缓存图片
-  var cards = g.cards || [];
-  for (var i = 0; i < cards.length; i++) {
-    if (cards[i].image && cards[i].image.startsWith('idx:') && typeof deleteCardIcon === 'function') {
-      deleteCardIcon(cards[i].id);
-    }
+  // v1.2.1: 删组前先保存 bak（含 IndexedDB 图片引用），避免恢复后破图
+  if (typeof getGroups === 'function') {
+    try {
+      var prev = await getGroups();
+      if (prev && Array.isArray(prev) && prev.length > 0) {
+        await new Promise(function (r) { chrome.storage.local.set({ groups_local_bak: prev, bak_timestamp: Date.now() }, r); });
+      }
+    } catch (e) {}
   }
+
+  // v1.2.1: 不在此处删除 IndexedDB 图片（保留给 bak 恢复用，GC 后续清理）
+  // 原 deleteCardIcon 调用已移除
+
+  var cards = g.cards || [];
 
   groups.splice(index, 1);
   if (activeGroupIndex >= groups.length) activeGroupIndex = groups.length - 1;
