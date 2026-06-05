@@ -21,6 +21,7 @@ const domSettings = {
   toggleShowVisitCount: document.getElementById('toggle-show-visit-count'),
   togglePureTextCards: document.getElementById('toggle-pure-text-cards'),
   toggleConfirmDelete: document.getElementById('toggle-confirm-delete'),
+  toggleDisableWheelSwitch: document.getElementById('toggle-disable-wheel-switch'),
   toggleShowGroupIndicator: document.getElementById('toggle-show-group-indicator'),
   groupNameMode:   document.getElementById('setting-group-name-mode'),
   toggleLock:    document.getElementById('toggle-lock'),
@@ -124,6 +125,7 @@ function populateSettingsForm(settings) {
   if (domSettings.toggleShowVisitCount) domSettings.toggleShowVisitCount.checked = settings.showVisitCount !== false;
   if (domSettings.togglePureTextCards) domSettings.togglePureTextCards.checked = settings.pureTextCards === true;
   if (domSettings.toggleConfirmDelete) domSettings.toggleConfirmDelete.checked = settings.confirmDelete !== false;
+  if (domSettings.toggleDisableWheelSwitch) domSettings.toggleDisableWheelSwitch.checked = settings.disableWheelSwitch === true;
   if (domSettings.toggleLock) domSettings.toggleLock.checked = settings.isLocked === true;
   if (domSettings.toggleShowGroupIndicator) domSettings.toggleShowGroupIndicator.checked = settings.showGroupIndicator !== false;
   if (domSettings.groupNameMode) domSettings.groupNameMode.value = settings.showGroupName || 'all';
@@ -411,6 +413,7 @@ function collectSettingsFromForm() {
     showVisitCount: domSettings.toggleShowVisitCount ? domSettings.toggleShowVisitCount.checked : true,
     pureTextCards: domSettings.togglePureTextCards ? domSettings.togglePureTextCards.checked : false,
     confirmDelete: domSettings.toggleConfirmDelete ? domSettings.toggleConfirmDelete.checked : true,
+    disableWheelSwitch: domSettings.toggleDisableWheelSwitch ? domSettings.toggleDisableWheelSwitch.checked : false,
     showGroupName: domSettings.groupNameMode ? domSettings.groupNameMode.value : 'all',
     showGroupIndicator: domSettings.toggleShowGroupIndicator ? domSettings.toggleShowGroupIndicator.checked : true,
     dashboardLayout: domSettings.dashboardLayout ? domSettings.dashboardLayout.value : 'row',
@@ -766,7 +769,7 @@ function bindSettingsEvents() {
     el.addEventListener('change', onSettingChanged);
   });
 
-  [domSettings.toggleClock, domSettings.toggleLunar, domSettings.toggleWeather, domSettings.toggleAddBtn, domSettings.toggleCardTitle, domSettings.toggleShowVisitCount, domSettings.togglePureTextCards, domSettings.toggleConfirmDelete, domSettings.toggleShowGroupIndicator, domSettings.bingUHD, domSettings.bingAutoRefresh, domSettings.toggleShowSearch, domSettings.toggleClockSeconds].forEach((el) => {
+  [domSettings.toggleClock, domSettings.toggleLunar, domSettings.toggleWeather, domSettings.toggleAddBtn, domSettings.toggleCardTitle, domSettings.toggleShowVisitCount, domSettings.togglePureTextCards, domSettings.toggleConfirmDelete, domSettings.toggleDisableWheelSwitch, domSettings.toggleShowGroupIndicator, domSettings.bingUHD, domSettings.bingAutoRefresh, domSettings.toggleShowSearch, domSettings.toggleClockSeconds].forEach((el) => {
     if (!el) return;
     el.addEventListener('change', onSettingChanged);
   });

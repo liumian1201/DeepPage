@@ -367,6 +367,7 @@ var _scrollEdgeTimer = null;
 function bindGroupEvents() {
   document.addEventListener('wheel', function (e) {
     if (!groups || groups.length <= 1) return;
+    if (currentSettings && currentSettings.disableWheelSwitch) return;
     if (typeof dragCard !== 'undefined' && dragCard) return;
     if (e.target.closest('.settings-panel') || e.target.closest('.dialog-overlay') ||
         e.target.closest('.context-menu')) return;

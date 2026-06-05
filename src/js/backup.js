@@ -6,7 +6,7 @@
 
 // ==================== 确认对话框 ====================
 
-function showImportConfirm(msg, onOk) {
+function showImportConfirm(msg, onOk, onCancel) {
   var dlg = document.getElementById('dialog-import-confirm');
   var msgEl = document.getElementById('import-confirm-msg');
   if (!dlg) { if (onOk) onOk(); return; }
@@ -17,14 +17,54 @@ function showImportConfirm(msg, onOk) {
   var cancelBtn = document.getElementById('import-confirm-cancel');
   var cleanup = function () { dlg.classList.add('hidden'); };
   if (okBtn) { okBtn.onclick = function () { cleanup(); if (onOk) onOk(); }; }
-  if (cancelBtn) cancelBtn.onclick = cleanup;
-  dlg.onclick = function (e) { if (e.target === dlg) cleanup(); };
+  if (cancelBtn) { cancelBtn.onclick = function () { cleanup(); if (onCancel) onCancel(); }; }
+  dlg.onclick = function (e) { if (e.target === dlg) { cleanup(); if (onCancel) onCancel(); } };
 }
 
 function showImportConfirmAsync(msg) {
-  return new Promise(function (resolve) {
-    showImportConfirm(msg, function () { resolve(); });
+  return new Promise(function (resolve, reject) {
+    showImportConfirm(msg, function () { resolve(); }, function () { reject(new Error('CANCELLED')); });
   });
+}
+
+/** 对导入数据去重：同一 ID 出现在多个分组时，为重复项生成新 ID，同时重映射 IndexedDB key */
+function dedupCardIds(groups, manifest, unzipped) {
+  var seen = new Set();
+  var dupCount = 0;
+  var keyRemap = {};
+  for (var gi = 0; gi < (groups || []).length; gi++) {
+    var cards = groups[gi].cards || [];
+    for (var ci = 0; ci < cards.length; ci++) {
+      var card = cards[ci];
+      if (seen.has(card.id)) {
+        var newId = card.id + '_dup' + (++dupCount);
+        if (card.image && card.image.startsWith('idx:cardimg_')) {
+          keyRemap['cardimg_' + card.id] = 'cardimg_' + newId;
+          card.image = 'idx:cardimg_' + newId;
+        }
+        card.id = newId;
+      } else {
+        seen.add(card.id);
+      }
+    }
+  }
+  var remapKeys = Object.keys(keyRemap);
+  if (remapKeys.length > 0) {
+    if (manifest && manifest.images) {
+      for (var mi = 0; mi < manifest.images.length; mi++) {
+        var img = manifest.images[mi];
+        if (keyRemap[img.key]) { img.key = keyRemap[img.key]; }
+      }
+    }
+    if (unzipped) {
+      for (var ki = 0; ki < remapKeys.length; ki++) {
+        var oldK = remapKeys[ki];
+        var newK = keyRemap[oldK];
+        if (unzipped[oldK]) { unzipped[newK] = unzipped[oldK]; unzipped[oldK] = undefined; }
+      }
+    }
+  }
+  return dupCount;
 }
 
 // ==================== 一键全部导出（fflate Zip） ====================
@@ -96,6 +136,7 @@ async function exportAll() {
 // ==================== 一键全部导入（兼容新旧格式） ====================
 
 function importAll() {
+  var _importCancelled = false;
   pickFile('.zip,.json', async function (file) {
     var loading = document.getElementById('backup-loading');
     if (loading) loading.classList.remove('hidden');
@@ -164,6 +205,8 @@ function importAll() {
         if (hasConfig) {
           var config = JSON.parse(fflate.strFromU8(unzipped['config.json']));
           if (typeof config === 'object' && config !== null) {
+            // 去重：同 ID 出现在多个分组时生成唯一 ID，同时重映射 IndexedDB key
+            var dupCount = dedupCardIds(config.groups, manifest, unzipped);
             var syncFailed = false;
             await new Promise(function (resolve) {
               chrome.storage.sync.set({
@@ -210,11 +253,11 @@ function importAll() {
         if (typeof collectCardImageGarbage === 'function') await collectCardImageGarbage();
 
         if (hasImages) {
-          showToast('全部导入成功（配置 + ' + imported + '/' + manifest.images.length + ' 张图片），即将刷新...', 'success');
+          showToast('全部导入成功（配置 + ' + imported + '/' + manifest.images.length + ' 张图片）' + (dupCount > 0 ? '，修复 ' + dupCount + ' 个重复 ID' : '') + '，即将刷新...', 'success');
         } else if (syncFailed) {
-          showToast('导入成功（数据量较大，使用本地存储，不支持跨设备同步），即将刷新...', 'success');
+          showToast('导入成功（数据量较大，使用本地存储）' + (dupCount > 0 ? '，修复 ' + dupCount + ' 个重复 ID' : '') + '，即将刷新...', 'success');
         } else {
-          showToast('配置导入成功，即将刷新...', 'success');
+          showToast('配置导入成功' + (dupCount > 0 ? '，修复 ' + dupCount + ' 个重复 ID' : '') + '，即将刷新...', 'success');
         }
 
       } else if (isJson) {
@@ -286,11 +329,18 @@ function importAll() {
         }
       }
     } catch (err) {
-      showToast('导入失败：' + err.message, 'error');
+      if (err.message === 'CANCELLED') {
+        _importCancelled = true;
+      } else {
+        showToast('导入失败：' + err.message, 'error');
+      }
     }
 
     if (loading) loading.classList.add('hidden');
-    setTimeout(function () { window.location.reload(); }, 1000);
+    if (!_importCancelled) {
+      setTimeout(function () { window.location.reload(); }, 1000);
+    }
+    _importCancelled = false;
   });
 }
 

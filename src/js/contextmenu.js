@@ -32,6 +32,8 @@ function initContextMenu() {
   if (sub) {
     sub.addEventListener('mouseenter', function () { sub.classList.remove('hidden'); });
     sub.addEventListener('mouseleave', hideMoveSubmenu);
+    // 阻止子菜单内滚轮冒泡到 window，避免触发 hideContextMenu
+    sub.addEventListener('wheel', function (e) { e.stopPropagation(); });
   }
 
   domMain.contextMenu.addEventListener('click', (e) => {
@@ -52,7 +54,11 @@ function initContextMenu() {
     if (e.key === 'Escape') hideContextMenu();
   });
 
-  window.addEventListener('scroll', hideContextMenu, true);
+  window.addEventListener('scroll', function (e) {
+    // 子菜单内部滚动不关闭菜单
+    if (e.target && e.target.nodeType === 1 && e.target.closest('#move-group-sub')) return;
+    hideContextMenu();
+  }, true);
   window.addEventListener('resize', hideContextMenu);
 }
 
@@ -150,6 +156,11 @@ function showMoveSubmenu() {
   var subX = menuRect.right + 4;
   var subY = itemRect.top;
   if (subX + 140 > window.innerWidth) subX = menuRect.left - 144;
+  // 纵向溢出修正：子菜单超出屏幕底部时向上对齐
+  var subH = sub.offsetHeight || 320;
+  if (subY + subH > window.innerHeight - 8) {
+    subY = Math.max(8, window.innerHeight - subH - 8);
+  }
   sub.style.left = subX + 'px';
   sub.style.top = subY + 'px';
   sub.classList.remove('hidden');

@@ -69,6 +69,7 @@ var DEFAULT_SETTINGS = {
   clockShowSeconds: true,
   lunarStyle: 'double',
   confirmDelete: true,
+  disableWheelSwitch: false,
   showGroupName: 'all',
   showGroupIndicator: true,
   isLocked: false,
@@ -97,7 +98,10 @@ function loadFromStorage(key, defaultValue) {
 
 function saveToStorage(key, value) {
   return new Promise(function (resolve) {
-    chrome.storage.sync.set({ [key]: value }, function () { resolve(); });
+    chrome.storage.sync.set({ [key]: value }, function () {
+      if (chrome.runtime.lastError) { /* 静默消费：超限由 saveGroups 回退处理 */ }
+      resolve();
+    });
   });
 }
 
@@ -146,7 +150,10 @@ async function saveGroups(groups) {
   await new Promise(function (resolve) {
     chrome.storage.sync.get([STORAGE_KEYS.GROUPS], function (result) {
       if (!result[STORAGE_KEYS.GROUPS] || (Array.isArray(result[STORAGE_KEYS.GROUPS]) && result[STORAGE_KEYS.GROUPS].length === 0)) {
-        chrome.storage.local.set({ [STORAGE_KEYS.GROUPS]: groups }, resolve);
+        chrome.storage.local.set({ [STORAGE_KEYS.GROUPS]: groups }, function () {
+          if (chrome.runtime.lastError) { /* 静默处理：resize 后 resolve */ }
+          resolve();
+        });
       } else { resolve(); }
     });
   });

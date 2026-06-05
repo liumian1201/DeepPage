@@ -2,6 +2,43 @@
 
 ---
 
+## v1.1.8 (2026-06-05)
+
+### 🐛 崩溃修复
+
+- 修复删除分组时 index 越界导致 `Cannot read properties of undefined (reading 'name')` 崩溃
+- 修复重置数据时 IndexedDB `onversionchange` 对 null 调 `.close()` 崩溃
+- 修复滚动时 `e.target.closest is not a function` 崩溃（scroll target 可能为 document）
+- 修复 `saveToStorage` 未消费 `lastError` 导致控制台 `Unchecked runtime.lastError`
+
+### 🐛 关键修复：FVD 导入跨组重复 ID
+
+- 修复 FVD 转换器生成的卡片 ID 跨组重复，导致截图刷新、访问计数更新到错误分组
+- `refreshCardCapture`、`incrementVisitCount` 仅更新当前活动分组的卡片，不再跨组查找
+- `importAll` 新增 `dedupCardIds` 去重：导入时检测重复 ID 并生成全局唯一 ID
+- 同步重映射 IndexedDB blob key 和 manifest 图片列表
+- FVD 转换器：卡片 ID 格式加入分组索引 `fvd_<ts>_g<分组>_<序号>` 确保全局唯一
+
+> ⚠️ **已有数据的用户修复方法**：设置 → 数据 → 全部导出（下载 .zip）→ 重置全部 → 全部导入（选择刚下载的 .zip）。导入过程会自动检测重复 ID 并修复，修复数量会在成功提示中显示。
+
+### 🐛 其他修复
+
+- 修复导入预览点击取消后 loading 遮罩卡死、无法关闭
+
+### 🐛 修复「移动到分组」子菜单溢出与滚轮消失
+
+- 子菜单新增 `max-height: 320px` + `overflow-y: auto`，分组过多时出现滚动条，不会溢出屏幕
+- `showMoveSubmenu()` 增加纵向边界检测：子菜单超出屏幕底部时自动向上对齐
+- 子菜单内绑定 `wheel` 事件 `stopPropagation()`，阻止滚轮冒泡到 `window` 导致菜单消失
+
+### 🔧 新增「关闭滚轮切换分组」开关
+
+- 设置面板 → 功能 → 新增「关闭滚轮切换分组」复选框（默认关闭）
+- 开启后鼠标滚轮不再触发分组切换，仅通过左侧指示器点击切换分组
+- 设置实时生效，无需刷新页面
+
+---
+
 ## v1.1.7 (2026-06-04)
 
 ### 🎚️ 壁纸遮罩透明度

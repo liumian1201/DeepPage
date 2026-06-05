@@ -88,6 +88,7 @@ var _pendingDeleteGroup = -1;
 
 async function deleteGroup(index) {
   if (groups.length <= 1) { showToast('至少保留一个分组', 'warning'); return; }
+  if (!groups[index]) return;
   _pendingDeleteGroup = index;
   var g = groups[index];
   if (domMain.confirmName) {

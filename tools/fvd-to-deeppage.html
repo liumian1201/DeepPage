@@ -115,23 +115,24 @@ function parseFVD() {
     });
   });
 
-  // 转为 DeepPage 分组格式，保持 position 排序
+  // 转为 DeepPage 分组格式，全局唯一 ID（含分组索引防止跨组重复）
+  var gids = Object.keys(dpGroups);
   var dpGroupList = [];
-  Object.keys(dpGroups).forEach(function (gid) {
+  gids.forEach(function (gid, gi) {
     var name = groupMap[gid] || ('分组 ' + gid);
     var cards = dpGroups[gid].map(function (c, i) {
       var card = {
-        id: 'fvd_' + Date.now().toString(36) + '_' + i,
+        id: 'fvd_' + Date.now().toString(36) + '_g' + gi + '_' + i,
         name: c.name,
         url: c.url,
+        color: stringToColor(c.url || c.name),
         visitCount: c.visitCount || 0,
         createdAt: c.createdAt || Date.now()
       };
-      // 仅非空时保留 image（节省存储空间）
       if (c.image) card.image = c.image;
       return card;
     });
-    dpGroupList.push({ id: 'g_fvd_' + Date.now().toString(36) + '_' + Object.keys(dpGroups).indexOf(gid), name: name, sortMode: 'manual', cards: cards });
+    dpGroupList.push({ id: 'g_fvd_' + Date.now().toString(36) + '_' + gi, name: name, sortMode: 'manual', cards: cards });
   });
 
   if (dpGroupList.length === 0) {
@@ -227,22 +228,26 @@ function getDefaultSettings() {
     searchEngines: [
       { id: 'google', name: 'Google', url: 'https://www.google.com/search?q={q}', enabled: true },
       { id: 'baidu',  name: '百度',   url: 'https://www.baidu.com/s?wd={q}',       enabled: true },
-      { id: 'bing',   name: 'Bing',   url: 'https://www.bing.com/search?q={q}',    enabled: true }
+      { id: 'bing',   name: 'Bing',   url: 'https://www.bing.com/search?q={q}',    enabled: true },
+      { id: 'sogou',  name: '搜狗',   url: 'https://www.sogou.com/web?query={q}',  enabled: false },
+      { id: 'yandex', name: 'Yandex', url: 'https://yandex.com/search/?text={q}',  enabled: false }
     ],
     columns: 5, showClock: true, showLunar: true, showWeather: true,
     theme: 'light', showAddButton: true, showCardTitle: true,
     pureTextCards: false, weatherType: 'openmeteo', weatherCity: '',
-    weatherRefreshMin: 15, wallpaperMode: 'bing', wallpaperUrl: '',
+    weatherApiUrl: '', weatherApiKey: '', weatherRefreshMin: 15,
+    wallpaperMode: 'bing', wallpaperUrl: '', wallpaperColor: '#1a1a2e', wallpaperOpacity: 30,
+    bingIdx: 0, bingUHD: false, bingRegion: 'zh-CN', bingAutoRefresh: true, bingRefreshMin: 360,
     showSearch: true, searchMarginTop: 60, searchMarginBottom: 48,
     groupPosition: 'left', groupOffset: 16,
-    showGroupName: 'all', showGroupIndicator: true,
-    cardOpenMode: 'current', confirmDelete: true,
+    showGroupName: 'all', showGroupIndicator: true, isLocked: false,
+    cardOpenMode: 'current', confirmDelete: true, disableWheelSwitch: false,
     dashboardLayout: 'row', dashLeft: 0, dashBottom: 0,
     dashItemW: 140, dashItemH: 0, dashGap: 16,
     clockFormat: '24h', clockShowSeconds: true, lunarStyle: 'double',
     bgColor: '', cardBgColor: '', cardTextColor: '',
     cardFontSize: 13, cardWidth: 270, cardHeight: 270, cardBorderRadius: 14,
-    showVisitCount: true, cardsMarginTop: 0
+    showVisitCount: true, cardsMarginTop: 0, groupDotSize: 10, groupTabSize: 13
   };
 }
 </script>

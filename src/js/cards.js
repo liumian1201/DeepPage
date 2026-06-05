@@ -294,25 +294,28 @@ async function refreshCardCapture(cardId) {
     var key = 'cardimg_' + cardId;
     await saveImage(key, blob);
 
-    // 重读最新分组数据，避免覆盖期间发生的删除/移动
+    // 仅更新当前活动分组的卡片（避免跨组覆盖同 ID 但不同 URL 的卡片）
     var latestGroups = await getGroups();
-    for (var gi = 0; gi < latestGroups.length; gi++) {
-      var gcards = latestGroups[gi].cards || [];
-      for (var ci = 0; ci < gcards.length; ci++) {
-        if (gcards[ci].id === cardId) {
-          gcards[ci].image = 'idx:' + key;
-          if (gi === activeGroupIndex) { speeddials = gcards; }
-          groups = latestGroups;
-          await saveGroups(groups);
-          renderSpeeddials();
-          if (typeof updateImageDBInfo === 'function') updateImageDBInfo();
-          showToast('截图已更新', 'success');
-          return;
-        }
+    var gcards = (latestGroups[activeGroupIndex] && latestGroups[activeGroupIndex].cards) || [];
+    var found = false;
+    for (var ci = 0; ci < gcards.length; ci++) {
+      if (gcards[ci].id === cardId) {
+        gcards[ci].image = 'idx:' + key;
+        speeddials = gcards;
+        found = true;
+        break;
       }
     }
-    // 卡片已被删除
-    showToast('截图完成但卡片已被删除', 'warning');
+    if (found) {
+      groups = latestGroups;
+      await saveGroups(groups);
+      renderSpeeddials();
+      if (typeof updateImageDBInfo === 'function') updateImageDBInfo();
+      showToast('截图已更新', 'success');
+    } else {
+      // 卡片已被删除
+      showToast('截图完成但卡片已被删除', 'warning');
+    }
   });
 }
 
@@ -373,18 +376,15 @@ async function saveDialog() {
 /** 对指定卡片访问计数 +1，自动保存并重渲染当前分组 */
 async function incrementVisitCount(cardId, render) {
   if (render === undefined) render = true;
-  for (var gi = 0; gi < groups.length; gi++) {
-    var cards = groups[gi].cards || [];
-    for (var ci = 0; ci < cards.length; ci++) {
-      if (cards[ci].id === cardId) {
-        cards[ci].visitCount = (cards[ci].visitCount || 0) + 1;
-        await saveGroups(groups);
-        if (gi === activeGroupIndex) {
-          speeddials = cards;
-          if (render) renderSpeeddials();
-        }
-        return;
-      }
+  // 仅更新当前活动分组（避免跨组重复 ID 计数到错误卡片）
+  var cards = groups[activeGroupIndex] ? (groups[activeGroupIndex].cards || []) : [];
+  for (var ci = 0; ci < cards.length; ci++) {
+    if (cards[ci].id === cardId) {
+      cards[ci].visitCount = (cards[ci].visitCount || 0) + 1;
+      await saveGroups(groups);
+      speeddials = cards;
+      if (render) renderSpeeddials();
+      return;
     }
   }
 }

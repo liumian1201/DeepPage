@@ -18,7 +18,7 @@ function openImgDB() {
     req.onsuccess = function () {
       _imgDB = req.result;
       _imgDB.onclose = function () { _imgDB = null; };
-      _imgDB.onversionchange = function () { _imgDB.close(); _imgDB = null; };
+      _imgDB.onversionchange = function () { if (_imgDB) { _imgDB.close(); _imgDB = null; } };
       resolve(_imgDB);
     };
     req.onerror = function () { reject(req.error); };
