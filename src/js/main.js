@@ -163,10 +163,11 @@ async function _autoBackupIfNeeded() {
 
   var cfg = await new Promise(function (r) { chrome.storage.local.get(['webdav_url','webdav_last_backup'], r); });
   var lastTs = cfg.webdav_last_backup ? new Date(cfg.webdav_last_backup).getTime() : 0;
+  var neverBackedUp = !cfg.webdav_last_backup;
 
   if (mode === 'webdav') {
     if (!cfg.webdav_url) return;
-    if (Date.now() - lastTs < 12 * 3600 * 1000) return;
+    if (!neverBackedUp && Date.now() - lastTs < 12 * 3600 * 1000) return;
     var remoteTime = null;
     try { remoteTime = await webdavCheckConflict(); } catch (e) { return; }
     if (remoteTime && new Date(remoteTime).getTime() > lastTs) return;
@@ -178,8 +179,9 @@ async function _autoBackupIfNeeded() {
     } catch (e) { /* 静默 */ }
   } else if (mode === 'remind') {
     var days = (currentSettings && currentSettings.backupRemindDays) || 7;
-    if (Date.now() - lastTs > days * 86400 * 1000) {
-      showToast('📥 已超 ' + days + ' 天未备份，点击此处导出数据', 'warning');
+    if (neverBackedUp || Date.now() - lastTs > days * 86400 * 1000) {
+      var msg = neverBackedUp ? '📥 尚未进行过备份，点击此处开始第一次备份' : '📥 已超 ' + days + ' 天未备份，点击此处导出数据';
+      showToast(msg, 'warning');
       var toast = document.querySelector('.toast');
       if (toast) {
         toast.style.cursor = 'pointer';

@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Manifest-V3-blue?logo=googlechrome" alt="Manifest V3">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/Version-1.2.1-brightgreen" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.2.2-brightgreen" alt="Version">
   <img src="https://img.shields.io/badge/PRs-Welcome-orange" alt="PRs Welcome">
 </p>
 
@@ -128,23 +128,27 @@ DeepPage/
 │   ├── background.js       # Service Worker（天气+图片代理+右键菜单）
 │   ├── index.html          # 新标签页 + 设置面板 + 对话框
 │   ├── css/
-│   │   └── style.css       # 全局样式 + CSS 变量体系 + 双主题
+│   │   ├── base.css       # CSS 变量体系 + 深色模式 + 响应式
+│   │   ├── main.css       # 主页样式：导航/搜索/看板/右键菜单
+│   │   └── settings.css   # 设置面板专用表单与滑块样式
 │   ├── js/
-│   │   ├── main.js         # 主入口：初始化/事件/快捷键/锁定/Toast
+│   │   ├── main.js         # 主入口：初始化/事件/快捷键/锁定/Toast/自动备份
 │   │   ├── cards.js        # 卡片渲染/CRUD/计数/排序/idx验证
 │   │   ├── groups.js       # 分组管理：指示器/切换/删除(含图片清理)
 │   │   ├── dragdrop.js     # 拖拽排序（纯鼠标事件）
 │   │   ├── search-engines.js  # 搜索引擎管理/下拉/搜索
 │   │   ├── contextmenu.js  # 右键菜单 + 移动到分组子菜单
-│   │   ├── storage.js      # chrome.storage 封装 + 默认值
+│   │   ├── storage.js      # chrome.storage 封装 + 默认值 + local_bak
 │   │   ├── settings.js     # 设置面板交互 + CSS 变量预览
+│   │   ├── settings-webdav.js  # WebDAV 配置区 UI 逻辑（从 settings.js 抽离）
 │   │   ├── appearance.js   # 外观配色 + 卡片尺寸预览
 │   │   ├── wallpaper.js    # 壁纸系统 + IndexedDB + GC
-│   │   ├── backup.js       # 导出(含时间戳)/导入(预览确认) + 重置
+│   │   ├── backup.js       # 导出/导入(fflate) + 重置 + WebDAV 辅助
+│   │   ├── webdav.js       # WebDAV 前端 API 层
 │   │   ├── weather.js      # 天气（4 API + SW 代理 + 缓存）
 │   │   ├── clock.js        # 时钟（12/24h + 秒数）
 │   │   ├── lunar.js        # 农历转换（1900-2100）
-│   │   └── fflate.min.js   # 图片库 zip 导入导出
+│   │   └── fflate.min.js   # zip 库
 │   └── assets/
 │       └── icons/          # icon-16/48/128.png
 ├── CHANGELOG.md            ← 更新日志
