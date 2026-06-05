@@ -80,6 +80,17 @@ async function init() {
   initContextMenu();
   renderGroupDots();
 
+  // v1.1.9: 数据超限回退到本地存储时，提醒多设备用户用 zip 同步（每设备仅弹一次）
+  if (currentSettings && currentSettings.storageFallback === 'local') {
+    var fbKey = '_fallback_toast_shown';
+    chrome.storage.local.get([fbKey], function (r) {
+      if (!r[fbKey]) {
+        chrome.storage.local.set({ [fbKey]: true });
+        showToast('⚠️ 数据量较大，使用本地存储。多设备同步请用设置→导出/导入 .zip 备份', 'warning');
+      }
+    });
+  }
+
   // v1.0.7: 离线指示器
   if (!navigator.onLine) document.body.classList.add('offline');
   window.addEventListener('online', function () { document.body.classList.remove('offline'); });

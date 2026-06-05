@@ -214,35 +214,30 @@ function importAll() {
                 groups: config.groups || [],
                 activeGroup: config.activeGroup || 0
               }, function () {
-                if (chrome.runtime.lastError) {
-                  console.warn('storage.sync.set 超限，回退到本地存储:', chrome.runtime.lastError.message);
-                  syncFailed = true;
-                }
+                if (chrome.runtime.lastError) { syncFailed = true; }
                 resolve();
               });
             });
             // 超限回退：将分组数据存到 chrome.storage.local
             if (syncFailed) {
+              var fSettings = config.settings || {};
+              fSettings.storageFallback = 'local';
               await new Promise(function (resolve) {
                 chrome.storage.local.set({
                   groups: config.groups || [],
                   activeGroup: config.activeGroup || 0
                 }, resolve);
               });
-              // settings 尝试走 sync，失败则回退到 local
               var settingsSyncFailed = false;
               await new Promise(function (resolve) {
-                chrome.storage.sync.set({ settings: config.settings || {}, groups: [], activeGroup: 0 }, function () {
-                  if (chrome.runtime.lastError) {
-                    console.warn('settings sync.set 也失败，回退到 local:', chrome.runtime.lastError.message);
-                    settingsSyncFailed = true;
-                  }
+                chrome.storage.sync.set({ settings: fSettings, groups: [], activeGroup: 0 }, function () {
+                  if (chrome.runtime.lastError) { settingsSyncFailed = true; }
                   resolve();
                 });
               });
               if (settingsSyncFailed) {
                 await new Promise(function (resolve) {
-                  chrome.storage.local.set({ settings: config.settings || {} }, resolve);
+                  chrome.storage.local.set({ settings: fSettings }, resolve);
                 });
               }
             }
@@ -304,19 +299,21 @@ function importAll() {
             });
           });
           if (oldSyncFailed) {
+            var oldFSettings = data.settings || {};
+            oldFSettings.storageFallback = 'local';
             await new Promise(function (resolve) {
               chrome.storage.local.set({ groups: data.groups || [], activeGroup: data.activeGroup || 0 }, resolve);
             });
             var oldSettingsFailed = false;
             await new Promise(function (resolve) {
-              chrome.storage.sync.set({ settings: data.settings || {}, groups: [], activeGroup: 0 }, function () {
+              chrome.storage.sync.set({ settings: oldFSettings, groups: [], activeGroup: 0 }, function () {
                 if (chrome.runtime.lastError) oldSettingsFailed = true;
                 resolve();
               });
             });
             if (oldSettingsFailed) {
               await new Promise(function (resolve) {
-                chrome.storage.local.set({ settings: data.settings || {} }, resolve);
+                chrome.storage.local.set({ settings: oldFSettings }, resolve);
               });
             }
             showToast('导入成功（数据量较大，使用本地存储），即将刷新...', 'success');

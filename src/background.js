@@ -93,27 +93,45 @@ async function captureScreenshot(url) {
   }
 
   // 页面每次导航完成后重新注入按钮
-  chrome.tabs.onUpdated.addListener(function onNav(tid, info) {
+  var onNav = function (tid, info) {
     if (closed) { chrome.tabs.onUpdated.removeListener(onNav); return; }
     if (tid === tabId && info.status === 'complete') {
       injectButton();
     }
-  });
+  };
+  chrome.tabs.onUpdated.addListener(onNav);
 
   // 等待用户点击截图按钮
   return new Promise(function (resolve, reject) {
-    var timeout = setTimeout(function () {
-      closed = true;
+    var done = false;
+    var timeout;
+
+    function cleanup() {
+      if (done) return;
+      done = true;
+      if (timeout) clearTimeout(timeout);
       chrome.runtime.onMessage.removeListener(onCaptureDone);
-      try { chrome.windows.remove(win.id); } catch (e) {}
-      reject(new Error('用户超时未截图'));
-    }, 120000);
+      chrome.windows.onRemoved.removeListener(onWinRemoved);
+      chrome.tabs.onUpdated.removeListener(onNav);
+    }
+
+    function doReject(msg, skipWinRemove) {
+      cleanup();
+      if (!skipWinRemove) { try { chrome.windows.remove(win.id); } catch (e) {} }
+      reject(new Error(msg));
+    }
+
+    timeout = setTimeout(function () { doReject('用户超时未截图'); }, 120000);
+
+    // 用户手动关闭截图窗口 → 立即清理（窗口已关，不重复 remove）
+    function onWinRemoved(removedId) {
+      if (removedId === win.id) doReject('截图窗口已关闭', true);
+    }
+    chrome.windows.onRemoved.addListener(onWinRemoved);
 
     function onCaptureDone(request) {
       if (request.type === 'capture-done') {
-        closed = true;
-        clearTimeout(timeout);
-        chrome.runtime.onMessage.removeListener(onCaptureDone);
+        cleanup();
         chrome.tabs.captureVisibleTab(win.id, { format: 'png' }).then(function (dataUrl) {
           chrome.windows.remove(win.id);
           resolve(dataUrl);
