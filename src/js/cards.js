@@ -86,6 +86,57 @@ async function _getCardImgUrl(imgKey) {
   return null;
 }
 
+/* ==================== 截图主题色提取 ==================== */
+function _extractThemeColorFromBlob(blob) {
+  return new Promise(function (resolve) {
+    var img = new Image();
+    img.onload = function () {
+      var canvas = document.createElement('canvas');
+      var w = Math.min(img.width, 200);
+      var h = Math.round(img.height * (w / img.width));
+      canvas.width = w; canvas.height = h;
+      var ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      var data = ctx.getImageData(0, 0, w, h).data;
+      var r = 0, g = 0, b = 0, count = 0;
+      for (var y = Math.floor(h * 0.1); y < h * 0.9; y += 3) {
+        for (var x = 0; x < w; x += 3) {
+          var i = (y * w + x) * 4;
+          var pr = data[i], pg = data[i + 1], pb = data[i + 2];
+          if ((pr > 240 && pg > 240 && pb > 240) || (pr < 20 && pg < 20 && pb < 20)) continue;
+          r += pr; g += pg; b += pb; count++;
+        }
+      }
+      if (!count) { resolve(null); return; }
+      r = Math.round(r / count * 0.8);
+      g = Math.round(g / count * 0.8);
+      b = Math.round(b / count * 0.8);
+      resolve('#' + [r, g, b].map(function (v) { var s = v.toString(16); return s.length === 1 ? '0' + s : s; }).join(''));
+    };
+    img.onerror = function () { resolve(null); };
+    img.src = URL.createObjectURL(blob);
+  });
+}
+
+async function _extractAndSaveTheme(cardId) {
+  var card = speeddials.find(function (c) { return c.id === cardId; });
+  if (!card || !card.image) return;
+  if (!card.image.startsWith('idx:')) {
+    if (typeof showToast === 'function') showToast('仅支持本地图片，请先上传或截图', 'warning');
+    return;
+  }
+  var key = card.image.replace('idx:', '');
+  var blob = await loadImage(key);
+  if (!blob) return;
+  var color = await _extractThemeColorFromBlob(blob);
+  if (color) {
+    card.themeColor = color;
+    if (typeof saveSpeeddials === 'function') saveSpeeddials(speeddials);
+    renderSpeeddials();
+    if (typeof showToast === 'function') showToast('主题色采样完成：' + color, 'success');
+  }
+}
+
 /* ==================== DOM 分组容器缓存（LRU 3组） ==================== */
 var _groupContainers = {};   // { groupIndex: div }
 var _groupLru = [];          // [groupIndex, ...] 最近使用的在前
@@ -149,6 +200,7 @@ function renderSpeeddials() {
 
   // 构建卡片 HTML（复用现有模板逻辑）
   var html = '';
+  var enableTheme = currentSettings && currentSettings.cardThemeColor === true;
   displayCards.forEach(function (card, index) {
     var hasCustomImage = card.image && card.image.trim();
     var isLocal = hasCustomImage && card.image.startsWith('idx:');
@@ -169,11 +221,13 @@ function renderSpeeddials() {
     }
 
     if (pureText) {
-      html += '<div class="card-wrapper" data-index="' + index + '" data-id="' + card.id + '" data-url="' + escapeHtml(card.url) + '" title="' + escapeHtml(card.name) + ' — ' + escapeHtml(card.url) + '">' + topBarHtml + '<div class="speeddial-card card-pure-text" draggable="true"><div class="card-pure-text-inner" style="background:' + bgColor + ';"><span class="card-pure-text-char">' + firstChar + '</span><span class="card-pure-text-name">' + escapeHtml(card.name) + '</span></div><div class="card-actions"><button class="btn-card-edit" data-action="edit" data-id="' + card.id + '" title="编辑">✎</button><button class="btn-card-delete" data-action="delete" data-id="' + card.id + '" title="删除">✕</button></div></div></div>';
+      var themeStyle = card.themeColor && enableTheme ? ' style="--theme-glow:' + card.themeColor + '"' : '';
+      html += '<div class="card-wrapper' + (card.themeColor && enableTheme ? ' has-theme-glow' : '') + '"' + themeStyle + ' data-index="' + index + '" data-id="' + card.id + '" data-url="' + escapeHtml(card.url) + '" title="' + escapeHtml(card.name) + ' — ' + escapeHtml(card.url) + '">' + topBarHtml + '<div class="speeddial-card card-pure-text" draggable="true"><div class="card-pure-text-inner" style="background:' + bgColor + ';"><span class="card-pure-text-char">' + firstChar + '</span><span class="card-pure-text-name">' + escapeHtml(card.name) + '</span></div><div class="card-actions"><button class="btn-card-edit" data-action="edit" data-id="' + card.id + '" title="编辑">✎</button><button class="btn-card-delete" data-action="delete" data-id="' + card.id + '" title="删除">✕</button></div></div></div>';
       return;
     }
 
-    html += '<div class="card-wrapper" data-index="' + index + '" data-id="' + card.id + '" data-url="' + escapeHtml(card.url) + '" ' + (isLocal ? 'data-local-img="' + card.image + '"' : '') + ' title="' + escapeHtml(card.name) + ' — ' + escapeHtml(card.url) + '">' + topBarHtml + '<div class="speeddial-card" draggable="true"><div class="card-thumb">' + (hasCustomImage ? (isLocal ? '<img class="card-thumb-img" alt="' + escapeHtml(card.name) + '" data-local="1">' : '<img class="card-thumb-img" src="' + imgSrc + '" alt="' + escapeHtml(card.name) + '" loading="lazy">') : '<div class="card-fallback" style="background:' + bgColor + ';">' + firstChar + '</div>') + '</div><div class="card-actions"><button class="btn-card-edit" data-action="edit" data-id="' + card.id + '" title="编辑">✎</button><button class="btn-card-delete" data-action="delete" data-id="' + card.id + '" title="删除">✕</button></div></div></div>';
+    var themeStyle2 = card.themeColor && enableTheme ? ' style="--theme-glow:' + card.themeColor + '"' : '';
+    html += '<div class="card-wrapper' + (card.themeColor && enableTheme ? ' has-theme-glow' : '') + '"' + themeStyle2 + ' data-index="' + index + '" data-id="' + card.id + '" data-url="' + escapeHtml(card.url) + '" ' + (isLocal ? 'data-local-img="' + card.image + '"' : '') + ' title="' + escapeHtml(card.name) + ' — ' + escapeHtml(card.url) + '">' + topBarHtml + '<div class="speeddial-card" draggable="true"><div class="card-thumb">' + (hasCustomImage ? (isLocal ? '<img class="card-thumb-img" alt="' + escapeHtml(card.name) + '" data-local="1">' : '<img class="card-thumb-img" src="' + imgSrc + '" alt="' + escapeHtml(card.name) + '" loading="lazy">') : '<div class="card-fallback" style="background:' + bgColor + ';">' + firstChar + '</div>') + '</div><div class="card-actions"><button class="btn-card-edit" data-action="edit" data-id="' + card.id + '" title="编辑">✎</button><button class="btn-card-delete" data-action="delete" data-id="' + card.id + '" title="删除">✕</button></div></div></div>';
   });
 
   if (showAdd) {
@@ -336,6 +390,13 @@ function openEditDialog(id) {
       }
     });
   }
+
+  // v1.2.5: 根据开关和图片状态显示/隐藏采样主题色按钮
+  var extractBtn = document.getElementById('dialog-extract-theme');
+  if (extractBtn) {
+    var hasImg = !!(card.image && card.image.trim());
+    extractBtn.style.display = (hasImg && currentSettings && currentSettings.cardThemeColor) ? '' : 'none';
+  }
 }
 
 function closeDialog() {
@@ -378,6 +439,13 @@ async function refreshCardCapture(cardId) {
     if (found) {
       groups = latestGroups;
       await saveGroups(groups);
+      // v1.2.5: 截图后自动提取主题色
+      if (currentSettings && currentSettings.cardThemeColor && gcards[ci]) {
+        var capturedCard = gcards[ci];
+        var color = await _extractThemeColorFromBlob(blob);
+        if (color) capturedCard.themeColor = color;
+        await saveGroups(groups);
+      }
       renderSpeeddials();
       if (typeof updateImageDBInfo === 'function') updateImageDBInfo();
       showToast('截图已更新', 'success');
@@ -436,6 +504,11 @@ async function saveDialog() {
     await editSpeeddial(editingId, name, url, image);
   } else {
     await addSpeeddial(name, url, image);
+  }
+
+  // v1.2.5: 保存后自动提取主题色（编辑含图片的卡片时）
+  if (editingId && currentSettings && currentSettings.cardThemeColor && image && image.startsWith('idx:')) {
+    if (typeof _extractAndSaveTheme === 'function') _extractAndSaveTheme(editingId);
   }
 
   closeDialog();

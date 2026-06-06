@@ -89,7 +89,8 @@ var DEFAULT_SETTINGS = {
   webdavAutoBackup: false,
   backupRemind: true,
   backupMode: 'off',
-  backupRemindDays: 7
+  backupRemindDays: 7,
+  cardThemeColor: true
 };
 
 function loadFromStorage(key, defaultValue) {

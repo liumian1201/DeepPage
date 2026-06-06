@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Manifest-V3-blue?logo=googlechrome" alt="Manifest V3">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/Version-1.2.4-brightgreen" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.2.5-brightgreen" alt="Version">
   <img src="https://img.shields.io/badge/PRs-Welcome-orange" alt="PRs Welcome">
 </p>
 
@@ -46,6 +46,7 @@
 
 ### 🎨 视觉与外观
 - 浅色 / 深色 / 跟随系统 三种主题模式
+- **截图主题色提取**：Canvas 采样截图主色调，卡片 hover 散发氛围灯光影（外观开关控制）
 - **顶部信息栏**：标题居中+计数右侧，独立背景色/文字色/字号可调
 - **沉浸模式**：双击空白隐藏界面，仅留壁纸+导航+设置按钮
 - Bing 每日壁纸（8 张缓存 + UHD 4K + 多区域 + 自动切换）

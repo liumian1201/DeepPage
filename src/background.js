@@ -345,7 +345,7 @@ function stringToColor(str) {
   return 'hsl(' + h + ', ' + s + '%, ' + l + '%)';
 }
 
-// ---- 初始创建 ----
+// ---- 初始创建 & SW 唤醒恢复 ----
 chrome.runtime.onInstalled.addListener(function () {
   rebuildContextMenus();
 });
@@ -353,3 +353,6 @@ chrome.runtime.onInstalled.addListener(function () {
 chrome.runtime.onStartup.addListener(function () {
   rebuildContextMenus();
 });
+
+// Manifest V3 SW 每次唤醒都需重建 ephemeral contextMenus
+rebuildContextMenus();

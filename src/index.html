@@ -122,6 +122,7 @@
             <div class="toggle-list">
               <label class="toggle-item"><input type="checkbox" id="toggle-lock"> 锁定界面（禁止拖拽、编辑、删除）</label>
               <label class="toggle-item"><input type="checkbox" id="toggle-pure-text-cards"> 极简卡片（纯色文字，不加载图片）</label>
+              <label class="toggle-item"><input type="checkbox" id="toggle-card-theme-color"> 卡片主题色（截图提取，hover 氛围灯）</label>
               <label class="toggle-item"><input type="checkbox" id="toggle-confirm-delete" checked> 删除卡片时弹出确认</label>
               <label class="toggle-item"><input type="checkbox" id="toggle-disable-wheel-switch"> 关闭滚轮切换分组</label>
             </div>
@@ -206,14 +207,14 @@
             <div class="setting-inline-row">
               <label for="setting-dash-left" class="setting-inline-label">水平位置</label>
               <span id="dash-left-val" class="slider-val">居中</span>
-              <input type="range" id="setting-dash-left" min="-1200" max="1200" value="0" step="5">
+              <input type="range" id="setting-dash-left" min="-1200" max="1200" value="0" step="1">
             </div>
           </div>
           <div class="setting-group">
             <div class="setting-inline-row">
               <label for="setting-dash-bottom" class="setting-inline-label">垂直位置</label>
               <span id="dash-bottom-val" class="slider-val">底部</span>
-              <input type="range" id="setting-dash-bottom" min="0" max="1200" value="0" step="5">
+              <input type="range" id="setting-dash-bottom" min="0" max="1200" value="0" step="1">
             </div>
           </div>
           <div class="setting-group">
@@ -224,21 +225,21 @@
             <div class="setting-inline-row">
               <label for="setting-dash-item-w" class="setting-inline-label">组件宽度</label>
               <span id="dash-item-w-val" class="slider-val">140px</span>
-              <input type="range" id="setting-dash-item-w" min="100" max="500" value="140" step="10">
+              <input type="range" id="setting-dash-item-w" min="100" max="500" value="140" step="1">
             </div>
           </div>
           <div class="setting-group">
             <div class="setting-inline-row">
               <label for="setting-dash-item-h" class="setting-inline-label">组件高度</label>
               <span id="dash-item-h-val" class="slider-val">自适应</span>
-              <input type="range" id="setting-dash-item-h" min="0" max="300" value="0" step="10">
+              <input type="range" id="setting-dash-item-h" min="0" max="300" value="0" step="1">
             </div>
           </div>
           <div class="setting-group">
             <div class="setting-inline-row">
               <label for="setting-dash-gap" class="setting-inline-label">组件间距</label>
               <span id="dash-gap-val" class="slider-val">16px</span>
-              <input type="range" id="setting-dash-gap" min="2" max="48" value="16" step="2">
+              <input type="range" id="setting-dash-gap" min="2" max="48" value="16" step="1">
             </div>
           </div>
           <div class="setting-group">
@@ -294,7 +295,7 @@
             <div class="setting-inline-row">
               <label for="setting-cards-top" class="setting-inline-label">卡片距顶</label>
               <span id="cards-top-val" class="slider-val">0px</span>
-              <input type="range" id="setting-cards-top" min="4" max="600" value="0" step="2">
+              <input type="range" id="setting-cards-top" min="4" max="600" value="0" step="1">
             </div>
           </div>
           <div class="setting-group">
@@ -308,14 +309,14 @@
             <div class="setting-inline-row">
               <label for="setting-card-width" class="setting-inline-label">卡片宽度</label>
               <span id="card-width-val" class="slider-val">270px</span>
-              <input type="range" id="setting-card-width" min="100" max="400" value="270" step="10">
+              <input type="range" id="setting-card-width" min="100" max="400" value="270" step="1">
             </div>
           </div>
           <div class="setting-group">
             <div class="setting-inline-row">
               <label for="setting-card-height" class="setting-inline-label">卡片高度</label>
               <span id="card-height-val" class="slider-val">270px</span>
-              <input type="range" id="setting-card-height" min="80" max="400" value="270" step="10">
+              <input type="range" id="setting-card-height" min="80" max="400" value="270" step="1">
             </div>
           </div>
           <div class="setting-group">
@@ -333,14 +334,14 @@
             <div class="setting-inline-row">
               <label for="setting-search-top" class="setting-inline-label">搜索边距 </label>
               <span id="search-top-val" class="slider-val">60px</span>
-              <input type="range" id="setting-search-top" min="2" max="300" value="60" step="2">
+              <input type="range" id="setting-search-top" min="2" max="300" value="60" step="1">
             </div>
           </div>
           <div class="setting-group">
             <div class="setting-inline-row">
               <label for="setting-search-gap" class="setting-inline-label">搜索卡距</label>
               <span id="search-gap-val" class="slider-val">48px</span>
-              <input type="range" id="setting-search-gap" min="12" max="200" value="48" step="4">
+              <input type="range" id="setting-search-gap" min="12" max="200" value="48" step="1">
             </div>
           </div>
           <div class="setting-group">
@@ -351,7 +352,7 @@
             <div class="setting-inline-row">
               <label for="setting-group-offset" class="setting-inline-label">指示器边距</label>
               <span id="group-offset-val" class="slider-val">16px</span>
-              <input type="range" id="setting-group-offset" min="2" max="80" value="16" step="2">
+              <input type="range" id="setting-group-offset" min="2" max="80" value="16" step="1">
             </div>
           </div>
           <div class="setting-group" id="group-size-dot-row">
@@ -403,7 +404,7 @@
             <div class="setting-inline-row">
               <label for="setting-wallpaper-opacity" class="setting-inline-label">壁纸遮罩</label>
               <span id="wallpaper-opacity-val" class="slider-val">30%</span>
-              <input type="range" id="setting-wallpaper-opacity" min="0" max="80" value="30" step="5">
+              <input type="range" id="setting-wallpaper-opacity" min="0" max="80" value="30" step="1">
             </div>
           </div>
         </div>
@@ -426,7 +427,7 @@
           </div>
           <div class="setting-group">
             <label for="setting-weather-refresh">刷新间隔 <span id="refresh-interval-val" class="slider-val">15分钟</span></label>
-            <input type="range" id="setting-weather-refresh" min="5" max="120" value="15" step="5">
+            <input type="range" id="setting-weather-refresh" min="5" max="120" value="15" step="1">
           </div>
           <div id="weather-cache-status" class="setting-group">
             <span class="cache-status">📡 缓存状态：暂无数据</span>
@@ -447,7 +448,7 @@
               <button id="btn-import-all" class="btn-backup">📤 导入数据</button>
             </div>
             <div class="setting-inline-row" style="margin-top:8px">
-              <label class="setting-inline-label">自动备份模式</label>
+              <label class="setting-inline-label" for="setting-backup-mode">自动备份模式</label>
               <select id="setting-backup-mode">
                 <option value="off">关闭</option>
                 <option value="remind">本地定时提醒</option>
@@ -455,7 +456,7 @@
               </select>
             </div>
             <div class="setting-inline-row" id="backup-remind-row" style="display:none">
-              <label class="setting-inline-label">提醒周期</label>
+              <label class="setting-inline-label" for="setting-backup-remind-days">提醒周期</label>
               <select id="setting-backup-remind-days">
                 <option value="7">7 天</option>
                 <option value="14">14 天</option>
@@ -508,6 +509,7 @@
         <div class="upload-row">
           <button id="dialog-image-upload" class="btn-upload">📁 上传本地图片</button>
           <button id="dialog-image-capture" class="btn-upload">📸 网页截图</button>
+          <button id="dialog-extract-theme" class="btn-upload" style="display:none">🎨 采样主题色</button>
           <input type="file" id="dialog-image-file" accept="image/*" class="hidden">
         </div>
         <div class="dialog-actions">

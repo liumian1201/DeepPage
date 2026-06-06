@@ -423,6 +423,14 @@ function bindMainEvents() {
     });
   }
 
+  // v1.2.5: 编辑弹窗「采样主题色」按钮
+  var extractBtn = document.getElementById('dialog-extract-theme');
+  if (extractBtn) {
+    extractBtn.addEventListener('click', function () {
+      if (editingId && typeof _extractAndSaveTheme === 'function') _extractAndSaveTheme(editingId);
+    });
+  }
+
   bindConfirmDialogEvents();
   bindGroupEvents();
   bindGroupDialogEvents();

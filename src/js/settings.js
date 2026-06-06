@@ -20,6 +20,7 @@ const domSettings = {
   toggleCardTitle: document.getElementById('toggle-card-title'),
   toggleShowVisitCount: document.getElementById('toggle-show-visit-count'),
   togglePureTextCards: document.getElementById('toggle-pure-text-cards'),
+  toggleCardThemeColor: document.getElementById('toggle-card-theme-color'),
   toggleConfirmDelete: document.getElementById('toggle-confirm-delete'),
   toggleDisableWheelSwitch: document.getElementById('toggle-disable-wheel-switch'),
   toggleShowGroupIndicator: document.getElementById('toggle-show-group-indicator'),
@@ -127,7 +128,9 @@ function populateSettingsForm(settings) {
   domSettings.toggleCardTitle.checked = settings.showCardTitle !== false;
   if (domSettings.toggleShowVisitCount) domSettings.toggleShowVisitCount.checked = settings.showVisitCount !== false;
   if (domSettings.togglePureTextCards) domSettings.togglePureTextCards.checked = settings.pureTextCards === true;
+  if (domSettings.toggleCardThemeColor) domSettings.toggleCardThemeColor.checked = settings.cardThemeColor === true;
   if (domSettings.toggleConfirmDelete) domSettings.toggleConfirmDelete.checked = settings.confirmDelete !== false;
+  if (domSettings.toggleDisableWheelSwitch) domSettings.toggleDisableWheelSwitch.checked = settings.disableWheelSwitch === true;
   if (domSettings.backupMode) domSettings.backupMode.value = settings.backupMode || 'off';
   if (domSettings.backupRemindDays) domSettings.backupRemindDays.value = settings.backupRemindDays || 7;
   _updateBackupModeUI();
@@ -417,6 +420,7 @@ function collectSettingsFromForm() {
     showCardTitle: domSettings.toggleCardTitle.checked,
     showVisitCount: domSettings.toggleShowVisitCount ? domSettings.toggleShowVisitCount.checked : true,
     pureTextCards: domSettings.togglePureTextCards ? domSettings.togglePureTextCards.checked : false,
+    cardThemeColor: domSettings.toggleCardThemeColor ? domSettings.toggleCardThemeColor.checked : false,
     confirmDelete: domSettings.toggleConfirmDelete ? domSettings.toggleConfirmDelete.checked : true,
     disableWheelSwitch: domSettings.toggleDisableWheelSwitch ? domSettings.toggleDisableWheelSwitch.checked : false,
     backupMode: domSettings.backupMode ? domSettings.backupMode.value : 'off',
@@ -776,7 +780,7 @@ function bindSettingsEvents() {
     el.addEventListener('change', onSettingChanged);
   });
 
-  [domSettings.toggleClock, domSettings.toggleLunar, domSettings.toggleWeather, domSettings.toggleAddBtn, domSettings.toggleCardTitle, domSettings.toggleShowVisitCount, domSettings.togglePureTextCards, domSettings.toggleConfirmDelete, domSettings.toggleDisableWheelSwitch, domSettings.toggleShowGroupIndicator, domSettings.bingUHD, domSettings.bingAutoRefresh, domSettings.toggleShowSearch, domSettings.toggleClockSeconds].forEach((el) => {
+  [domSettings.toggleClock, domSettings.toggleLunar, domSettings.toggleWeather, domSettings.toggleAddBtn, domSettings.toggleCardTitle, domSettings.toggleShowVisitCount, domSettings.togglePureTextCards, domSettings.toggleCardThemeColor, domSettings.toggleConfirmDelete, domSettings.toggleDisableWheelSwitch, domSettings.toggleShowGroupIndicator, domSettings.bingUHD, domSettings.bingAutoRefresh, domSettings.toggleShowSearch, domSettings.toggleClockSeconds].forEach((el) => {
     if (!el) return;
     el.addEventListener('change', onSettingChanged);
   });
