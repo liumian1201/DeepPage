@@ -358,6 +358,82 @@
   padding: 4px 0;
 }
 
+/* ===== 本地卡片搜索下拉 ===== */
+.local-search-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: 420px;
+  overflow-y: auto;
+  background: color-mix(in srgb, var(--bg-panel) 85%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.18);
+  z-index: 150;
+  padding: 4px 0;
+}
+.local-search-list {
+  /* 子项容器 */
+}
+.local-search-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  gap: 12px;
+}
+.local-search-item:hover,
+.local-search-item.active {
+  background: var(--accent-light);
+}
+.local-search-item.active {
+  color: var(--accent);
+}
+.local-search-item .ls-name {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+.local-search-item .ls-name mark {
+  background: var(--accent);
+  color: #fff;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.local-search-item .ls-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--accent-light);
+  color: var(--accent);
+  font-weight: 600;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.local-search-item.active .ls-badge {
+  background: var(--accent);
+  color: #fff;
+}
+.local-search-footer {
+  padding: 6px 16px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-align: center;
+  border-top: 1px solid var(--border-color);
+}
+
 .search-engine-dropdown .engine-option {
   padding: 8px 16px;
   font-size: 14px;

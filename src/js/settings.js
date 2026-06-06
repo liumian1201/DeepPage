@@ -482,7 +482,7 @@ function closeSettingsPanel() {
 function bindSettingsEvents() {
   domSettings.btnOpen.addEventListener('click', openSettingsPanel);
   domSettings.btnClose.addEventListener('click', closeSettingsPanel);
-  domSettings.overlay.addEventListener('click', closeSettingsPanel);
+  // 遮罩不再响应点击关闭（与首次备份引导弹窗一致）
 
   // 面板拖拽
   var header = domSettings.panel.querySelector('.settings-panel-header');
@@ -826,11 +826,17 @@ function bindSettingsEvents() {
     }
   });
 
-  // ESC 关闭面板
+  // ESC 关闭面板（若有子弹窗打开则优先关子弹窗，不关面板）
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !domSettings.panel.classList.contains('hidden')) {
-      closeSettingsPanel();
-    }
+    if (e.key !== 'Escape' || domSettings.panel.classList.contains('hidden')) return;
+    // 子弹窗打开时，ESC 仅关子弹窗不关面板（由 main.js 的 ESC 链处理）
+    var searchMgr = document.getElementById('dialog-search-engines');
+    if (searchMgr && !searchMgr.classList.contains('hidden')) return;
+    var importConfirm = document.getElementById('dialog-import-confirm');
+    if (importConfirm && !importConfirm.classList.contains('hidden')) return;
+    var resetDlg = document.getElementById('dialog-reset');
+    if (resetDlg && !resetDlg.classList.contains('hidden')) return;
+    closeSettingsPanel();
   });
 
   // ---- 备份模式切换 ----

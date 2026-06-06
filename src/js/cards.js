@@ -191,7 +191,7 @@ function showDuplicateConfirm(name, url, dup) {
     function cleanup() { dlg.classList.add('hidden'); }
     okBtn.onclick = function () { cleanup(); resolve(true); };
     cancelBtn.onclick = function () { cleanup(); resolve(false); };
-    dlg.onclick = function (e) { if (e.target === dlg) { cleanup(); resolve(false); } };
+    // 点击空白处不再关闭弹窗
   });
 }
 

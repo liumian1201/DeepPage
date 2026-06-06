@@ -53,11 +53,16 @@
         <label for="search-input" class="sr-only">搜索网页</label>
         <span id="search-engine-icon" class="search-engine-icon" title="当前搜索引擎">🔍</span>        <div id="search-engine-dropdown" class="search-engine-dropdown hidden">
           <!-- 由 main.js 动态渲染 -->
-        </div>        <input
+        </div>
+        <div id="local-search-dropdown" class="local-search-dropdown hidden">
+          <div id="local-search-list" class="local-search-list"></div>
+          <div id="local-search-footer" class="local-search-footer"></div>
+        </div>
+        <input
           type="text"
           id="search-input"
           class="search-input"
-          placeholder="搜索网页...（按 / 聚焦搜索）"
+          placeholder="搜索网页...（/ 聚焦 | > 搜本地卡片）"
           autocomplete="off"
           autofocus
         >
@@ -515,7 +520,8 @@
 
     <!-- ===== 右键上下文菜单 ===== -->
     <div id="context-menu" class="context-menu hidden">
-      <div class="context-menu-item" data-action="open">🔗 打开</div>
+      <div class="context-menu-item" data-action="openForeground">🔗 前台打开</div>
+      <div class="context-menu-item" data-action="openBackground">🔗 后台打开</div>
       <div class="context-menu-item" data-action="copyurl">📋 复制 URL</div>
       <div class="context-menu-item" data-action="edit">✏️ 编辑</div>
       <div class="context-menu-item" data-action="capture">📸 刷新截图</div>

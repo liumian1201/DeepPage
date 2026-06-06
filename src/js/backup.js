@@ -18,7 +18,7 @@ function showImportConfirm(msg, onOk, onCancel) {
   var cleanup = function () { dlg.classList.add('hidden'); };
   if (okBtn) { okBtn.onclick = function () { cleanup(); if (onOk) onOk(); }; }
   if (cancelBtn) { cancelBtn.onclick = function () { cleanup(); if (onCancel) onCancel(); }; }
-  dlg.onclick = function (e) { if (e.target === dlg) { cleanup(); if (onCancel) onCancel(); } };
+  // 点击空白处不再关闭弹窗
 }
 
 function showImportConfirmAsync(msg) {
@@ -300,7 +300,7 @@ function resetAll() {
   var okBtn = document.getElementById('reset-ok');
   if (cancelBtn) cancelBtn.onclick = function () { dlg.classList.add('hidden'); };
   if (okBtn) okBtn.onclick = function () { dlg.classList.add('hidden'); doResetAll(); };
-  dlg.onclick = function (e) { if (e.target === dlg) dlg.classList.add('hidden'); };
+  // 点击空白处不再关闭弹窗
 }
 
 function doResetAll() {

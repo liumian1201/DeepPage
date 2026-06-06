@@ -325,9 +325,33 @@ function bindMainEvents() {
   });
 
   domMain.searchInput.addEventListener('keydown', (e) => {
+    // > 本地卡片搜索（拦截方向键/回车/ESC）
+    if (typeof handleLocalSearchKeydown === 'function' && handleLocalSearchKeydown(e)) {
+      return;
+    }
     if (e.key === 'Enter') {
+      // 本地搜索面板打开时优先选结果，否则走搜索引擎
+      var dd = document.getElementById('local-search-dropdown');
+      if (dd && !dd.classList.contains('hidden')) return;
       performSearch();
     }
+  });
+
+  domMain.searchInput.addEventListener('input', function () {
+    var val = this.value;
+    if (val.startsWith('>')) {
+      var query = val.substring(1).trim();
+      if (typeof performLocalSearch === 'function') performLocalSearch(query);
+    } else {
+      if (typeof hideLocalSearchDropdown === 'function') hideLocalSearchDropdown();
+    }
+  });
+
+  // 搜索框失焦时延迟关闭本地搜索（给点击事件留时间）
+  domMain.searchInput.addEventListener('blur', function () {
+    setTimeout(function () {
+      if (typeof hideLocalSearchDropdown === 'function') hideLocalSearchDropdown();
+    }, 200);
   });
 
   domMain.searchIcon.addEventListener('click', function (e) {
@@ -348,9 +372,7 @@ function bindMainEvents() {
       closeDialog();
     }
   });
-  domMain.dialog.addEventListener('click', (e) => {
-    if (e.target === domMain.dialog) closeDialog();
-  });
+  // 点击空白处不再关闭弹窗
 
   domMain.dialogUrl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') saveDialog();
@@ -424,9 +446,7 @@ function bindConfirmDialogEvents() {
     closeConfirmDialog();
   });
   domMain.confirmCancel.addEventListener('click', closeConfirmDialog);
-  domMain.confirmDialog.addEventListener('click', function (e) {
-    if (e.target === domMain.confirmDialog) closeConfirmDialog();
-  });
+  // 点击空白处不再关闭确认弹窗
 }
 
 function handleDeleteClick(id) {
@@ -536,15 +556,86 @@ function bindKeyboardShortcuts() {
       return;
     }
 
+    // Alt+↑/↓ 切换分组（全局，不受输入框焦点影响）
+    if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      if (!groups || groups.length <= 1) return;
+      if (e.key === 'ArrowUp') {
+        var prev = activeGroupIndex - 1;
+        if (prev < 0) prev = groups.length - 1;
+        if (typeof switchGroup === 'function') switchGroup(prev);
+      } else {
+        var next = activeGroupIndex + 1;
+        if (next >= groups.length) next = 0;
+        if (typeof switchGroup === 'function') switchGroup(next);
+      }
+      return;
+    }
+
     if (e.key === 'Escape') {
-      hideContextMenu();
+      // 链式按优先级关闭弹窗（从高层到底层）
+      // 1. 确认删除弹窗（z-index 最高）
+      if (domMain.confirmDialog && !domMain.confirmDialog.classList.contains('hidden')) {
+        closeConfirmDialog();
+        return;
+      }
+      // 2. 分组命名弹窗
+      var groupDlg = document.getElementById('dialog-group');
+      if (groupDlg && !groupDlg.classList.contains('hidden')) {
+        if (typeof closeGroupDialog === 'function') closeGroupDialog();
+        return;
+      }
+      // 3. 分组管理器
+      var groupMgr = document.getElementById('dialog-group-manager');
+      if (groupMgr && !groupMgr.classList.contains('hidden')) {
+        if (typeof closeGroupManager === 'function') closeGroupManager();
+        return;
+      }
+      // 4. 搜索引擎管理器
+      var searchMgr = document.getElementById('dialog-search-engines');
+      if (searchMgr && !searchMgr.classList.contains('hidden')) {
+        searchMgr.classList.add('hidden');
+        return;
+      }
+      // 5. 备份引导弹窗
+      var backupGuide = document.getElementById('dialog-backup-guide');
+      if (backupGuide && !backupGuide.classList.contains('hidden')) {
+        backupGuide.classList.add('hidden');
+        return;
+      }
+      // 6. 导入确认弹窗
+      var importConfirm = document.getElementById('dialog-import-confirm');
+      if (importConfirm && !importConfirm.classList.contains('hidden')) {
+        importConfirm.classList.add('hidden');
+        return;
+      }
+      // 7. 重置确认弹窗
+      var resetDlg = document.getElementById('dialog-reset');
+      if (resetDlg && !resetDlg.classList.contains('hidden')) {
+        resetDlg.classList.add('hidden');
+        return;
+      }
+      // 8. 重复卡片弹窗
+      var dupDlg = document.getElementById('dialog-duplicate');
+      if (dupDlg && !dupDlg.classList.contains('hidden')) {
+        dupDlg.classList.add('hidden');
+        return;
+      }
+      // 9. 卡片编辑弹窗
+      if (!domMain.dialog.classList.contains('hidden')) {
+        closeDialog();
+        return;
+      }
+      // 10. 设置面板
       if (typeof closeSettingsPanel === 'function') {
         var panel = document.getElementById('settings-panel');
         if (panel && !panel.classList.contains('hidden')) {
           closeSettingsPanel();
+          return;
         }
       }
-      closeDialog();
+      // 8. 右键菜单
+      hideContextMenu();
     }
   });
 }

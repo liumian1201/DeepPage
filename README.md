@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Manifest-V3-blue?logo=googlechrome" alt="Manifest V3">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/Version-1.2.2-brightgreen" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.2.3-brightgreen" alt="Version">
   <img src="https://img.shields.io/badge/PRs-Welcome-orange" alt="PRs Welcome">
 </p>
 
@@ -29,6 +29,7 @@
 - 置顶居中搜索框，点击图标切换搜索引擎
 - 默认支持 **Google / 百度 / Bing / 搜狗 / Yandex** + 自定义引擎
 - 快捷键 `/` 聚焦搜索、回车跳转
+- **`>` 本地卡片搜索**：输入 `>` + 关键词，全局检索所有分组卡片，键鼠导航选择，空格 AND 多关键词精准匹配
 
 ### 🧩 FVD 风格快捷导航
 - 大方块卡片网格布局（CSS Grid）
@@ -139,7 +140,7 @@ DeepPage/
 │   ├── js/
 │   │   ├── main.js         # 主入口：初始化/事件/快捷键/锁定/Toast/自动备份
 │   │   ├── cards.js        # 卡片渲染/CRUD/计数/排序/idx验证
-│   │   ├── groups.js       # 分组管理：指示器/切换/删除(含图片清理)
+│   │   ├── groups.js       # 分组管理：指示器/切换/管理器 + bak快照
 │   │   ├── dragdrop.js     # 拖拽排序（纯鼠标事件）
 │   │   ├── search-engines.js  # 搜索引擎管理/下拉/搜索
 │   │   ├── contextmenu.js  # 右键菜单 + 移动到分组子菜单
@@ -172,9 +173,11 @@ DeepPage/
 |--------|------|
 | 点击页面空白 | 自动聚焦搜索框 |
 | `/` | 聚焦搜索框并全选 |
+| `>` + 关键词 | 搜索所有分组的本地卡片（↑↓选择 / Enter 打开） |
 | `Alt + ,` | 打开/关闭设置面板 |
 | `Alt + N` | 新建卡片 |
-| `ESC` | 关闭弹窗/面板/右键菜单 |
+| `Alt + ↑/↓` | 切换到上/下一个分组 |
+| `ESC` | 链式逐层关闭弹窗/面板/右键菜单 |
 
 ---
 

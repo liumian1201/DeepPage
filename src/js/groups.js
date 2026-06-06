@@ -68,11 +68,11 @@ async function switchGroup(index) {
   activeGroupIndex = index;
   speeddials = groups[index].cards || [];
   renderSpeeddials();
-  // BUG-023: await 确保 _savingGroups 在函数返回前恢复，避免跨标签同步盲区
-  await saveGroups(groups);
-  await saveActiveGroup(activeGroupIndex);
   renderGroupDots();
   if (typeof updateSortModeSelect === 'function') updateSortModeSelect();
+  // 异步保存，不阻塞 UI 切换
+  saveGroups(groups);
+  saveActiveGroup(activeGroupIndex);
 }
 
 /* ==================== 分组 CRUD ==================== */
@@ -211,7 +211,7 @@ function bindGroupDialogEvents() {
   if (!dlg) return;
   if (saveBtn) saveBtn.addEventListener('click', saveGroupDialog);
   if (cancelBtn) cancelBtn.addEventListener('click', closeGroupDialog);
-  dlg.addEventListener('click', function (e) { if (e.target === dlg) closeGroupDialog(); });
+  // 点击空白处不再关闭弹窗
   if (input) input.addEventListener('keydown', function (e) { if (e.key === 'Enter') saveGroupDialog(); });
 }
 
@@ -232,7 +232,7 @@ function openGroupManager() {
     // BUG-022: 在 saveGroupDialog 中重开管理器，替代 setTimeout 盲等
     addGroup();
   };
-  dlg.onclick = function (e) { if (e.target === dlg) closeGroupManager(); };
+  // 点击空白处不再关闭弹窗
 }
 
 function closeGroupManager() {

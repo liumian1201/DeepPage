@@ -70,7 +70,7 @@ function showContextMenu(x, y, source) {
   items.forEach((item) => {
     const action = item.dataset.action;
     if (source === 'card') {
-      var allowed = ['open', 'copyurl', 'edit', 'capture', 'moveToGroup', 'delete'];
+      var allowed = ['openForeground', 'openBackground', 'copyurl', 'edit', 'capture', 'moveToGroup', 'delete'];
       if (action === 'lock' || action === 'unlock') {
         item.classList.toggle('hidden', true);
       } else {
@@ -190,19 +190,21 @@ async function handleMoveToGroup(targetIdx) {
 function handleContextAction(action, ds) {
   ds = ds || {};
   switch (action) {
-    case 'open':
+    case 'openForeground':
       if (contextCardId) {
-        const card = speeddials.find((c) => c.id === contextCardId);
-        if (card) {
+        var cardFg = speeddials.find(function (c) { return c.id === contextCardId; });
+        if (cardFg && cardFg.url) {
+          if (typeof incrementVisitCount === 'function') incrementVisitCount(contextCardId, true);
+          chrome.tabs.create({ url: cardFg.url, active: true });
+        }
+      }
+      break;
+    case 'openBackground':
+      if (contextCardId) {
+        var cardBg = speeddials.find(function (c) { return c.id === contextCardId; });
+        if (cardBg && cardBg.url) {
           if (typeof incrementVisitCount === 'function') incrementVisitCount(contextCardId, false);
-          var mode = (typeof currentSettings !== 'undefined' && currentSettings) ? currentSettings.cardOpenMode : 'current';
-          if (mode === 'foreground') {
-            chrome.tabs.create({ url: card.url, active: true });
-          } else if (mode === 'background') {
-            chrome.tabs.create({ url: card.url, active: false });
-          } else {
-            window.location.href = card.url;
-          }
+          chrome.tabs.create({ url: cardBg.url, active: false });
         }
       }
       break;
