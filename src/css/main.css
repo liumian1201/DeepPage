@@ -565,6 +565,11 @@
   justify-content: center;
 }
 
+/* 分组容器：display: contents 让卡片直接参与 Grid 布局 */
+.speeddial-group {
+  display: contents;
+}
+
 /* ---- 卡片外层包裹（v1.0.9） — 统一容器：背景+圆角+阴影 ---- */
 .card-wrapper {
   display: flex;

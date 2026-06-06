@@ -43,7 +43,13 @@ function onMouseDown(e) {
   if (!wrapper) return;
 
   dragCard = cardEl;
-  dragOrigIndex = parseInt(wrapper.dataset.index, 10);
+  // 用 data-id 查找在 speeddials 中的实际位置
+  var cardId = wrapper.dataset.id;
+  dragOrigIndex = -1;
+  for (var si = 0; si < speeddials.length; si++) {
+    if (speeddials[si].id === cardId) { dragOrigIndex = si; break; }
+  }
+  if (dragOrigIndex < 0) return;
   dragStartX = e.clientX;
   dragStartY = e.clientY;
   // BUG-007: 预计算所有卡片中心坐标，mousemove 期间避免 DOM 查询
@@ -105,8 +111,14 @@ document.addEventListener('mouseup', function (e) {
   if (!targetCard) { dragCard = null; return; }
 
   var targetWrapper = targetCard.closest('.card-wrapper');
-  var targetIndex = targetWrapper ? parseInt(targetWrapper.dataset.index, 10) : parseInt(targetCard.dataset.index, 10);
-  if (isNaN(targetIndex) || targetIndex === dragOrigIndex) { dragCard = null; return; }
+  var targetCardId = targetWrapper ? targetWrapper.dataset.id : null;
+  var targetIndex = -1;
+  if (targetCardId) {
+    for (var ti = 0; ti < speeddials.length; ti++) {
+      if (speeddials[ti].id === targetCardId) { targetIndex = ti; break; }
+    }
+  }
+  if (targetIndex < 0 || targetIndex === dragOrigIndex) { dragCard = null; return; }
 
   var rect = targetCard.getBoundingClientRect();
   var midX = rect.left + rect.width / 2;
@@ -145,7 +157,9 @@ function getTargetCard(e) {
 /** BUG-007: 预缓存所有卡片中心坐标（mousedown 时调用一次） */
 var _cardCenters = null;
 function _cacheCardCenters() {
-  var wrappers = domMain.grid.querySelectorAll('.card-wrapper');
+  // 仅缓存当前活跃分组的卡片（避免隐藏组的 0 尺寸污染）
+  var activeContainer = _groupContainers && _groupContainers[activeGroupIndex];
+  var wrappers = activeContainer ? activeContainer.querySelectorAll('.card-wrapper') : domMain.grid.querySelectorAll('.card-wrapper');
   _cardCenters = [];
   for (var i = 0; i < wrappers.length; i++) {
     var r = wrappers[i].getBoundingClientRect();
@@ -158,9 +172,12 @@ function highlightDropTarget(e) {
   var target = getTargetCard(e);
   if (target) {
     var wrapper = target.closest('.card-wrapper');
-    var idx = wrapper ? parseInt(wrapper.dataset.index, 10) : parseInt(target.dataset.index, 10);
-    if (idx !== dragOrigIndex) {
-      target.classList.add('drag-over');
+    if (wrapper && wrapper.dataset.id) {
+      var tid = -1;
+      for (var hi = 0; hi < speeddials.length; hi++) {
+        if (speeddials[hi].id === wrapper.dataset.id) { tid = hi; break; }
+      }
+      if (tid >= 0 && tid !== dragOrigIndex) target.classList.add('drag-over');
     }
   }
 }

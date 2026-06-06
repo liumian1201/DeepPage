@@ -830,12 +830,13 @@ function bindSettingsEvents() {
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape' || domSettings.panel.classList.contains('hidden')) return;
     // 子弹窗打开时，ESC 仅关子弹窗不关面板（由 main.js 的 ESC 链处理）
-    var searchMgr = document.getElementById('dialog-search-engines');
-    if (searchMgr && !searchMgr.classList.contains('hidden')) return;
-    var importConfirm = document.getElementById('dialog-import-confirm');
-    if (importConfirm && !importConfirm.classList.contains('hidden')) return;
-    var resetDlg = document.getElementById('dialog-reset');
-    if (resetDlg && !resetDlg.classList.contains('hidden')) return;
+    // 覆盖所有可从设置面板内打开的弹窗
+    var guards = ['dialog-search-engines', 'dialog-import-confirm', 'dialog-reset',
+                  'dialog-group-manager', 'dialog-group', 'dialog-confirm'];
+    for (var gi = 0; gi < guards.length; gi++) {
+      var el = document.getElementById(guards[gi]);
+      if (el && !el.classList.contains('hidden')) return;
+    }
     closeSettingsPanel();
   });
 

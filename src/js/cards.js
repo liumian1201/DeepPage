@@ -53,89 +53,157 @@ function getSortedCards(cards, sortMode) {
   }
 }
 
+/* ==================== 渲染竞态防护 ==================== */
+var _renderId = 0;
+
+/* ==================== 图片 Blob URL 缓存层 ==================== */
+var _cardBlobCache = {};
+
+function _clearCardBlobCache(cardId) {
+  var old = _cardBlobCache[cardId];
+  if (old) {
+    URL.revokeObjectURL(old);
+    delete _cardBlobCache[cardId];
+  }
+}
+
+function _clearAllBlobCaches() {
+  Object.keys(_cardBlobCache).forEach(function (k) {
+    URL.revokeObjectURL(_cardBlobCache[k]);
+  });
+  _cardBlobCache = {};
+}
+
+/** 获取卡片图片 URL（优先缓存，否则从 IndexedDB 加载并缓存） */
+async function _getCardImgUrl(imgKey) {
+  if (_cardBlobCache[imgKey]) return _cardBlobCache[imgKey];
+  var blob = await loadImage(imgKey);
+  if (blob) {
+    var url = URL.createObjectURL(blob);
+    _cardBlobCache[imgKey] = url;
+    return url;
+  }
+  return null;
+}
+
+/* ==================== DOM 分组容器缓存（LRU 3组） ==================== */
+var _groupContainers = {};   // { groupIndex: div }
+var _groupLru = [];          // [groupIndex, ...] 最近使用的在前
+
+function _ensureGroupContainer(groupIndex) {
+  if (_groupContainers[groupIndex]) {
+    var pos = _groupLru.indexOf(groupIndex);
+    if (pos >= 0) _groupLru.splice(pos, 1);
+    _groupLru.unshift(groupIndex);
+    return _groupContainers[groupIndex];
+  }
+  var div = document.createElement('div');
+  div.className = 'speeddial-group';
+  div.dataset.group = groupIndex;
+  div.style.display = 'none';
+  domMain.grid.appendChild(div);
+  _groupContainers[groupIndex] = div;
+  _groupLru.unshift(groupIndex);
+  // LRU 驱逐：超过 3 组时销毁最久未用的
+  while (_groupLru.length > 3) {
+    var oldIdx = _groupLru.pop();
+    var oldDiv = _groupContainers[oldIdx];
+    if (oldDiv) { oldDiv.remove(); delete _groupContainers[oldIdx]; }
+  }
+  return div;
+}
+
+function _showCurrentGroup() {
+  Object.keys(_groupContainers).forEach(function (gi) {
+    _groupContainers[gi].style.display = gi == activeGroupIndex ? 'contents' : 'none';
+  });
+}
+
+/** 检查当前分组是否已有缓存 DOM */
+function _groupHasDOM(groupIndex) {
+  var c = _groupContainers[groupIndex];
+  return c && c.children.length > 0;
+}
+
 /* ==================== 卡片渲染 ==================== */
 function renderSpeeddials() {
   if (!domMain.grid) return;
+  if (typeof _renderDebounce !== 'undefined') clearTimeout(_renderDebounce);
 
   var cols = (currentSettings && currentSettings.columns) ? currentSettings.columns : 5;
-  if (typeof updateGridColumns === 'function') {
-    updateGridColumns(cols);
-  }
+  if (typeof updateGridColumns === 'function') updateGridColumns(cols);
 
   var sortMode = (groups[activeGroupIndex] && groups[activeGroupIndex].sortMode) ? groups[activeGroupIndex].sortMode : 'manual';
   var displayCards = getSortedCards(speeddials, sortMode);
 
+  var container = _ensureGroupContainer(activeGroupIndex);
+  _showCurrentGroup();
+
+  // 空状态
+  var showAdd = (!currentSettings || currentSettings.showAddButton !== false) && !isLocked;
+  if (speeddials.length === 0 && !showAdd) {
+    container.innerHTML = '<div class="empty-state"><p>📌 还没有快捷方式</p><p class="empty-hint">打开设置面板，开启「+ 添加按钮」来添加快捷导航</p></div>';
+    domMain.grid.classList.add('rendered');
+    return;
+  }
+
+  // 构建卡片 HTML（复用现有模板逻辑）
   var html = '';
+  displayCards.forEach(function (card, index) {
+    var hasCustomImage = card.image && card.image.trim();
+    var isLocal = hasCustomImage && card.image.startsWith('idx:');
+    var imgSrc = isLocal ? null : (hasCustomImage ? escapeHtml(card.image.trim()) : '');
+    var showTitle = !currentSettings || currentSettings.showCardTitle !== false;
+    var firstChar = (card.name || '?').charAt(0).toUpperCase();
+    var bgColor = card.color || stringToColor(card.url || card.name);
+    var showCounter = currentSettings && currentSettings.showVisitCount === true;
+    var visitCount = card.visitCount || 0;
+    var pureText = currentSettings && currentSettings.pureTextCards === true;
 
-  displayCards.forEach((card, index) => {
-    const hasCustomImage = card.image && card.image.trim();
-    const isLocal = hasCustomImage && card.image.startsWith('idx:');
-    const imgSrc = isLocal ? '' : (hasCustomImage ? escapeHtml(card.image.trim()) : '');
-    const showTitle = !currentSettings || currentSettings.showCardTitle !== false;
-    const firstChar = (card.name || '?').charAt(0).toUpperCase();
-    const bgColor = card.color || stringToColor(card.url || card.name);
-    const showCounter = currentSettings && currentSettings.showVisitCount === true;
-    const visitCount = card.visitCount || 0;
-    const pureText = currentSettings && currentSettings.pureTextCards === true;
-
-    // 顶部信息栏：标题 + 计数（v1.1.0: 移除图标）
     var topBarHtml = '';
     if (showTitle || showCounter) {
       topBarHtml = '<div class="card-top-bar">';
-      if (showTitle) {
-        topBarHtml += '<span class="card-top-title">' + escapeHtml(card.name) + '</span>';
-      }
-      if (showCounter) {
-        topBarHtml += '<span class="card-top-counter">👁 ' + visitCount + '</span>';
-      }
+      if (showTitle) topBarHtml += '<span class="card-top-title">' + escapeHtml(card.name) + '</span>';
+      if (showCounter) topBarHtml += '<span class="card-top-counter">👁 ' + visitCount + '</span>';
       topBarHtml += '</div>';
     }
 
     if (pureText) {
-      html += '\n      <div class="card-wrapper"\n           data-index="' + index + '"\n           data-id="' + card.id + '"\n           data-url="' + escapeHtml(card.url) + '"\n           title="' + escapeHtml(card.name) + ' — ' + escapeHtml(card.url) + '">\n        ' + topBarHtml + '\n        <div class="speeddial-card card-pure-text" draggable="true">\n          <div class="card-pure-text-inner" style="background:' + bgColor + ';">\n            <span class="card-pure-text-char">' + firstChar + '</span>\n            <span class="card-pure-text-name">' + escapeHtml(card.name) + '</span>\n          </div>\n          <div class="card-actions">\n            <button class="btn-card-edit" data-action="edit" data-id="' + card.id + '" title="编辑">✎</button>\n            <button class="btn-card-delete" data-action="delete" data-id="' + card.id + '" title="删除">✕</button>\n          </div>\n        </div>\n      </div>';
+      html += '<div class="card-wrapper" data-index="' + index + '" data-id="' + card.id + '" data-url="' + escapeHtml(card.url) + '" title="' + escapeHtml(card.name) + ' — ' + escapeHtml(card.url) + '">' + topBarHtml + '<div class="speeddial-card card-pure-text" draggable="true"><div class="card-pure-text-inner" style="background:' + bgColor + ';"><span class="card-pure-text-char">' + firstChar + '</span><span class="card-pure-text-name">' + escapeHtml(card.name) + '</span></div><div class="card-actions"><button class="btn-card-edit" data-action="edit" data-id="' + card.id + '" title="编辑">✎</button><button class="btn-card-delete" data-action="delete" data-id="' + card.id + '" title="删除">✕</button></div></div></div>';
       return;
     }
 
-    html += '\n      <div class="card-wrapper"\n           data-index="' + index + '"\n           data-id="' + card.id + '"\n           data-url="' + escapeHtml(card.url) + '"\n           ' + (isLocal ? 'data-local-img="' + card.image + '"' : '') + '\n           title="' + escapeHtml(card.name) + ' — ' + escapeHtml(card.url) + '">\n        ' + topBarHtml + '\n        <div class="speeddial-card" draggable="true">\n          <div class="card-thumb">\n            ' + (hasCustomImage ? '\n              <img class="card-thumb-img" src="' + (isLocal ? '' : imgSrc) + '" alt="' + escapeHtml(card.name) + '" loading="lazy"\n                   ' + (isLocal ? 'data-local="1"' : '') + '>\n            ' : '\n              <div class="card-fallback" style="background:' + bgColor + ';">' + firstChar + '</div>\n            ') + '\n          </div>\n          <div class="card-actions">\n            <button class="btn-card-edit" data-action="edit" data-id="' + card.id + '" title="编辑">✎</button>\n            <button class="btn-card-delete" data-action="delete" data-id="' + card.id + '" title="删除">✕</button>\n          </div>\n        </div>\n      </div>';
+    html += '<div class="card-wrapper" data-index="' + index + '" data-id="' + card.id + '" data-url="' + escapeHtml(card.url) + '" ' + (isLocal ? 'data-local-img="' + card.image + '"' : '') + ' title="' + escapeHtml(card.name) + ' — ' + escapeHtml(card.url) + '">' + topBarHtml + '<div class="speeddial-card" draggable="true"><div class="card-thumb">' + (hasCustomImage ? (isLocal ? '<img class="card-thumb-img" alt="' + escapeHtml(card.name) + '" data-local="1">' : '<img class="card-thumb-img" src="' + imgSrc + '" alt="' + escapeHtml(card.name) + '" loading="lazy">') : '<div class="card-fallback" style="background:' + bgColor + ';">' + firstChar + '</div>') + '</div><div class="card-actions"><button class="btn-card-edit" data-action="edit" data-id="' + card.id + '" title="编辑">✎</button><button class="btn-card-delete" data-action="delete" data-id="' + card.id + '" title="删除">✕</button></div></div></div>';
   });
 
-  var showAdd = (!currentSettings || currentSettings.showAddButton !== false) && !isLocked;
   if (showAdd) {
-    html += '\n      <div class="card-wrapper card-wrapper-add">\n        <div class="speeddial-card card-add" data-action="add" title="添加快捷方式（Alt+N）">\n          <span class="card-add-icon">+</span>\n        </div>\n      </div>';
+    html += '<div class="card-wrapper card-wrapper-add"><div class="speeddial-card card-add" data-action="add" title="添加快捷方式（Alt+N）"><span class="card-add-icon">+</span></div></div>';
   }
 
-  domMain.grid.innerHTML = html;
-
-  if (speeddials.length === 0 && !showAdd) {
-    domMain.grid.innerHTML = '<div class="empty-state"><p>📌 还没有快捷方式</p><p class="empty-hint">打开设置面板，开启「+ 添加按钮」来添加快捷导航</p></div>';
-  }
-
+  container.innerHTML = html;
   domMain.grid.classList.add('rendered');
 
-  loadLocalCardImages();
+  var thisRenderId = ++_renderId;
+  loadLocalCardImages(container, thisRenderId);
   bindDragEvents();
 }
 
-/** 加载卡片中的本地 IndexedDB 图片 */
-async function loadLocalCardImages() {
-  // BUG-009: for...of 串行加载，避免 IndexedDB 并发风暴 + 异常静默丢失
-  var imgs = domMain.grid.querySelectorAll('img[data-local="1"]');
+/** 加载卡片中的本地 IndexedDB 图片（仅操作指定容器内的新 img，带 renderId） */
+async function loadLocalCardImages(container, renderId) {
+  var imgs = container.querySelectorAll('img[data-local="1"]:not([src])');
   for (var i = 0; i < imgs.length; i++) {
+    if (renderId !== _renderId) return;
     var img = imgs[i];
     try {
       var wrapper = img.closest('.card-wrapper');
       var key = wrapper ? wrapper.dataset.localImg : null;
-      if (!key) {
-        var card = img.closest('.speeddial-card');
-        var w2 = card ? card.parentElement : null;
-        key = w2 && w2.classList.contains('card-wrapper') ? w2.dataset.localImg : null;
-      }
+      if (!key) { var card = img.closest('.speeddial-card'); var w2 = card ? card.parentElement : null; key = w2 && w2.classList.contains('card-wrapper') ? w2.dataset.localImg : null; }
       if (!key) continue;
       key = key.replace('idx:', '');
-      var blob = await loadImage(key);
-      if (blob) {
-        if (img.src && img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
-        img.src = URL.createObjectURL(blob);
+      var url = await _getCardImgUrl(key);
+      if (renderId !== _renderId) return;
+      if (url) {
+        img.src = url;
       } else {
         var wrapper2 = img.closest('.card-wrapper');
         if (wrapper2) {
@@ -221,8 +289,9 @@ async function editSpeeddial(id, name, url, image) {
 
 async function deleteSpeeddialById(id) {
   var card = speeddials.find(function (c) { return c.id === id; });
-  if (card && card.image && card.image.startsWith('idx:') && typeof deleteCardIcon === 'function') {
-    deleteCardIcon(id);
+  if (card && card.image && card.image.startsWith('idx:')) {
+    _clearCardBlobCache(card.image.replace('idx:', ''));
+    if (typeof deleteCardIcon === 'function') deleteCardIcon(id);
   }
   speeddials = speeddials.filter((c) => c.id !== id);
   await saveSpeeddials(speeddials);
@@ -360,6 +429,7 @@ async function saveDialog() {
     if (typeof deleteCardIcon === 'function') {
       var oldCard = speeddials.find(function (c) { return c.id === editingId; });
       if (oldCard && oldCard.image && oldCard.image.startsWith('idx:') && oldCard.image !== image) {
+        _clearCardBlobCache(oldCard.image.replace('idx:', ''));
         deleteCardIcon(editingId);
       }
     }
@@ -373,18 +443,22 @@ async function saveDialog() {
 
 /* ==================== 访问计数（v1.0.9） ==================== */
 
-/** 对指定卡片访问计数 +1，自动保存并重渲染当前分组 */
+/** 对指定卡片访问计数 +1（全局扫描所有分组），自动保存 */
 async function incrementVisitCount(cardId, render) {
   if (render === undefined) render = true;
-  // 仅更新当前活动分组（避免跨组重复 ID 计数到错误卡片）
-  var cards = groups[activeGroupIndex] ? (groups[activeGroupIndex].cards || []) : [];
-  for (var ci = 0; ci < cards.length; ci++) {
-    if (cards[ci].id === cardId) {
-      cards[ci].visitCount = (cards[ci].visitCount || 0) + 1;
-      await saveGroups(groups);
-      speeddials = cards;
-      if (render) renderSpeeddials();
-      return;
+  for (var gi = 0; gi < groups.length; gi++) {
+    var cards = groups[gi].cards || [];
+    for (var ci = 0; ci < cards.length; ci++) {
+      if (cards[ci].id === cardId) {
+        cards[ci].visitCount = (cards[ci].visitCount || 0) + 1;
+        await saveGroups(groups);
+        // 仅在当前活动分组时才更新 speeddials 和重渲染
+        if (gi === activeGroupIndex) {
+          speeddials = cards;
+          if (render) renderSpeeddials();
+        }
+        return;
+      }
     }
   }
 }

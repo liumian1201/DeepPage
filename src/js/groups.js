@@ -67,12 +67,20 @@ async function switchGroup(index) {
   }
   activeGroupIndex = index;
   speeddials = groups[index].cards || [];
-  renderSpeeddials();
+
+  // DOM 分组缓存命中：只切换显示，不重建 DOM
+  if (typeof _groupHasDOM === 'function' && _groupHasDOM(activeGroupIndex) && typeof _showCurrentGroup === 'function') {
+    _showCurrentGroup();
+  } else {
+    renderSpeeddials();
+  }
   renderGroupDots();
   if (typeof updateSortModeSelect === 'function') updateSortModeSelect();
-  // 异步保存，不阻塞 UI 切换
+  // 异步保存，不阻塞 UI；延迟释放 _savingGroups 确保 onChanged 被拦截
+  if (typeof _savingGroups !== 'undefined') _savingGroups = true;
   saveGroups(groups);
   saveActiveGroup(activeGroupIndex);
+  setTimeout(function () { _savingGroups = false; }, 200);
 }
 
 /* ==================== 分组 CRUD ==================== */

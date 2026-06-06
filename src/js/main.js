@@ -112,7 +112,7 @@ async function init() {
   // v1.1.0: 沉浸模式 — 双击空白隐藏/恢复界面
   var _immClick = 0;
   document.addEventListener('click', function (e) {
-    if (e.target.closest('button') || e.target.closest('input') || e.target.closest('select') || e.target.closest('.settings-panel') || e.target.closest('.dialog-overlay') || e.target.closest('.toast')) return;
+    if (e.target.closest('button') || e.target.closest('input') || e.target.closest('select') || e.target.closest('.settings-panel') || e.target.closest('.dialog-overlay') || e.target.closest('.toast') || e.target.closest('.group-indicator')) return;
     var now = Date.now();
     if (now - _immClick < 350) {
       document.body.classList.toggle('immersive');

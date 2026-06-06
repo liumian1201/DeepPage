@@ -2,6 +2,24 @@
 
 ---
 
+## v1.2.4 (2026-06-06)
+
+### ⚡ 性能优化
+
+- **DOM 分组缓存池**：每组独立容器（`display: contents`），热切换仅改 `display` 不重建 DOM，切组零闪烁零延迟；LRU 限制 3 组兜底内存
+- **Blob URL 缓存层**：`_cardBlobCache` + `_getCardImgUrl`，切回已访问组直接复用
+
+### 🐛 修复
+
+- **`incrementVisitCount` 全局扫描**：遍历所有分组查找卡片 ID，`>` 跨组搜索结果累加计数
+- `switchGroup` 双重渲染 → `_savingGroups` 锁 + debounce 清理
+- 快速切组竞态 → `_renderId` 防护
+- `dragdrop.js` 改用 `data-id` 匹配，DOM 回收后索引不脱钩
+- ESC 10层链式关闭 + settings.js 数组守卫
+- `scrollbar-gutter: stable` + 分组指示器防沉浸 + `user-select: none`
+
+---
+
 ## v1.2.3 (2026-06-06)
 
 ### ⌨️ 交互打磨
