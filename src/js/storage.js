@@ -158,10 +158,9 @@ async function saveGroups(groups) {
       }
     } catch (e) { console.error('local_bak save failed:', e); }
   }
-  if (typeof _savingGroups !== 'undefined') {
-    var _wasSaving = _savingGroups;
-    _savingGroups = true;
-  }
+  // BUG-028: _savingGroups 未定义时默认视为已在保存中，避免误复位
+  var _wasSaving = typeof _savingGroups !== 'undefined' ? _savingGroups : true;
+  if (typeof _savingGroups !== 'undefined') _savingGroups = true;
   await saveToStorage(STORAGE_KEYS.GROUPS, groups);
   if (typeof _savingGroups !== 'undefined' && !_wasSaving) _savingGroups = false;
   // 同步存储超限时自动回退到本地存储

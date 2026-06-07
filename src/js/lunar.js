@@ -172,8 +172,18 @@ function initLunar() {
   const now = new Date();
   const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
   const delay = tomorrow - now + 1000;
-  setTimeout(() => {
+  // BUG-033: 递归 setTimeout 每次重新校准到次日 00:00:01，避免 setInterval 累积漂移
+  function scheduleNext() {
+    var now = new Date();
+    var next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    var ms = next - now + 1000;
+    setTimeout(function () {
+      updateLunarDisplay();
+      scheduleNext();
+    }, ms);
+  }
+  setTimeout(function () {
     updateLunarDisplay();
-    setInterval(updateLunarDisplay, 86400000); // 每 24 小时更新
+    scheduleNext();
   }, delay);
 }

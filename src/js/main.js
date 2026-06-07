@@ -309,8 +309,8 @@ function bindMainEvents() {
       if (!cardUrl) return;
       // 刚完成拖拽，忽略本次点击
       if (window._justDragged && Date.now() - window._justDragged < 300) return;
+      var mode = currentSettings ? currentSettings.cardOpenMode : 'current';
       if (cardId && typeof incrementVisitCount === 'function') {
-        var mode = currentSettings ? currentSettings.cardOpenMode : 'current';
         // 仅在切换标签页（foreground）时重渲染；current/background 用户仍在本页，不重建 DOM
         incrementVisitCount(cardId, mode === 'foreground');
       }

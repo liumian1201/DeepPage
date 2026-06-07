@@ -132,8 +132,8 @@ async function fetchAndDisplayWeather(settings) {
     else if (type === 'openweathermap') { weatherData = await fetchOpenWeatherMapWeather(settings); }
     else if (type === 'custom') { weatherData = await fetchCustomWeather(settings); }
     else { throw new Error('未知数据源'); }
-    await setWeatherCache(weatherData, type, settings.weatherCity || weatherData.city || '');
-    renderWeather(weatherData, type, await getWeatherCache().then(function (c) { return c.meta; }));
+    var weatherMeta = await setWeatherCache(weatherData, type, settings.weatherCity || weatherData.city || '');
+    renderWeather(weatherData, type, weatherMeta);
   } catch (err) {
     console.error('Weather error:', err);
     if (cache2.data) { renderWeather(cache2.data, type, cache2.meta); }

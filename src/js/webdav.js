@@ -101,7 +101,7 @@ function webdavSilentPut(zipBlob) {
     if (!c.url) return;
     var fname = _genBackupFilename();
     return zipBlob.arrayBuffer().then(function (buf) {
-      setWebdavLastBackupFilename(fname);
+      // BUG-031: filename 写入在 SW 侧 silent-put 处理器中完成，避免 beforeunload 丢失
       chrome.runtime.sendMessage({ type: WEBDAV_MSG.SILENT_PUT, payload: { body: Array.from(new Uint8Array(buf)), _filename: fname, _url: c.url, _user: c.user, _pass: c.pass } });
     });
   });

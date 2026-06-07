@@ -102,6 +102,10 @@ function showContextMenu(x, y, source) {
     }
   });
 
+  // BUG-030: 先显示再读尺寸，否则 offsetHeight 返回旧值导致第一次定位出错
+  menu.classList.remove('hidden');
+  void menu.offsetHeight; // 强制同步重排
+
   let posX = x;
   let posY = y;
   const menuW = menu.offsetWidth || 180;
@@ -112,7 +116,6 @@ function showContextMenu(x, y, source) {
 
   menu.style.left = posX + 'px';
   menu.style.top = posY + 'px';
-  menu.classList.remove('hidden');
 
   // 构建移动到分组子菜单数据（不立即显示）
   if (source === 'card' && groups && groups.length > 1) {

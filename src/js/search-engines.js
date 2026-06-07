@@ -259,10 +259,13 @@ function renderLocalSearchDropdown(originalQuery, total) {
   }
 
   var html = '';
-  var escaped = escapeRegExp(originalQuery);
-  var regex = new RegExp('(' + escaped + ')', 'gi');
+  // BUG-026: 多关键词时对每个关键词分别高亮
+  var keywords = originalQuery.toLowerCase().split(/\s+/).filter(function (k) { return k.length > 0; });
   _localSearchResults.forEach(function (item, i) {
-    var name = (item.card.name || '').replace(regex, '<mark>$1</mark>');
+    var name = item.card.name || '';
+    keywords.forEach(function (kw) {
+      name = name.replace(new RegExp('(' + escapeRegExp(kw) + ')', 'gi'), '<mark>$1</mark>');
+    });
     html += '<div class="local-search-item" data-index="' + i + '">' +
       '<span class="ls-name">' + name + '</span>' +
       '<span class="ls-badge">📁 ' + escapeHtml(item.groupName) + '</span>' +

@@ -431,7 +431,7 @@ function collectSettingsFromForm() {
     showGroupIndicator: domSettings.toggleShowGroupIndicator ? domSettings.toggleShowGroupIndicator.checked : true,
     dashboardLayout: domSettings.dashboardLayout ? domSettings.dashboardLayout.value : 'row',
     dashLeft: domSettings.dashLeft ? parseInt(domSettings.dashLeft.value, 10) : 0,
-    dashBottom: domSettings.dashBottom ? parseInt(domSettings.dashBottom.value, 10) : 24,
+    dashBottom: domSettings.dashBottom ? parseInt(domSettings.dashBottom.value, 10) : 0,
     dashItemW: domSettings.dashItemW ? parseInt(domSettings.dashItemW.value, 10) : 140,
     dashItemH: domSettings.dashItemH ? parseInt(domSettings.dashItemH.value, 10) : 0,
     dashGap: domSettings.dashGap ? parseInt(domSettings.dashGap.value, 10) : 16,

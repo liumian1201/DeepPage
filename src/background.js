@@ -46,7 +46,18 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   if (request.type === 'webdav:get') { webdavProxy('GET', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
   if (request.type === 'webdav:propfind') { webdavProxy('PROPFIND', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
   if (request.type === 'webdav:test') { webdavProxy('OPTIONS', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
-  if (request.type === 'webdav:silent-put') { webdavProxy('PUT', request.payload).catch(function (e) { console.warn('silent-put:', e.message); }); sendResponse({ ok: true }); return false; }
+  if (request.type === 'webdav:silent-put') {
+    // BUG-031/032: 空 body 检查 + filename/time 在 SW 侧持久写入
+    var sp = request.payload || {};
+    if (!sp.body || !sp.body.length) { sendResponse({ ok: true }); return false; }
+    webdavProxy('PUT', sp).then(function (res) {
+      if (res.ok && sp._filename) {
+        chrome.storage.local.set({ webdav_last_backup_filename: sp._filename, webdav_last_backup: new Date().toISOString() });
+      }
+      sendResponse({ ok: true });
+    }).catch(function (e) { console.warn('silent-put:', e.message); sendResponse({ ok: true }); });
+    return true;
+  }
   // v1.2.6: 版本化备份
   if (request.type === 'webdav:list') { webdavProxy('PROPFIND_LIST', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
   if (request.type === 'webdav:delete') { webdavProxy('DELETE', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }

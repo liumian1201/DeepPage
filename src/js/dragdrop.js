@@ -159,7 +159,13 @@ var _cardCenters = null;
 function _cacheCardCenters() {
   // 仅缓存当前活跃分组的卡片（避免隐藏组的 0 尺寸污染）
   var activeContainer = _groupContainers && _groupContainers[activeGroupIndex];
-  var wrappers = activeContainer ? activeContainer.querySelectorAll('.card-wrapper') : domMain.grid.querySelectorAll('.card-wrapper');
+  var wrappers = activeContainer ? activeContainer.querySelectorAll('.card-wrapper:not(.card-wrapper-add)') : domMain.grid.querySelectorAll('.card-wrapper:not(.card-wrapper-add)');
+  // BUG-027: 回退分支中过滤 display:none 父容器内的 wrapper
+  if (!activeContainer) {
+    wrappers = Array.prototype.filter.call(wrappers, function (w) {
+      return !w.closest('.speeddial-group[style*="display: none"]');
+    });
+  }
   _cardCenters = [];
   for (var i = 0; i < wrappers.length; i++) {
     var r = wrappers[i].getBoundingClientRect();
