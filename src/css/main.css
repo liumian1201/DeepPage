@@ -375,9 +375,6 @@
   z-index: 150;
   padding: 4px 0;
 }
-.local-search-list {
-  /* 子项容器 */
-}
 .local-search-item {
   display: flex;
   align-items: center;
@@ -577,6 +574,7 @@
   width: 100%;
   background: var(--bg-card, #ffffff);
   border-radius: var(--card-radius);
+  opacity: var(--card-opacity, 1);
   box-shadow: var(--shadow-card);
   overflow: hidden;
   transition: transform var(--transition-normal),
@@ -809,6 +807,16 @@
 .dashboard-section[data-layout="column"] {
   flex-direction: column;
   align-items: center;
+}
+
+/* v1.2.6: 碰撞检测 — 卡片触底时看板退为流式，避免重叠 */
+body[data-dash-collision] .dashboard-section {
+  position: static !important;
+  transform: none !important;
+  left: auto !important;
+  bottom: auto !important;
+  order: 1;
+  margin-top: 20px;
 }
 
 .dashboard-item {

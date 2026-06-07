@@ -100,6 +100,8 @@ const domSettings = {
   columnsSliderVal: document.getElementById('columns-slider-val'),
   cardBorderRadius: document.getElementById('setting-card-radius'),
   cardBorderRadiusVal: document.getElementById('radius-val'),
+  cardOpacity:    document.getElementById('setting-card-opacity'),
+  cardOpacityVal: document.getElementById('card-opacity-val'),
   cardOpenMode:    document.getElementById('setting-card-open-mode'),
   cardsMarginTop:  document.getElementById('setting-cards-top'),
   cardsTopVal:     document.getElementById('cards-top-val')
@@ -908,7 +910,7 @@ async function onSettingChanged() {
 async function onAppearanceChanged() {
   currentSettings = collectSettingsFromForm();
   await saveSettings(currentSettings);
-  applyAllSettings(currentSettings);
+  // v1.2.6: 只保存不重刷 applyAllSettings，避免触发 applyWallpaperOpacity 等非外观设置
 
   if (typeof renderSpeeddials === 'function') {
     renderSpeeddials();

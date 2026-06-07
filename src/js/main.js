@@ -66,6 +66,9 @@ async function init() {
   if (typeof collectCardImageGarbage === 'function') collectCardImageGarbage();
 
   renderSpeeddials();
+  // v1.2.6: 延迟碰撞检测，等 DOM 布局稳定后再判断
+  setTimeout(_checkDashboardCollision, 500);
+  window.addEventListener('resize', _debounceCollisionCheck);
   bindMainEvents();
   if (currentSettings && currentSettings.showClock) {
     initClock();
@@ -167,8 +170,11 @@ async function _autoBackupIfNeeded() {
     try {
       var data = await _collectAllData();
       var zipBlob = await _buildZipBlob(data);
-      await webdavUpload(zipBlob);
+      var fname = _genBackupFilename();
+      await webdavUpload(zipBlob, fname);
+      setWebdavLastBackupFilename(fname);
       setWebdavLastBackup(new Date().toISOString());
+      webdavCleanupBackups(5).catch(function () {});
     } catch (e) { /* 静默 */ }
     return;
   }
@@ -221,6 +227,33 @@ async function _autoBackupIfNeeded() {
       };
     }
   }
+}
+
+/* ==================== v1.2.6: 看板碰撞检测 ==================== */
+var _collisionCheckTimer = null;
+function _checkDashboardCollision() {
+  var grid = domMain.grid;
+  var body = document.body;
+  if (!grid) return;
+  var inCollision = body.hasAttribute('data-dash-collision');
+  var gridRect = grid.getBoundingClientRect();
+  var dashH = 70; // 看板预估高度
+  var vh = window.innerHeight;
+  if (inCollision) {
+    // 已碰撞：窗口变宽后卡片底部腾出空间则恢复（多留 30px 缓冲）
+    if (gridRect.bottom < vh - dashH - 50) {
+      body.removeAttribute('data-dash-collision');
+    }
+  } else {
+    // 正常：卡片底部触及看板区域则切换流式（多留 20px 缓冲）
+    if (gridRect.bottom > vh - dashH - 20) {
+      body.setAttribute('data-dash-collision', '');
+    }
+  }
+}
+function _debounceCollisionCheck() {
+  clearTimeout(_collisionCheckTimer);
+  _collisionCheckTimer = setTimeout(_checkDashboardCollision, 150);
 }
 
 chrome.storage.onChanged.addListener(function (changes, areaName) {

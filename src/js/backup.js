@@ -369,6 +369,15 @@ async function updateImageDBInfo() {
         }
         nextEl.style.display = 'none';
       });
+      // v1.2.6: 同步更新 WebDAV 配置状态
+      chrome.storage.local.get(['webdav_url'], function (r2) {
+        var cfgEl = document.getElementById('webdav-config-status');
+        if (cfgEl && r2.webdav_url) {
+          cfgEl.textContent = '✅ WebDAV 已配置：' + r2.webdav_url;
+          cfgEl.style.color = '#16a34a';
+          cfgEl.style.display = '';
+        }
+      });
     } else if (mode === 'remind') {
       chrome.storage.local.get(['remind_last_backup','remind_backup_skipped'], function (r) {
         if (r.remind_last_backup) {
@@ -482,21 +491,27 @@ function updateWebdavStatus() {
 
 /** 收集全量数据（供 WebDAV 备份复用 exportAll 逻辑） */
 async function _collectAllData() {
-  var config = await new Promise(function (resolve) {
-    chrome.storage.sync.get(null, function (result) { resolve(result); });
-  });
+  // v1.2.6: 并行读取 sync 和 IndexedDB
+  var [syncData, db] = await Promise.all([
+    new Promise(function (resolve) {
+      chrome.storage.sync.get(null, function (result) { resolve(result); });
+    }),
+    openImgDB()
+  ]);
+
+  var config = syncData;
   if (!config.groups || (Array.isArray(config.groups) && config.groups.length === 0)) {
     var localData = await new Promise(function (resolve) {
       chrome.storage.local.get(['groups', 'activeGroup'], function (result) { resolve(result); });
     });
     if (localData.groups && Array.isArray(localData.groups) && localData.groups.length > 0) {
+      config = config || {};
       config.groups = localData.groups;
       config.activeGroup = localData.activeGroup;
     }
   }
   if (config.settings) config.settings._exportTime = new Date().toLocaleString('zh-CN');
 
-  var db = await openImgDB();
   var images = await new Promise(function (resolve) {
     var tx = db.transaction('images', 'readonly');
     var result = [];

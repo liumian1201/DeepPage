@@ -81,6 +81,7 @@ var DEFAULT_SETTINGS = {
   cardWidth: 270,
   cardHeight: 270,
   cardBorderRadius: 14,
+  cardOpacity: 100,
   cardOpenMode: 'current',
   showVisitCount: true,
   cardsMarginTop: 0,

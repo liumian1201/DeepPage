@@ -10,13 +10,21 @@ function initWebdavSection() {
   var webdavUserEl  = document.getElementById('webdav-user');
   var webdavPassEl  = document.getElementById('webdav-pass');
   var webdavStatus  = document.getElementById('webdav-status');
+  var webdavCfgStatus = document.getElementById('webdav-config-status');
   var toggleWebdavAuto = document.getElementById('toggle-webdav-auto');
 
-  // ---- 状态提示 ----
+  // ---- 状态提示（webdav-status 用于临时消息，webdav-config-status 用于持久状态） ----
   function _showWStatus(msg, ok) {
     if (webdavStatus) {
       webdavStatus.textContent = msg;
       webdavStatus.style.color = ok === false ? '#ef4444' : ok ? '#16a34a' : '';
+    }
+  }
+  function _showConfigStatus(msg, ok) {
+    if (webdavCfgStatus) {
+      webdavCfgStatus.textContent = msg;
+      webdavCfgStatus.style.color = ok ? '#16a34a' : '#ef4444';
+      webdavCfgStatus.style.display = '';
     }
   }
 
@@ -46,7 +54,7 @@ function initWebdavSection() {
       webdav_pass: btoa(webdavPassEl.value),
       webdav_auto_backup: toggleWebdavAuto ? toggleWebdavAuto.checked : false
     }, function () {
-      _showWStatus('配置已保存', true);
+      _showConfigStatus('✅ WebDAV 配置已保存', true);
       if (typeof showToast === 'function') showToast('WebDAV 配置已保存', 'success');
     });
   });
@@ -91,30 +99,54 @@ function initWebdavSection() {
       }
       var config = await _collectAllData();
       var zipBlob = await _buildZipBlob(config);
-      await webdavUpload(zipBlob);
+      var fname = _genBackupFilename();
+      await webdavUpload(zipBlob, fname);
+      setWebdavLastBackupFilename(fname);
       setWebdavLastBackup(new Date().toISOString());
       _showWStatus('备份成功 ✅', true);
+      webdavCleanupBackups(5).catch(function () {});
       if (typeof showToast === 'function') showToast('☁️ 已备份到 WebDAV', 'success');
     } catch (e) { _showWStatus('备份失败: ' + e.message, false); }
   });
 
-  // ---- 从云端恢复 ----
+  // ---- 从云端恢复（v1.2.6: 版本选择器） ----
   var btnRestore = document.getElementById('btn-webdav-restore');
-  if (btnRestore) btnRestore.addEventListener('click', async function () {
-    var remoteTime = null;
-    try {
-      var ts = await webdavCheckConflict();
-      if (ts) remoteTime = new Date(ts).toLocaleString('zh-CN');
-    } catch (e) {}
-    var msg = '从云端恢复将覆盖当前所有数据';
-    if (remoteTime) msg += '\n🕐 云端备份时间：' + remoteTime;
-    msg += '，是否继续？';
-    try {
-      await showImportConfirmAsync(msg);
-    } catch (e) { return; }
+  var versionPicker = document.getElementById('webdav-version-picker');
+  var versionList = document.getElementById('webdav-version-list');
+
+  // 显示备份版本选择器
+  async function _showVersionPicker() {
+    _showWStatus('正在获取备份列表...');
+    var backupList = [];
+    try { backupList = await webdavListBackups(); } catch (e) {
+      _showWStatus('获取备份列表失败: ' + e.message, false);
+      return;
+    }
+    if (!Array.isArray(backupList) || backupList.length === 0) {
+      _showWStatus('云端暂无备份文件', false);
+      return;
+    }
+    if (!versionList || !versionPicker) return;
+    var html = '';
+    for (var i = 0; i < backupList.length; i++) {
+      var f = backupList[i];
+      var fn = f.name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      var timeStr = (f.lastModified || '-').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      var checked = i === 0 ? ' checked' : '';
+      html += '<label class="webdav-version-item"><input type="radio" name="webdav-version" value="' + fn + '"' + checked + '><span class="webdav-version-info"><strong>' + fn + '</strong><br><small>' + timeStr + '</small></span></label>';
+    }
+    versionList.innerHTML = html;
+    versionPicker.classList.remove('hidden');
+    _showWStatus('');
+  }
+
+  // 执行恢复
+  async function _doRestoreFrom(filename) {
+    var msg = '从云端恢复将覆盖当前所有数据，是否继续？';
+    try { await showImportConfirmAsync(msg); } catch (e) { return; }
     _showWStatus('正在下载...');
     try {
-      var zipBlob = await webdavDownload();
+      var zipBlob = await webdavDownload(filename);
       var loading = document.getElementById('backup-loading');
       if (loading) loading.classList.remove('hidden');
       try {
@@ -126,11 +158,31 @@ function initWebdavSection() {
       } finally {
         if (loading) loading.classList.add('hidden');
       }
-      if (remoteTime) setWebdavLastBackup(new Date(remoteTime).toISOString());
+      setWebdavLastBackupFilename(filename);
+      setWebdavLastBackup(new Date().toISOString());
       _showWStatus('恢复成功，即将刷新...', true);
+      if (versionPicker) versionPicker.classList.add('hidden');
       if (typeof showToast === 'function') showToast('☁️ 已从 WebDAV 恢复，即将刷新...', 'success');
       setTimeout(function () { window.location.reload(); }, 1500);
     } catch (e) { _showWStatus('恢复失败: ' + e.message, false); }
+  }
+
+  if (btnRestore) btnRestore.addEventListener('click', _showVersionPicker);
+
+  // 恢复选中版本
+  var btnRestoreSelected = document.getElementById('btn-webdav-restore-selected');
+  if (btnRestoreSelected) btnRestoreSelected.addEventListener('click', function () {
+    var sel = versionList ? versionList.querySelector('input[name="webdav-version"]:checked') : null;
+    if (!sel) { _showWStatus('请先选择一个版本', false); return; }
+    _doRestoreFrom(sel.value);
+  });
+
+  // 恢复最新（快捷按钮）
+  var btnRestoreLatest = document.getElementById('btn-webdav-restore-latest');
+  if (btnRestoreLatest) btnRestoreLatest.addEventListener('click', function () {
+    var first = versionList ? versionList.querySelector('input[name="webdav-version"]') : null;
+    if (!first) { _showWStatus('无可用版本', false); return; }
+    _doRestoreFrom(first.value);
   });
 
   // ---- 密码显隐切换 ----

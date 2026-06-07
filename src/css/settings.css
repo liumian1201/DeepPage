@@ -427,6 +427,54 @@
   width: 100%;
 }
 
+/* v1.2.6: WebDAV 备份版本选择器 */
+.webdav-version-picker {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--btn-radius);
+  background: var(--bg-input);
+}
+
+.webdav-version-list {
+  max-height: 160px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.webdav-version-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  font-size: 13px;
+  font-family: var(--font-family);
+  color: var(--text-primary);
+}
+
+.webdav-version-item:hover {
+  background: var(--accent-light);
+}
+
+.webdav-version-item input[type="radio"] {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.webdav-version-info strong {
+  font-size: 13px;
+}
+
+.webdav-version-info small {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
 /* 纯色文字卡片（v1.0.7） */
 .card-pure-text-inner {
   width: 100%;

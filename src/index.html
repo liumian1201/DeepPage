@@ -302,7 +302,7 @@
             <div class="setting-inline-row">
               <label for="setting-columns-slider" class="setting-inline-label">每行列数</label>
               <span id="columns-slider-val" class="slider-val">5</span>
-              <input type="range" id="setting-columns-slider" min="2" max="12" value="5" step="1">
+              <input type="range" id="setting-columns-slider" min="2" max="8" value="5" step="1">
             </div>
           </div>
           <div class="setting-group">
@@ -324,6 +324,11 @@
               <label for="setting-card-radius" class="setting-inline-label">卡片圆角</label>
               <span id="radius-val" class="slider-val">14px</span>
               <input type="range" id="setting-card-radius" min="0" max="50" value="14" step="1">
+            </div>
+            <div class="setting-inline-row">
+              <label for="setting-card-opacity" class="setting-inline-label">卡片透明度</label>
+              <span id="card-opacity-val" class="slider-val">100%</span>
+              <input type="range" id="setting-card-opacity" min="0" max="100" value="100" step="1">
             </div>
           </div>
           <div class="setting-group">
@@ -466,6 +471,7 @@
             <span id="image-db-info" class="setting-hint">暂无图片数据</span>
             <span id="backup-status-info" class="setting-hint" style="display:none"></span>
             <span id="backup-next-info" class="setting-hint" style="display:none"></span>
+            <span id="webdav-config-status" class="setting-hint" style="display:none"></span>
           </div>
           <div class="setting-group" id="webdav-config-group" style="margin-top:12px;display:none">
             <span class="setting-label">☁️ WebDAV 云备份</span>
@@ -474,11 +480,22 @@
               <button id="btn-webdav-restore" class="btn-backup">⬇ 从云端恢复</button>
             </div>
             <input type="text" id="webdav-url" class="setting-input" placeholder="WebDAV 地址 (如 https://dav.jianguoyun.com/dav/DeepPage)" style="width:100%;box-sizing:border-box">
-            <input type="text" id="webdav-user" class="setting-input" placeholder="账号" style="margin-top:4px;width:100%;box-sizing:border-box">
-            <input type="password" id="webdav-pass" class="setting-input" placeholder="密码（坚果云请用应用专用密码）" style="margin-top:4px;width:100%;box-sizing:border-box"><span id="webdav-pass-toggle" style="margin-left:-34px;cursor:pointer;user-select:none;font-size:16px;opacity:0.5;vertical-align:middle" title="显示/隐藏密码">👁</span>
+            <div style="margin-top:4px">
+              <input type="text" id="webdav-user" class="setting-input" placeholder="账号" style="width:calc(50% - 4px);box-sizing:border-box">
+              <input type="password" id="webdav-pass" class="setting-input" placeholder="密码" style="width:calc(50% - 4px);box-sizing:border-box;margin-left:6px;padding-right:28px">
+              <span id="webdav-pass-toggle" style="margin-left:-26px;cursor:pointer;user-select:none;font-size:16px;opacity:0.5;vertical-align:middle" title="显示/隐藏密码">👁</span>
+            </div>
             <div class="btn-row" style="margin-top:4px">
               <button id="btn-webdav-test" class="btn-backup btn-backup-sm">🔗 测试连接</button>
               <button id="btn-webdav-save" class="btn-backup btn-backup-sm">💾 保存配置</button>
+            </div>
+            <div id="webdav-version-picker" class="webdav-version-picker hidden">
+              <span class="setting-label" style="margin-bottom:6px">📋 选择备份版本</span>
+              <div id="webdav-version-list" class="webdav-version-list"></div>
+              <div class="btn-row" style="margin-top:8px">
+                <button id="btn-webdav-restore-selected" class="btn-backup btn-backup-sm">⬇ 恢复选中版本</button>
+                <button id="btn-webdav-restore-latest" class="btn-backup btn-backup-sm">⚡ 恢复最新</button>
+              </div>
             </div>
             <span id="webdav-status" class="setting-hint"></span>
           </div>

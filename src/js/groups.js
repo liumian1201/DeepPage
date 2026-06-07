@@ -76,6 +76,8 @@ async function switchGroup(index) {
   }
   renderGroupDots();
   if (typeof updateSortModeSelect === 'function') updateSortModeSelect();
+  // v1.2.6: 分组切换后检测看板碰撞
+  if (typeof _debounceCollisionCheck === 'function') _debounceCollisionCheck();
   // 异步保存，不阻塞 UI；延迟释放 _savingGroups 确保 onChanged 被拦截
   if (typeof _savingGroups !== 'undefined') _savingGroups = true;
   saveGroups(groups);

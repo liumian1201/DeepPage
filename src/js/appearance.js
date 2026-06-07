@@ -13,6 +13,7 @@ function applyAppearance(settings) {
   root.style.setProperty('--card-width', (settings.cardWidth || 270) + 'px');
   root.style.setProperty('--card-height', (settings.cardHeight || 270) + 'px');
   root.style.setProperty('--card-radius', (settings.cardBorderRadius || 14) + 'px');
+  root.style.setProperty('--card-opacity', (settings.cardOpacity != null ? settings.cardOpacity : 100) / 100);
   // 同步 Grid 列布局
   updateGridColumns(settings.columns);
 }
@@ -30,8 +31,13 @@ function updateGridColumns(cols) {
       cols = s ? parseInt(s.value, 10) : 5;
     }
     var ws = document.getElementById('setting-card-width');
-    var w = ws ? ws.value : 270;
-    grid.style.gridTemplateColumns = 'repeat(' + cols + ', ' + w + 'px)';
+    var w = parseInt(ws ? ws.value : 270, 10);
+    // v1.2.6: auto-fill 自动换行 + max-width 限最大列数（滑块值）+ margin auto 居中
+    grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(' + w + 'px, 1fr))';
+    var gap = 16; // 与 main.css .speeddial-grid gap 一致
+    grid.style.maxWidth = (cols * w + (cols - 1) * gap) + 'px';
+    grid.style.marginLeft = 'auto';
+    grid.style.marginRight = 'auto';
   });
 }
 
@@ -61,6 +67,12 @@ function bindAppearancePreview(dom, onChanged) {
     document.documentElement.style.setProperty('--card-radius', rs.value + 'px');
   });
 
+  var os = dom.cardOpacity, osv = dom.cardOpacityVal;
+  if (os && osv) os.addEventListener('input', function () {
+    osv.textContent = os.value + '%';
+    document.documentElement.style.setProperty('--card-opacity', parseInt(os.value, 10) / 100);
+  });
+
   var cs = dom.columnsSlider, csv = dom.columnsSliderVal;
   if (cs && csv) cs.addEventListener('input', function () {
     csv.textContent = cs.value;
@@ -88,9 +100,12 @@ function bindAppearancePreview(dom, onChanged) {
     if (hsv) hsv.textContent = '270px';
     if (rs) rs.value = 14;
     if (rsv) rsv.textContent = '14px';
+    if (os) os.value = 100;
+    if (osv) osv.textContent = '100%';
     document.documentElement.style.setProperty('--card-width', '270px');
     document.documentElement.style.setProperty('--card-height', '270px');
     document.documentElement.style.setProperty('--card-radius', '14px');
+    document.documentElement.style.setProperty('--card-opacity', '1');
     updateGridColumns();
   });
 
@@ -125,7 +140,7 @@ function bindAppearancePreview(dom, onChanged) {
 
   if (onChanged) {
     // BUG-014: 仅外观专属控件绑定 onChanged，避免与 bindSettingsEvents 双重绑定
-    var appearanceEls = [dom.bgColor, dom.cardBgColor, dom.cardTextColor, dom.cardFontSize, dom.cardWidth, dom.cardHeight, dom.columnsSlider, dom.cardBorderRadius];
+    var appearanceEls = [dom.bgColor, dom.cardBgColor, dom.cardTextColor, dom.cardFontSize, dom.cardWidth, dom.cardHeight, dom.columnsSlider, dom.cardBorderRadius, dom.cardOpacity];
     appearanceEls.forEach(function (el) {
       if (el) el.addEventListener('change', onChanged);
     });
@@ -147,6 +162,8 @@ function initAppearance(dom, settings, cb) {
   if (dom.cardHeightVal) dom.cardHeightVal.textContent = (settings.cardHeight || 270) + 'px';
   if (dom.cardBorderRadius) dom.cardBorderRadius.value = settings.cardBorderRadius || 14;
   if (dom.cardBorderRadiusVal) dom.cardBorderRadiusVal.textContent = (settings.cardBorderRadius || 14) + 'px';
+  if (dom.cardOpacity) dom.cardOpacity.value = settings.cardOpacity != null ? settings.cardOpacity : 100;
+  if (dom.cardOpacityVal) dom.cardOpacityVal.textContent = (settings.cardOpacity != null ? settings.cardOpacity : 100) + '%';
   applyAppearance(settings);
   bindAppearancePreview(dom, cb || function () {});
 }
@@ -163,6 +180,7 @@ function collectAppearanceForm(dom) {
     cardWidth: dom.cardWidth ? parseInt(dom.cardWidth.value, 10) : 270,
     cardHeight: dom.cardHeight ? parseInt(dom.cardHeight.value, 10) : 270,
     columns: dom.columnsSlider ? parseInt(dom.columnsSlider.value, 10) : 5,
-    cardBorderRadius: dom.cardBorderRadius ? parseInt(dom.cardBorderRadius.value, 10) : 14
+    cardBorderRadius: dom.cardBorderRadius ? parseInt(dom.cardBorderRadius.value, 10) : 14,
+    cardOpacity: dom.cardOpacity ? parseInt(dom.cardOpacity.value, 10) : 100
   };
 }
