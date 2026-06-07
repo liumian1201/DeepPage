@@ -280,9 +280,13 @@ async function rebuildContextMenus() {
     // 清除所有菜单项
     await new Promise(function (r) { chrome.contextMenus.removeAll(r); });
 
-    // 读取分组
+    // 读取分组（大容量用户数据在 local，需回退）
     var result = await chrome.storage.sync.get(['groups']);
     var groups = result.groups;
+    if (!groups || !Array.isArray(groups) || groups.length === 0) {
+      var localResult = await chrome.storage.local.get(['groups']);
+      groups = localResult.groups;
+    }
     if (!groups || !Array.isArray(groups) || groups.length === 0) return;
 
     // 创建父菜单
@@ -306,9 +310,9 @@ async function rebuildContextMenus() {
   }
 }
 
-/** 监听 storage 变更：分组数据变化时自动刷新右键菜单 */
+/** 监听 storage 变更：分组数据变化时自动刷新右键菜单（sync + local 双通道） */
 chrome.storage.onChanged.addListener(function (changes, areaName) {
-  if (areaName === 'sync' && changes.groups) {
+  if ((areaName === 'sync' || areaName === 'local') && changes.groups) {
     rebuildContextMenus();
   }
 });
@@ -327,9 +331,13 @@ chrome.contextMenus.onClicked.addListener(async function (info, tab) {
     return;
   }
 
-  // 读取当前分组数据
+  // 读取当前分组数据（大容量用户数据在 local，需回退）
   var result = await chrome.storage.sync.get(['groups']);
   var groups = result.groups;
+  if (!groups || !Array.isArray(groups) || groups.length === 0) {
+    var localResult = await chrome.storage.local.get(['groups']);
+    groups = localResult.groups;
+  }
   if (!groups || !groups[groupIndex]) return;
 
   // v1.0.8: 检查重复 → 当前页面弹确认框
@@ -381,7 +389,13 @@ chrome.contextMenus.onClicked.addListener(async function (info, tab) {
   if (!groups[groupIndex].cards) groups[groupIndex].cards = [];
   groups[groupIndex].cards.push(card);
 
+  // 写入 sync，超限则回退 local（与 saveGroups 一致）
   await chrome.storage.sync.set({ groups: groups });
+  chrome.storage.sync.get(['groups'], function (check) {
+    if (!check.groups || !Array.isArray(check.groups) || check.groups.length === 0) {
+      chrome.storage.local.set({ groups: groups }).catch(function () {});
+    }
+  });
 
   // v1.0.5: 不在此处重建菜单（onChanged 会自动触发）
 });

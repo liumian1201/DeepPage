@@ -13,6 +13,7 @@
 - 修复 WebDAV 静默备份在标签页关闭时文件名写入丢失（移至 SW 侧）
 - 修复 WebDAV silent-put 空 body 导致 TypeError
 - 修复农历 `setInterval` 长期运行漂移（改为递归 `setTimeout` 每日校准）
+- 修复重度用户（1600+ 卡片）浏览器右键菜单「添加到 DeepPage」消失（sync 超限后未回退 local）
 
 ---
 
