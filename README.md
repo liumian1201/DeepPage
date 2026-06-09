@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Manifest-V3-blue?logo=googlechrome" alt="Manifest V3">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/Version-1.2.9-brightgreen" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.3.0-brightgreen" alt="Version">
   <img src="https://img.shields.io/badge/PRs-Welcome-orange" alt="PRs Welcome">
 </p>
 
@@ -43,6 +43,7 @@
 - **数字时钟**：12/24 小时制 + 秒数开关
 - **农历信息**：纯 JS 实现，1900-2100 范围 + 生肖 Emoji
 - **天气预报**：支持 4 种 API（Open-Meteo / 和风 / OpenWeatherMap / 自定义）
+- **v1.3.0 组件换位**：设置→看板→「✋ 编辑组件顺序」进入编辑态，◀▶ 箭头调整顺序
 
 ### 🎨 视觉与外观
 - 浅色 / 深色 / 跟随系统 三种主题模式
@@ -146,6 +147,7 @@ DeepPage/
 │   │   ├── cards.js        # 卡片渲染/CRUD/计数/排序/idx验证
 │   │   ├── groups.js       # 分组管理：指示器/切换/管理器 + bak快照
 │   │   ├── dragdrop.js     # 拖拽排序（纯鼠标事件）
+│   │   ├── dashboard.js    # v1.3.0: 看板编辑态（组件换位）
 │   │   ├── search-engines.js  # 搜索引擎管理/下拉/搜索
 │   │   ├── contextmenu.js  # 右键菜单 + 移动到分组子菜单
 │   │   ├── storage.js      # chrome.storage 封装 + 默认值 + local_bak

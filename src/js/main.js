@@ -64,6 +64,9 @@ async function init() {
   // v1.1.0+: 清理 IndexedDB 无主卡片图标
   if (typeof collectCardImageGarbage === 'function') collectCardImageGarbage();
 
+  // v1.3.0: 初始化 GridStack 看板拖拽
+  if (typeof initDashboardGrid === 'function') initDashboardGrid();
+
   renderSpeeddials();
   // v1.2.6: 延迟碰撞检测，等 DOM 布局稳定后再判断
   setTimeout(_checkDashboardCollision, 500);

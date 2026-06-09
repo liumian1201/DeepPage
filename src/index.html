@@ -84,22 +84,29 @@
     </section>
 
     <!-- ===== 信息看板区域 ===== -->
-    <section class="dashboard-section">
-      <div id="dashboard-clock" class="dashboard-item dashboard-clock">
+    <div id="dashboard-grid" class="dashboard-section">
+      <div id="dash-clock" class="dashboard-item dashboard-clock" data-widget="clock">
+        <button class="dash-arrow dash-arrow-left" data-dir="left" title="左移">◀</button>
         <div class="clock-row">
           <span class="clock-time">00:00</span><span class="clock-seconds">:00</span>
         </div>
         <span class="clock-date">----年--月--日 星期-</span>
+        <button class="dash-arrow dash-arrow-right" data-dir="right" title="右移">▶</button>
       </div>
-      <div id="dashboard-lunar" class="dashboard-item dashboard-lunar">
-        <span class="lunar-year">农历加载中...</span>
-        <span class="lunar-date"></span>
-      </div>
-      <div id="dashboard-weather" class="dashboard-item dashboard-weather">
+      <div id="dash-weather" class="dashboard-item dashboard-weather" data-widget="weather">
+        <button class="dash-arrow dash-arrow-left" data-dir="left" title="左移">◀</button>
         <span class="weather-city">天气加载中...</span>
         <span class="weather-detail"></span>
+        <button class="dash-arrow dash-arrow-right" data-dir="right" title="右移">▶</button>
       </div>
-    </section>
+      <div id="dash-lunar" class="dashboard-item dashboard-lunar" data-widget="lunar">
+        <button class="dash-arrow dash-arrow-left" data-dir="left" title="左移">◀</button>
+        <span class="lunar-year">农历加载中...</span>
+        <span class="lunar-date"></span>
+        <button class="dash-arrow dash-arrow-right" data-dir="right" title="右移">▶</button>
+      </div>
+    </div>
+    <button id="btn-dash-done" class="btn-dash-done" title="完成编辑">✅ 完成</button>
 
     <!-- ===== 设置面板（默认隐藏） ===== -->
     <div id="settings-panel" class="settings-panel hidden">
@@ -201,6 +208,11 @@
               <label class="toggle-item"><input type="checkbox" id="toggle-weather" checked> 天气预报</label>            </div>
           </div>
           <div class="setting-group">
+            <label>组件排序</label>
+            <button id="btn-dash-edit" class="btn-backup btn-backup-sm">✋ 编辑组件顺序</button>
+            <small style="color:var(--text-muted);font-size:11px;margin-top:4px;">点击后在主页用 ◀▶ 箭头调整看板组件位置</small>
+          </div>
+          <div class="setting-group">
             <label for="setting-dashboard-layout">布局方向</label>
             <select id="setting-dashboard-layout"><option value="row">水平排列</option><option value="column">垂直排列</option></select>
           </div>
@@ -246,6 +258,11 @@
           </div>
           <div class="setting-group">
             <button id="btn-reset-dash-size" class="btn-reset-danger">↺ 重置大小</button>
+          </div>
+          <div class="settings-section-title">🧩 拖拽布局</div>
+          <div class="setting-group">
+            <button id="btn-reset-dash-grid" class="btn-reset-danger">↺ 重置看板布局</button>
+            <small style="color:var(--text-muted);font-size:11px;">或点击右下角 ✋ 编辑看板 拖拽调整</small>
           </div>
           <div class="settings-section-title">⏰ 时钟</div>
           <div class="setting-group">
@@ -734,6 +751,7 @@
   <script src="js/cards.js"></script>
   <script src="js/groups.js"></script>
   <script src="js/dragdrop.js"></script>
+  <script src="js/dashboard.js"></script>
   <script src="js/search-engines.js"></script>
   <script src="js/contextmenu.js"></script>
   <script src="js/settings-webdav.js"></script>

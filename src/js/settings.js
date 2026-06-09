@@ -729,7 +729,7 @@ function bindSettingsEvents() {
       if (domSettings.dashGap) domSettings.dashGap.value = 16;
       if (domSettings.dashGapVal) domSettings.dashGapVal.textContent = '16px';
       document.documentElement.style.setProperty('--dash-gap', '16px');
-      document.querySelectorAll('.dashboard-item').forEach(function (item) { item.style.width = '140px'; item.style.height = ''; });
+      document.querySelectorAll('.grid-stack-item-content').forEach(function (item) { item.style.width = '140px'; item.style.height = ''; });
       onSettingChanged();
     });
   }
