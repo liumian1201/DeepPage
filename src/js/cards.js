@@ -282,15 +282,17 @@ async function loadLocalCardImages(container, renderId) {
 
 /* ==================== 卡片 CRUD ==================== */
 
-/** v1.0.8: 检查 URL 域名是否已存在于任意分组，返回 { groupName, cardName } 或 null */
+/** v1.2.8: 检查完整 URL 是否已存在于任意分组（非仅域名），返回 { groupName, cardName } 或 null */
 function findDuplicate(url) {
   try {
-    var host = new URL(url).hostname.replace('www.', '');
+    var u = new URL(url);
+    var normalized = u.hostname.replace('www.', '') + u.pathname + u.search;
     for (var gi = 0; gi < groups.length; gi++) {
       var cards = groups[gi].cards || [];
       for (var ci = 0; ci < cards.length; ci++) {
         try {
-          if (new URL(cards[ci].url).hostname.replace('www.', '') === host) {
+          var cu = new URL(cards[ci].url);
+          if (cu.hostname.replace('www.', '') + cu.pathname + cu.search === normalized) {
             return { groupName: groups[gi].name, cardName: cards[ci].name };
           }
         } catch (e) {}

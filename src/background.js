@@ -340,16 +340,17 @@ chrome.contextMenus.onClicked.addListener(async function (info, tab) {
   }
   if (!groups || !groups[groupIndex]) return;
 
-  // v1.0.8: 检查重复 → 当前页面弹确认框
-  var hostname = '';
-  try { hostname = new URL(pageUrl).hostname.replace('www.', ''); } catch (e) {}
+  // v1.2.8: 检查重复（完整 URL 匹配，非仅域名）→ 当前页面弹确认框
+  var normalizedUrl = '';
+  try { var u = new URL(pageUrl); normalizedUrl = u.hostname.replace('www.', '') + u.pathname + u.search; } catch (e) {}
   var dupGroup = null, dupCardName = '';
-  if (hostname) {
+  if (normalizedUrl) {
     for (var gi = 0; gi < groups.length; gi++) {
       var cards = groups[gi].cards || [];
       for (var ci = 0; ci < cards.length; ci++) {
         try {
-          if (new URL(cards[ci].url).hostname.replace('www.', '') === hostname) {
+          var cu = new URL(cards[ci].url);
+          if (cu.hostname.replace('www.', '') + cu.pathname + cu.search === normalizedUrl) {
             dupGroup = groups[gi].name;
             dupCardName = cards[ci].name;
             break;
@@ -389,8 +390,10 @@ chrome.contextMenus.onClicked.addListener(async function (info, tab) {
   if (!groups[groupIndex].cards) groups[groupIndex].cards = [];
   groups[groupIndex].cards.push(card);
 
-  // 写入 sync，超限则回退 local（与 saveGroups 一致）
-  await chrome.storage.sync.set({ groups: groups });
+  // v1.2.8: 写入 sync，超限则回退 local（try-catch 防 reject 跳过回退）
+  try {
+    await chrome.storage.sync.set({ groups: groups });
+  } catch (e) { /* 配额超限，静默回退到 local */ }
   chrome.storage.sync.get(['groups'], function (check) {
     if (!check.groups || !Array.isArray(check.groups) || check.groups.length === 0) {
       chrome.storage.local.set({ groups: groups }).catch(function () {});

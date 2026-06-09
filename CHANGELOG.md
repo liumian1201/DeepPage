@@ -1,5 +1,13 @@
 # DeepPage 更新日志
 
+## v1.2.8 (2026-06-09)
+
+### 🐛 修复
+- 修复网页右键菜单「添加到 DeepPage」选择分组后卡片未写入（`sync.set` Promise reject 未被 catch，导致 `local` 回退路径跳过）
+- 修复重复卡片检测仅匹配域名，同域不同路径误判为重复（改为 `hostname+pathname+search` 完整 URL 匹配，覆盖 `cards.js` + `background.js` 两处）
+
+---
+
 ## v1.2.7 (2026-06-07)
 
 ### 🐛 修复
