@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Manifest-V3-blue?logo=googlechrome" alt="Manifest V3">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/Version-1.2.7-brightgreen" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.2.9-brightgreen" alt="Version">
   <img src="https://img.shields.io/badge/PRs-Welcome-orange" alt="PRs Welcome">
 </p>
 
@@ -34,7 +34,7 @@
 ### 🧩 FVD 风格快捷导航
 - 大方块卡片网格布局（CSS Grid）
 - **访问计数**：卡片显示 👁 打开次数，点击/右键均计入
-- **卡片排序**：5 种排序模式（手动/时间/访问数），按分组独立设置
+- **卡片排序**：6 种排序模式（手动/添加时间/访问数/最近访问），按分组独立设置
 - 拖拽排序（纯鼠标事件）、右键菜单、中键新标签页打开
 - 列数/宽高/圆角滑块实时预览，自由调整布局
 - **网页截图**：右键「刷新截图」或编辑弹窗「网页截图」→ 弹出目标页面 → 用户自由调整窗口 → 点按钮截图
@@ -59,14 +59,16 @@
 - 组名显示 3 种状态：不显示 / 仅当前 / 全部显示
 
 ### 💾 数据管理
-- 轻量配置 → `chrome.storage.sync`（跨设备自动同步）
+- 轻量配置 → `chrome.storage.sync`（跨设备自动同步，超限自动回退 `local`）
 - 图片资源 → IndexedDB（本地存储，Blob 直存，无大小限制）
 - **IndexedDB GC**：启动时自动清理删除卡片/分组的残留图片，防止备份包膨胀
 - 一键全部导出/导入：fflate 二进制 zip 打包（`_DeepPage_Backup.zip`），兼容旧版 .json
 - **导入预览**：导入前展示分组数/卡片数/图片数/导出时间，确认后写入
 - 卡片图标本地缓存（SW 代理下载，断网可用）
+- **重复卡片检查**：数据标签页一键扫描全部分组，按 URL 分组展示，逐张删除或一键清理
 - **自动备份模式**：关闭 / 本地定时提醒（7/14/30天）/ WebDAV 云同步 三种模式
-- **WebDAV 云备份**：支持坚果云/NextCloud/NAS，SW 代理免疫 CORS，冲突检测，静默自动备份
+- **WebDAV 增量备份**：SHA-256 MD5 去重图片池 + manifest.json 索引 + 版本化配置快照 + 5 阶段进度弹窗 + 按需恢复 + 孤儿 GC；支持坚果云/NextCloud/NAS，SW 代理免疫 CORS
+- **版本回退**：云端保留最近 5 个备份版本，恢复时手动选版或一键恢复最新
 - **备份状态看板**：数据标签页实时显示上次备份时间、下次提醒时间、跳过标记
 - **首次备份引导**：首次开启提醒模式弹专用对话框引导，防误触不可点空白关闭
 - **本地快照恢复**：每次保存自动留 `local_bak` 快照，支持一键恢复到上一次改动
@@ -77,7 +79,8 @@
 - 右键菜单分组列表动态更新（含卡片数量统计）
 
 ### 🔒 更多细节
-- 界面锁定（防误操作）+ 红白闪烁警告动画
+- 界面锁定（防误操作）+ 分组指示器旁锁图标 + 拖拽时抖动提示
+- **批量自动截图**：右键空白「📸 批量截图未封面卡片」，1280×720 自动截图 + 进度弹窗
 - 设置面板可拖拽移动
 - Toast 通知系统 + 键盘快捷键
 - 右键上下文菜单（卡片/空白/分组）+ 移动到分组子菜单
@@ -132,7 +135,7 @@ cd DeepPage
 DeepPage/
 ├── src/                    ← 开发源码目录
 │   ├── manifest.json       # Manifest V3 配置
-│   ├── background.js       # Service Worker（天气+图片代理+右键菜单）
+│   ├── background.js       # Service Worker（天气+图片代理+WebDAV代理+截图+右键菜单）
 │   ├── index.html          # 新标签页 + 设置面板 + 对话框
 │   ├── css/
 │   │   ├── base.css       # CSS 变量体系 + 深色模式 + 响应式
