@@ -50,6 +50,25 @@ function _wdSend(type, payload, creds) {
   });
 }
 
+/** 同 _wdSend 但返回完整响应（含 _mime 等元数据），用于下载图片 */
+function _wdSendFull(type, payload, creds) {
+  return new Promise(function (resolve, reject) {
+    var p = Promise.resolve(creds);
+    if (!creds) p = _wdGetCreds();
+    p.then(function (c) {
+      payload = payload || {};
+      payload._url = c.url;
+      payload._user = c.user;
+      payload._pass = c.pass;
+      chrome.runtime.sendMessage({ type: type, payload: payload }, function (resp) {
+        if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
+        if (!resp || !resp.ok) { reject(new Error((resp && resp.error) || 'unknown')); return; }
+        resolve(resp);
+      });
+    });
+  });
+}
+
 /** 上传备份 zip 到 WebDAV（v1.2.6: 支持版本化文件名） */
 async function webdavUpload(zipBlob, filename) {
   var buf = await zipBlob.arrayBuffer();
@@ -70,6 +89,11 @@ async function webdavDownload(filename) {
 /** 获取云端备份最后修改时间 */
 async function webdavCheckConflict() {
   return _wdSend(WEBDAV_MSG.PROPFIND);
+}
+
+/** 测试 WebDAV 连接（支持直接传凭据，不依赖先保存） */
+async function webdavTestConnection(creds) {
+  return _wdSend(WEBDAV_MSG.TEST, null, creds);
 }
 
 /** v1.2.6: 列出云端所有备份文件 */
@@ -156,11 +180,13 @@ async function webdavPutImage(md5, blob) {
   return _wdSend(WEBDAV_MSG.IMG_PUT, { _filename: md5, body: Array.from(new Uint8Array(buf)), _mime: blob.type || 'image/png' });
 }
 
-/** 下载图片 */
+/** 下载图片（保留原始 MIME 类型，防止 SVG→PNG 等错误转换） */
 async function webdavGetImage(md5) {
-  var resp = await _wdSend(WEBDAV_MSG.IMG_GET, { _filename: md5 });
-  if (Array.isArray(resp)) return new Blob([new Uint8Array(resp)], { type: 'image/png' });
-  return new Blob([resp], { type: 'image/png' });
+  var resp = await _wdSendFull(WEBDAV_MSG.IMG_GET, { _filename: md5 });
+  if (!resp) return null;
+  var mime = resp._mime || 'image/png';
+  if (Array.isArray(resp.data)) return new Blob([new Uint8Array(resp.data)], { type: mime });
+  return new Blob([resp.data], { type: mime });
 }
 
 /** 删除图片 */

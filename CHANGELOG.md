@@ -23,6 +23,8 @@
 - 修复卡片高度滑块拖动无实时预览（`input` 事件同步刷新所有卡片 inline height）
 - 修复控制台 wheel 事件 passive 警告
 - 手动截图分辨率 1400×900 → 1280×720
+- **修复 WebDAV 测试连接报错**：`webdavTestConnection` 函数在 v1.2.6 被误删，补回 `webdav.js`
+- **修复增量恢复丢图**：`webdavGetImage` 硬编码 blob MIME 为 `image/png`，导致 SVG 等非 PNG 图片恢复后破图（`naturalWidth: 0`）。改为备份时 `imageRefs` 存储 `{ md5, type }` 对象，恢复时按原始 MIME 重建 blob，`background.js` IMG_GET 响应附带 `_mime`。兼容旧 `imageRefs` 字符串格式。
 
 ---
 

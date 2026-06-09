@@ -220,7 +220,8 @@ async function webdavProxy(method, payload) {
       if (!res.ok) return { ok: false, error: 'GET ' + res.status };
       if (method === 'IMG_GET') {
         var ab = await res.arrayBuffer();
-        return { ok: true, data: Array.from(new Uint8Array(ab)) };
+        var ct = res.headers.get('Content-Type') || 'image/png';
+        return { ok: true, data: Array.from(new Uint8Array(ab)), _mime: ct };
       }
       var text = await res.text();
       try { return { ok: true, data: JSON.parse(text) }; } catch (e) { return { ok: true, data: text }; }

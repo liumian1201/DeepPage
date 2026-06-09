@@ -614,7 +614,7 @@ async function _incrementalBackup(data, isSilent) {
     for (var mk = 0; mk < totalImages; mk++) {
       var k = images[mk].key;
       if (hashMap[k] && !hashMap[k].startsWith('err_')) {
-        configSnapshot.imageRefs[k] = hashMap[k];
+        configSnapshot.imageRefs[k] = { md5: hashMap[k], type: images[mk].blob.type || 'image/png' };
       }
     }
 
@@ -818,10 +818,17 @@ async function _doIncrementalRestore(configName) {
       for (var bi = 0; bi < md5Keys.length; bi += batchSize) {
         var batch = md5Keys.slice(bi, bi + batchSize);
         var results = await Promise.all(batch.map(function (key) {
-          var md5 = imageRefs[key];
+          var ref = imageRefs[key];
+          // 兼容旧格式（纯字符串 md5）和新格式（{ md5, type }）
+          var md5 = typeof ref === 'string' ? ref : (ref && ref.md5 ? ref.md5 : ref);
+          var mime = (ref && ref.type) ? ref.type : 'image/png';
           return webdavGetImage(md5).then(function (blob) {
+            // 用正确的 MIME 重新创建 blob
+            if (blob.type !== mime) {
+              blob = new Blob([blob], { type: mime });
+            }
             return { key: key, blob: blob };
-          }).catch(function () { return null; });
+          }).catch(function (e) { console.warn('[恢复] 下载失败:', key, e.message); return null; });
         }));
 
         for (var ri = 0; ri < results.length; ri++) {
