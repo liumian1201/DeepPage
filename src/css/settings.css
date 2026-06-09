@@ -183,6 +183,30 @@
   margin-top: 4px;
 }
 
+/* v1.2.9: 高级选项折叠 */
+.advanced-toggle {
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--transition-fast);
+}
+
+.advanced-toggle:hover {
+  color: var(--accent-hover);
+}
+
+.advanced-options {
+  overflow: hidden;
+  transition: max-height 0.3s ease, opacity 0.3s ease;
+  max-height: 600px;
+  opacity: 1;
+}
+
+.advanced-options.hidden {
+  max-height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* --------------------- 设置面板 - 滑块 & 颜色选择器 --------------------- */
 .setting-group input[type="range"] {
   width: 100%;

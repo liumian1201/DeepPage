@@ -20,10 +20,12 @@ function showImportConfirm(msg, onOk, onCancel, opts) {
   if (okBtn) okBtn.textContent = opts.okLabel || '确认导入';
   if (cancelBtn) cancelBtn.textContent = opts.cancelLabel || '取消';
   if (cardEl && opts.wider) cardEl.style.width = '420px';
+  dlg.style.zIndex = '1010';
   dlg.classList.remove('hidden');
 
   var cleanup = function () {
     dlg.classList.add('hidden');
+    dlg.style.zIndex = '';
     if (titleEl) titleEl.textContent = '确认导入';
     if (okBtn) okBtn.textContent = '确认导入';
     if (cancelBtn) cancelBtn.textContent = '取消';
@@ -1085,6 +1087,12 @@ function bindBackupEvents() {
   if (btnExport) btnExport.addEventListener('click', exportAll);
   if (btnImport) btnImport.addEventListener('click', importAll);
   if (btnReset)  btnReset.addEventListener('click', resetAll);
+
+  // v1.2.9: 重复卡片检查
+  var btnDupCheck = document.getElementById('btn-check-duplicates');
+  if (btnDupCheck) btnDupCheck.addEventListener('click', function () {
+    if (typeof showDuplicateCheckDialog === 'function') showDuplicateCheckDialog();
+  });
 
   // v1.2.8: 版本列表删除按钮事件委托
   var versionList = document.getElementById('webdav-version-list');

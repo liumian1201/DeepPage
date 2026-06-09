@@ -88,6 +88,21 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     });
     return true;
   }
+
+  // v1.2.9: 批量自动截图
+  if (request.type === 'batch-capture-one') {
+    var url = request.url;
+    if (!url || !/^https?:\/\//i.test(url)) {
+      sendResponse({ ok: false, error: 'invalid url' });
+      return;
+    }
+    batchCaptureOne(url).then(function (dataUrl) {
+      sendResponse({ ok: true, dataUrl: dataUrl });
+    }).catch(function (err) {
+      sendResponse({ ok: false, error: err.message });
+    });
+    return true;
+  }
 });
 
 // ---- WebDAV 云备份代理（v1.2.0 / v1.2.6 版本化） ----
@@ -271,9 +286,10 @@ async function webdavProxy(method, payload) {
 async function captureScreenshot(url) {
   var win = await chrome.windows.create({
     url: url,
-    type: 'popup',
-    width: 1400,
-    height: 900,
+    type: 'normal',
+    width: 1280,
+    height: 720,
+    state: 'normal',
     focused: true
   });
   var tabId = win.tabs[0].id;
@@ -351,6 +367,60 @@ async function captureScreenshot(url) {
       }
     }
     chrome.runtime.onMessage.addListener(onCaptureDone);
+  });
+}
+
+// ---- v1.2.9: 批量自动截图（无需人工点击） ----
+
+/** 自动截取单个页面：打开窗口 → 等加载 → 截图 → 关闭 */
+async function batchCaptureOne(url) {
+  var win = await chrome.windows.create({
+    url: url,
+    type: 'normal',
+    width: 1280,
+    height: 720,
+    state: 'normal',
+    focused: true
+  });
+  var tabId = win.tabs[0].id;
+
+  return new Promise(function (resolve, reject) {
+    var done = false;
+    var timeout;
+
+    function cleanup() {
+      if (done) return;
+      done = true;
+      if (timeout) clearTimeout(timeout);
+      chrome.tabs.onUpdated.removeListener(onLoad);
+      chrome.windows.onRemoved.removeListener(onRemoved);
+    }
+
+    function finish(err, dataUrl) {
+      cleanup();
+      try { chrome.windows.remove(win.id); } catch (e) {}
+      if (err) reject(new Error(err));
+      else resolve(dataUrl);
+    }
+
+    timeout = setTimeout(function () { finish('截图超时'); }, 30000);
+
+    function onRemoved(removedId) {
+      if (removedId === win.id) finish('窗口已关闭');
+    }
+    chrome.windows.onRemoved.addListener(onRemoved);
+
+    function onLoad(tid, info) {
+      if (tid !== tabId || info.status !== 'complete') return;
+      // 页面加载完成后等 3 秒让懒加载内容渲染
+      setTimeout(function () {
+        if (done) return;
+        chrome.tabs.captureVisibleTab(win.id, { format: 'png' })
+          .then(function (dataUrl) { finish(null, dataUrl); })
+          .catch(function (err) { finish(err.message); });
+      }, 3000);
+    }
+    chrome.tabs.onUpdated.addListener(onLoad);
   });
 }
 

@@ -47,15 +47,14 @@ async function init() {
   if (currentSettings && currentSettings.isLocked) {
     setLocked(true, true);
   }
-  var wrapper = document.createElement('div');
-  wrapper.style.cssText = 'flex-basis:100%;display:flex;justify-content:center';
-  var indicator = document.createElement('div');
-  indicator.className = 'lock-indicator';
-  indicator.textContent = '\u{1F512} \u754C\u9762\u5DF2\u9501\u5B9A\uFF08\u53EA\u8BFB\u6A21\u5F0F\uFF09';
-  wrapper.appendChild(indicator);
-  var dashboard = document.querySelector('.dashboard-section');
-  if (dashboard) {
-    dashboard.insertBefore(wrapper, dashboard.firstChild);
+
+  // v1.2.9: 锁图标点击切换（不论初始状态，始终绑定）
+  var lockIcon = document.getElementById('lock-icon');
+  if (lockIcon) {
+    lockIcon.addEventListener('click', function (e) {
+      e.stopPropagation();
+      setLocked(!isLocked, false);
+    });
   }
 
   // v1.0.3: 迁移现有 URL 图标到本地缓存
@@ -354,11 +353,11 @@ function bindMainEvents() {
     var wrapper = cardEl.closest('.card-wrapper');
     if (!wrapper) return;
     e.preventDefault();
-    var indicator = document.querySelector('.lock-indicator');
-    if (indicator) {
-      indicator.classList.remove('shake');
-      void indicator.offsetWidth;
-      indicator.classList.add('shake');
+    var lockIcon = document.getElementById('lock-icon');
+    if (lockIcon) {
+      lockIcon.classList.remove('shake');
+      void lockIcon.offsetWidth;
+      lockIcon.classList.add('shake');
     }
   });
 
@@ -694,11 +693,17 @@ function setLocked(state, silent) {
   } else {
     document.body.classList.remove('is-locked');
   }
+  // v1.2.9: 锁图标替代横幅
+  var lockIcon = document.getElementById('lock-icon');
+  if (lockIcon) {
+    lockIcon.textContent = state ? '🔒' : '🔓';
+    lockIcon.title = state ? '界面已锁定' : '界面已解锁';
+    lockIcon.className = state ? 'lock-icon locked' : 'lock-icon';
+  }
   if (currentSettings) {
     currentSettings.isLocked = state;
     saveSettings(currentSettings);
   }
-  // BUG-008: silent 模式跳过渲染，由 _debouncedRefresh 统一控制
   if (!silent) {
     renderSpeeddials();
     showToast(state ? '🔒 界面已锁定（只读模式）' : '🔓 界面已解锁', 'info');
@@ -742,6 +747,97 @@ function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
+}
+
+/* ==================== v1.2.9: 批量自动截图 ==================== */
+
+var _batchCaptureActive = false;
+
+async function startBatchCapture() {
+  if (_batchCaptureActive) { showToast('批量截图正在进行中', 'warning'); return; }
+  // 扫描当前分组无封面的卡片
+  var cards = speeddials || [];
+  var targets = [];
+  for (var i = 0; i < cards.length; i++) {
+    if (!cards[i].image && cards[i].url && /^https?:\/\//i.test(cards[i].url)) {
+      targets.push({ id: cards[i].id, name: cards[i].name, url: cards[i].url, index: i });
+    }
+  }
+  if (targets.length === 0) {
+    showToast('当前分组所有卡片都已有封面', 'info');
+    return;
+  }
+
+  // 显示进度弹窗
+  var progDlg = document.getElementById('dialog-backup-progress');
+  var progTitle = document.getElementById('backup-progress-title');
+  var progFill = document.getElementById('backup-progress-fill');
+  var progPct = document.getElementById('backup-progress-pct');
+  var progStages = document.getElementById('backup-progress-stages');
+  var progCancel = document.getElementById('backup-progress-cancel');
+  if (!progDlg) return;
+
+  _batchCaptureActive = true;
+  progTitle.textContent = '📸 批量截图中...';
+  progFill.style.width = '0%';
+  progPct.textContent = '0%';
+  progStages.innerHTML = '<div class="progress-stage active">⏳ 准备截图... (0/' + targets.length + ')</div>';
+  progDlg.classList.remove('hidden');
+  if (progCancel) {
+    progCancel.textContent = '终止';
+    progCancel.onclick = function () { _batchCaptureActive = false; };
+  }
+
+  var okCount = 0;
+  var failCount = 0;
+
+  for (var ti = 0; ti < targets.length; ti++) {
+    if (!_batchCaptureActive) break;
+    var t = targets[ti];
+    var pct = Math.round((ti) / targets.length * 100);
+    progFill.style.width = pct + '%';
+    progPct.textContent = pct + '%';
+    progStages.innerHTML = '<div class="progress-stage active">⏳ 截图: ' + (ti + 1) + '/' + targets.length + ' — ' + t.name.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</div>';
+
+    try {
+      var resp = await new Promise(function (resolve) {
+        chrome.runtime.sendMessage({ type: 'batch-capture-one', url: t.url }, function (r) {
+          resolve(r || { ok: false, error: 'no response' });
+        });
+      });
+      if (resp.ok && resp.dataUrl) {
+        // 保存截图到卡片
+        var card = speeddials.find(function (c) { return c.id === t.id; });
+        if (card) {
+          card.image = resp.dataUrl;
+          okCount++;
+        }
+      } else {
+        failCount++;
+      }
+    } catch (e) {
+      failCount++;
+    }
+
+    // 间隔 2 秒，尊重 Chrome 限流
+    if (ti < targets.length - 1 && _batchCaptureActive) {
+      await new Promise(function (r) { setTimeout(r, 2000); });
+    }
+  }
+
+  // 保存并刷新
+  if (groups[activeGroupIndex]) {
+    groups[activeGroupIndex].cards = speeddials;
+  }
+  await saveGroups(groups);
+  renderSpeeddials();
+
+  // 关闭弹窗
+  progDlg.classList.add('hidden');
+  _batchCaptureActive = false;
+  if (progCancel) progCancel.textContent = '取消';
+
+  showToast('📸 批量截图完成：' + okCount + ' 成功，' + failCount + ' 失败', failCount > 0 ? 'warning' : 'success');
 }
 
 /* ==================== 启动 ==================== */

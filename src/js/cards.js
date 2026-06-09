@@ -33,6 +33,8 @@ function migrateCardFields() {
       var card = cards[ci];
       if (card.visitCount === undefined) { card.visitCount = 0; changed = true; }
       if (card.createdAt === undefined) { card.createdAt = 0; changed = true; }
+      // v1.2.9: 为旧卡片补全 lastOpened 字段
+      if (card.lastOpened === undefined) { card.lastOpened = card.createdAt || 0; changed = true; }
     }
   }
   if (changed) {
@@ -40,7 +42,7 @@ function migrateCardFields() {
   }
 }
 
-/* ==================== 卡片排序（v1.0.9） ==================== */
+/* ==================== 卡片排序（v1.0.9 / v1.2.9 最近访问） ==================== */
 function getSortedCards(cards, sortMode) {
   if (!sortMode || sortMode === 'manual') return cards;
   var sorted = cards.slice();
@@ -49,6 +51,7 @@ function getSortedCards(cards, sortMode) {
     case 'time-desc':  return sorted.sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
     case 'visits-asc':  return sorted.sort(function (a, b) { return (a.visitCount || 0) - (b.visitCount || 0); });
     case 'visits-desc': return sorted.sort(function (a, b) { return (b.visitCount || 0) - (a.visitCount || 0); });
+    case 'lastOpened-desc': return sorted.sort(function (a, b) { return (b.lastOpened || 0) - (a.lastOpened || 0); });
     default: return cards;
   }
 }
@@ -165,9 +168,22 @@ function _ensureGroupContainer(groupIndex) {
 }
 
 function _showCurrentGroup() {
+  // v1.2.9: 确保缓存的卡片高度与当前 CSS 变量一致（display:contents 下变量可能丢失）
+  _syncCardHeights();
+
   Object.keys(_groupContainers).forEach(function (gi) {
     _groupContainers[gi].style.display = gi == activeGroupIndex ? 'contents' : 'none';
   });
+}
+
+/** v1.2.9: 将所有可见卡片的 height 同步为当前 CSS 变量值 */
+function _syncCardHeights() {
+  var cardH = document.documentElement.style.getPropertyValue('--card-height');
+  if (!cardH) return;
+  var cards = document.querySelectorAll('.speeddial-card');
+  for (var i = 0; i < cards.length; i++) {
+    cards[i].style.height = cardH;
+  }
 }
 
 /** 检查当前分组是否已有缓存 DOM */
@@ -236,6 +252,9 @@ function renderSpeeddials() {
 
   container.innerHTML = html;
   domMain.grid.classList.add('rendered');
+
+  // v1.2.9: 新渲染的卡片同步当前高度，防 display:contents 变量继承丢失
+  _syncCardHeights();
 
   var thisRenderId = ++_renderId;
   loadLocalCardImages(container, thisRenderId);
@@ -319,6 +338,142 @@ function showDuplicateConfirm(name, url, dup) {
   });
 }
 
+/* ==================== v1.2.9: 全量重复卡片检查 ==================== */
+
+/** 扫描所有分组，返回按 URL 分组的重复卡片 */
+function findAllDuplicates() {
+  var urlMap = {};
+  for (var gi = 0; gi < groups.length; gi++) {
+    var cards = groups[gi].cards || [];
+    for (var ci = 0; ci < cards.length; ci++) {
+      var card = cards[ci];
+      var url = (card.url || '').trim();
+      if (!url) continue;
+      if (!urlMap[url]) urlMap[url] = [];
+      urlMap[url].push({
+        groupIndex: gi,
+        cardIndex: ci,
+        groupName: groups[gi].name || '未命名',
+        cardName: card.name || url,
+        cardId: card.id
+      });
+    }
+  }
+  // 只保留重复项
+  var result = {};
+  Object.keys(urlMap).forEach(function (u) {
+    if (urlMap[u].length > 1) result[u] = urlMap[u];
+  });
+  return result;
+}
+
+/** 显示重复卡片检查弹窗 */
+function showDuplicateCheckDialog() {
+  var dupMap = findAllDuplicates();
+  var urls = Object.keys(dupMap);
+  var totalCards = 0;
+  urls.forEach(function (u) { totalCards += dupMap[u].length; });
+
+  var dlg = document.getElementById('dialog-duplicate-check');
+  var msg = document.getElementById('dup-check-msg');
+  var list = document.getElementById('dup-check-list');
+  var cleanBtn = document.getElementById('dup-check-clean-all');
+  var closeBtn = document.getElementById('dup-check-close');
+
+  if (!dlg || !msg || !list) return;
+
+  if (urls.length === 0) {
+    if (typeof showToast === 'function') showToast('✅ 未发现重复卡片', 'success');
+    return;
+  }
+
+  msg.textContent = '发现 ' + urls.length + ' 组重复（共 ' + totalCards + ' 张卡片）';
+
+  var html = '';
+  urls.forEach(function (url) {
+    var entries = dupMap[url];
+    html += '<div class="dup-check-group"><div class="dup-check-url">' + url.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>';
+    entries.forEach(function (e) {
+      html += '<div class="dup-check-row" data-card-id="' + e.cardId + '" data-group-index="' + e.groupIndex + '">';
+      html += '<span class="dup-check-group-name">' + e.groupName.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</span>';
+      html += '<span class="dup-check-card-name" title="' + e.cardName.replace(/"/g,'&quot;') + '">' + e.cardName.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</span>';
+      html += '<button class="dup-check-delete" title="删除此卡片">🗑️</button>';
+      html += '</div>';
+    });
+    html += '</div>';
+  });
+  list.innerHTML = html;
+
+  // 绑定删除按钮
+  list.querySelectorAll('.dup-check-delete').forEach(function (btn) {
+    btn.addEventListener('click', async function () {
+      var row = btn.closest('.dup-check-row');
+      var cardId = row.getAttribute('data-card-id');
+      var groupIdx = parseInt(row.getAttribute('data-group-index'), 10);
+      // 确认
+      try {
+        await showImportConfirmAsync('确定要删除此卡片吗？', { title: '🗑️ 删除卡片', okLabel: '删除', cancelLabel: '取消' });
+      } catch (e) { return; }
+      // 删除
+      if (groups[groupIdx]) {
+        groups[groupIdx].cards = (groups[groupIdx].cards || []).filter(function (c) { return c.id !== cardId; });
+        await saveGroups(groups);
+        // 从弹窗中移除该行
+        var groupEl = row.closest('.dup-check-group');
+        row.remove();
+        // 如果该组只剩一个，移除整组
+        if (groupEl) {
+          var rows = groupEl.querySelectorAll('.dup-check-row');
+          if (rows.length <= 1) groupEl.remove();
+        }
+        // 刷新主页卡片
+        if (groupIdx === activeGroupIndex) {
+          speeddials = groups[groupIdx].cards;
+          renderSpeeddials();
+        }
+        if (typeof showToast === 'function') showToast('已删除', 'info');
+        // 如果所有重复都清完了，关闭弹窗
+        if (list.querySelectorAll('.dup-check-row').length === 0) {
+          dlg.classList.add('hidden');
+          if (typeof showToast === 'function') showToast('✅ 所有重复卡片已清理', 'success');
+        }
+      }
+    });
+  });
+
+  // 一键清理重复
+  if (cleanBtn) {
+    cleanBtn.style.display = 'block';
+    cleanBtn.onclick = async function () {
+      var msg2 = '将为每组重复保留第一张卡片，删除其余 ' + (totalCards - urls.length) + ' 张，是否继续？';
+      try {
+        await showImportConfirmAsync(msg2, { title: '🗑️ 一键清理重复', okLabel: '确认清理', cancelLabel: '取消' });
+      } catch (e) { return; }
+      urls.forEach(function (url) {
+        var entries = dupMap[url];
+        // 保留第一张，删除其余
+        for (var i = 1; i < entries.length; i++) {
+          var e = entries[i];
+          if (groups[e.groupIndex]) {
+            groups[e.groupIndex].cards = (groups[e.groupIndex].cards || []).filter(function (c) { return c.id !== e.cardId; });
+          }
+        }
+      });
+      await saveGroups(groups);
+      // 刷新
+      if (groups[activeGroupIndex]) {
+        speeddials = groups[activeGroupIndex].cards;
+        renderSpeeddials();
+      }
+      dlg.classList.add('hidden');
+      if (typeof showToast === 'function') showToast('✅ 已清理 ' + (totalCards - urls.length) + ' 张重复卡片', 'success');
+    };
+  }
+
+  dlg.classList.remove('hidden');
+  if (closeBtn) closeBtn.onclick = function () { dlg.classList.add('hidden'); };
+}
+
 async function addSpeeddial(name, url, image) {
   var dup = findDuplicate(url);
   if (dup) {
@@ -326,7 +481,7 @@ async function addSpeeddial(name, url, image) {
     if (!proceed) return;
   }
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  speeddials.push({ id, name, url, image: image || '', color: stringToColor(url), visitCount: 0, createdAt: Date.now() });
+  speeddials.push({ id, name, url, image: image || '', color: stringToColor(url), visitCount: 0, createdAt: Date.now(), lastOpened: 0 });
   await saveSpeeddials(speeddials);
   renderSpeeddials();
 }
@@ -521,11 +676,13 @@ async function saveDialog() {
 /** 对指定卡片访问计数 +1（全局扫描所有分组），自动保存 */
 async function incrementVisitCount(cardId, render) {
   if (render === undefined) render = true;
+  var now = Date.now();
   for (var gi = 0; gi < groups.length; gi++) {
     var cards = groups[gi].cards || [];
     for (var ci = 0; ci < cards.length; ci++) {
       if (cards[ci].id === cardId) {
         cards[ci].visitCount = (cards[ci].visitCount || 0) + 1;
+        cards[ci].lastOpened = now;
         await saveGroups(groups);
         // 仅在当前活动分组时才更新 speeddials 和重渲染
         if (gi === activeGroupIndex) {

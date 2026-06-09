@@ -858,6 +858,16 @@ function bindSettingsEvents() {
   }
 
   // ---- v1.2.2: WebDAV 配置区初始化（抽离到 settings-webdav.js） ----
+  // v1.2.9: 高级选项折叠切换
+  var advancedToggle = document.getElementById('advanced-options-toggle');
+  var advancedGroup = document.getElementById('advanced-options-group');
+  if (advancedToggle && advancedGroup) {
+    advancedToggle.addEventListener('click', function () {
+      var isHidden = advancedGroup.classList.toggle('hidden');
+      advancedToggle.textContent = isHidden ? '⚙️ 高级选项 ▸' : '⚙️ 高级选项 ▾';
+    });
+  }
+
   initWebdavSection();
 }
 

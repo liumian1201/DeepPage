@@ -61,6 +61,8 @@ function renderGroupDots() {
 
 /* ==================== 分组切换 ==================== */
 async function switchGroup(index) {
+  // v1.2.9: 切换分组时恢复原始排序
+  if (typeof _resetRecentSort === 'function') _resetRecentSort();
   if (index === activeGroupIndex || !groups[index]) return;
   if (groups[activeGroupIndex]) {
     groups[activeGroupIndex].cards = speeddials;
@@ -315,3 +317,43 @@ function renderGroupManagerList() {
     });
   });
 }
+
+/* ==================== v1.2.9: 最近访问排序 ==================== */
+var _recentSortActive = false;
+var _origSortMode = null;
+
+function toggleRecentSort() {
+  var btn = document.getElementById('group-recent');
+  if (!btn) return;
+  if (_recentSortActive) {
+    _resetRecentSort();
+    renderSpeeddials();
+    if (typeof updateSortModeSelect === 'function') updateSortModeSelect();
+  } else {
+    _recentSortActive = true;
+    btn.classList.add('active-sort');
+    if (groups[activeGroupIndex]) {
+      _origSortMode = groups[activeGroupIndex].sortMode || 'manual';
+      groups[activeGroupIndex].sortMode = 'lastOpened-desc';
+    }
+    renderSpeeddials();
+    if (typeof updateSortModeSelect === 'function') updateSortModeSelect();
+  }
+}
+
+function _resetRecentSort() {
+  if (!_recentSortActive) return;
+  _recentSortActive = false;
+  var btn = document.getElementById('group-recent');
+  if (btn) btn.classList.remove('active-sort');
+  if (groups[activeGroupIndex] && _origSortMode) {
+    groups[activeGroupIndex].sortMode = _origSortMode;
+  }
+  _origSortMode = null;
+}
+
+// 页面加载后绑定事件
+(function () {
+  var btn = document.getElementById('group-recent');
+  if (btn) btn.addEventListener('click', toggleRecentSort);
+})();

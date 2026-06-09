@@ -33,7 +33,7 @@ function initContextMenu() {
     sub.addEventListener('mouseenter', function () { sub.classList.remove('hidden'); });
     sub.addEventListener('mouseleave', hideMoveSubmenu);
     // 阻止子菜单内滚轮冒泡到 window，避免触发 hideContextMenu
-    sub.addEventListener('wheel', function (e) { e.stopPropagation(); });
+    sub.addEventListener('wheel', function (e) { e.stopPropagation(); }, { passive: true });
   }
 
   domMain.contextMenu.addEventListener('click', (e) => {
@@ -84,7 +84,7 @@ function showContextMenu(x, y, source) {
         }
       }
     } else {
-      var gridAllowed = ['add', 'refresh', 'nextWallpaper', 'settings', 'lock', 'unlock'];
+      var gridAllowed = ['add', 'refresh', 'batchCapture', 'nextWallpaper', 'settings', 'lock', 'unlock'];
       item.classList.toggle('hidden', !gridAllowed.includes(action));
       if (action === 'lock') item.classList.toggle('hidden', isLocked);
       if (action === 'unlock') item.classList.toggle('hidden', !isLocked);
@@ -240,6 +240,9 @@ function handleContextAction(action, ds) {
       break;
     case 'nextWallpaper':
       if (typeof nextWallpaper === 'function') nextWallpaper();
+      break;
+    case 'batchCapture':
+      if (typeof startBatchCapture === 'function') startBatchCapture();
       break;
     case 'settings':
       if (typeof openSettingsPanel === 'function') openSettingsPanel();

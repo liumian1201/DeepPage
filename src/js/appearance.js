@@ -32,10 +32,11 @@ function updateGridColumns(cols) {
     }
     var ws = document.getElementById('setting-card-width');
     var w = parseInt(ws ? ws.value : 270, 10);
-    // v1.2.6: auto-fill 自动换行 + max-width 限最大列数（滑块值）+ margin auto 居中
-    grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(' + w + 'px, 1fr))';
-    var gap = 16; // 与 main.css .speeddial-grid gap 一致
-    grid.style.maxWidth = (cols * w + (cols - 1) * gap) + 'px';
+    grid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(' + w + 'px, 1fr))';
+    var gap = 16;
+    var gridW = (cols * w + (cols - 1) * gap) + 'px';
+    grid.style.width = gridW;
+    grid.style.maxWidth = gridW;
     grid.style.marginLeft = 'auto';
     grid.style.marginRight = 'auto';
   });
@@ -90,6 +91,11 @@ function bindAppearancePreview(dom, onChanged) {
   if (hs && hsv) hs.addEventListener('input', function () {
     hsv.textContent = hs.value + 'px';
     document.documentElement.style.setProperty('--card-height', hs.value + 'px');
+    // v1.2.9: 同步更新所有可见卡片的 inline height，绕过 display:contents 继承问题
+    var cards = document.querySelectorAll('.speeddial-card');
+    for (var i = 0; i < cards.length; i++) {
+      cards[i].style.height = hs.value + 'px';
+    }
   });
 
   var resetBtn = document.getElementById('btn-reset-card-size');
