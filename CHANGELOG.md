@@ -26,6 +26,7 @@
 - **修复 WebDAV 测试连接报错**：`webdavTestConnection` 函数在 v1.2.6 被误删，补回 `webdav.js`
 - **修复增量恢复丢图**：`webdavGetImage` 硬编码 blob MIME 为 `image/png`，导致 SVG 等非 PNG 图片恢复后破图（`naturalWidth: 0`）。改为备份时 `imageRefs` 存储 `{ md5, type }` 对象，恢复时按原始 MIME 重建 blob，`background.js` IMG_GET 响应附带 `_mime`。兼容旧 `imageRefs` 字符串格式。
 - **更新扩展图标**：新版彩色九宫格 speed dial 风格 logo
+- **FVD 转换器增强**：`clicks` → `visitCount` 保留历史点击次数；按 FVD `position` 排序；补 `lastOpened` 字段
 
 ---
 

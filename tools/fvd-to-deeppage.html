@@ -110,8 +110,9 @@ function parseFVD() {
       name: name || d.url,
       url: d.url,
       image: image,
-      visitCount: 0,
-      createdAt: Date.now()
+      visitCount: d.clicks || 0,
+      createdAt: Date.now(),
+      position: d.position || 0
     });
   });
 
@@ -120,6 +121,8 @@ function parseFVD() {
   var dpGroupList = [];
   gids.forEach(function (gid, gi) {
     var name = groupMap[gid] || ('分组 ' + gid);
+    // 按 FVD position 排序
+    dpGroups[gid].sort(function (a, b) { return (a.position || 0) - (b.position || 0); });
     var cards = dpGroups[gid].map(function (c, i) {
       var card = {
         id: 'fvd_' + Date.now().toString(36) + '_g' + gi + '_' + i,
@@ -127,7 +130,8 @@ function parseFVD() {
         url: c.url,
         color: stringToColor(c.url || c.name),
         visitCount: c.visitCount || 0,
-        createdAt: c.createdAt || Date.now()
+        createdAt: c.createdAt || Date.now(),
+        lastOpened: 0
       };
       if (c.image) card.image = c.image;
       return card;

@@ -194,7 +194,7 @@ DeepPage/
 3. 粘贴 FVD JSON → 解析预览 → 生成 `_DeepPage_Backup.zip`
 4. DeepPage → 设置 → 数据 → 导入数据 → 选择该 .zip 文件
 
-> 可迁移：网址、标题、分组结构。FVD 内部截图无法跨扩展读取，DeepPage 会自动用首字符+哈希色块替代。
+> 可迁移：网址、标题、分组结构、访问计数（`clicks`→`visitCount`）、原始排序（`position`）。FVD 内部截图无法跨扩展读取，DeepPage 会自动用首字符+哈希色块替代。
 > ⚠️ 注意：Chrome 同步存储上限 100KB，大量卡片（数百+）会自动回退到本地存储（不支持跨设备同步但可存 10MB+）。
 
 ---
