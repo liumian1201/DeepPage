@@ -695,6 +695,27 @@
       </div>
     </div>
 
+    <!-- ===== v1.2.8: 增量备份进度弹窗 ===== -->
+    <div id="dialog-backup-progress" class="dialog-overlay hidden">
+      <div class="dialog-card" style="width:440px">
+        <h3 id="backup-progress-title">☁️ 正在备份到云端...</h3>
+        <div class="progress-bar-track">
+          <div id="backup-progress-fill" class="progress-bar-fill" style="width:0%"></div>
+        </div>
+        <p id="backup-progress-pct" class="progress-pct">0%</p>
+        <div id="backup-progress-stages" class="progress-stages">
+          <div id="stage-hash" class="progress-stage pending">🔹 计算图片哈希...</div>
+          <div id="stage-diff" class="progress-stage pending">🔹 对比云端清单...</div>
+          <div id="stage-upload" class="progress-stage pending">🔹 上传图片 (0/0)</div>
+          <div id="stage-config" class="progress-stage pending">🔹 保存配置...</div>
+          <div id="stage-cleanup" class="progress-stage pending">🔹 清理旧文件...</div>
+        </div>
+        <div class="dialog-actions">
+          <button id="backup-progress-cancel" class="btn-secondary">取消</button>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <script src="js/storage.js"></script>

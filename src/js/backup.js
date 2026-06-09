@@ -6,24 +6,36 @@
 
 // ==================== 确认对话框 ====================
 
-function showImportConfirm(msg, onOk, onCancel) {
+function showImportConfirm(msg, onOk, onCancel, opts) {
+  opts = opts || {};
   var dlg = document.getElementById('dialog-import-confirm');
   var msgEl = document.getElementById('import-confirm-msg');
-  if (!dlg) { if (onOk) onOk(); return; }
-  if (msgEl) msgEl.textContent = msg;
-  dlg.classList.remove('hidden');
-
+  var titleEl = dlg ? dlg.querySelector('h3') : null;
+  var cardEl = dlg ? dlg.querySelector('.dialog-card') : null;
   var okBtn = document.getElementById('import-confirm-ok');
   var cancelBtn = document.getElementById('import-confirm-cancel');
-  var cleanup = function () { dlg.classList.add('hidden'); };
+  if (!dlg) { if (onOk) onOk(); return; }
+  if (msgEl) msgEl.textContent = msg;
+  if (titleEl) titleEl.textContent = opts.title || '确认导入';
+  if (okBtn) okBtn.textContent = opts.okLabel || '确认导入';
+  if (cancelBtn) cancelBtn.textContent = opts.cancelLabel || '取消';
+  if (cardEl && opts.wider) cardEl.style.width = '420px';
+  dlg.classList.remove('hidden');
+
+  var cleanup = function () {
+    dlg.classList.add('hidden');
+    if (titleEl) titleEl.textContent = '确认导入';
+    if (okBtn) okBtn.textContent = '确认导入';
+    if (cancelBtn) cancelBtn.textContent = '取消';
+    if (cardEl) cardEl.style.width = '';
+  };
   if (okBtn) { okBtn.onclick = function () { cleanup(); if (onOk) onOk(); }; }
   if (cancelBtn) { cancelBtn.onclick = function () { cleanup(); if (onCancel) onCancel(); }; }
-  // 点击空白处不再关闭弹窗
 }
 
-function showImportConfirmAsync(msg) {
+function showImportConfirmAsync(msg, opts) {
   return new Promise(function (resolve, reject) {
-    showImportConfirm(msg, function () { resolve(); }, function () { reject(new Error('CANCELLED')); });
+    showImportConfirm(msg, function () { resolve(); }, function () { reject(new Error('CANCELLED')); }, opts);
   });
 }
 
@@ -398,7 +410,476 @@ async function updateImageDBInfo() {
   });
 }
 
-// ==================== v1.2.0 WebDAV 辅助 ====================
+// ==================== v1.2.8: 增量备份核心 ====================
+
+/** Web Crypto API 计算 Blob SHA-256，返回 hex 字符串 */
+async function computeSHA256(blob) {
+  var buf = await blob.arrayBuffer();
+  var hash = await crypto.subtle.digest('SHA-256', buf);
+  var hex = Array.from(new Uint8Array(hash)).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+  return hex;
+}
+
+/** 进度弹窗 DOM 引用与状态 */
+var _progressState = { cancelled: false };
+
+function _getProgressEls() {
+  return {
+    dlg: document.getElementById('dialog-backup-progress'),
+    title: document.getElementById('backup-progress-title'),
+    fill: document.getElementById('backup-progress-fill'),
+    pct: document.getElementById('backup-progress-pct'),
+    cancel: document.getElementById('backup-progress-cancel'),
+    stages: {
+      hash: document.getElementById('stage-hash'),
+      diff: document.getElementById('stage-diff'),
+      upload: document.getElementById('stage-upload'),
+      config: document.getElementById('stage-config'),
+      cleanup: document.getElementById('stage-cleanup')
+    }
+  };
+}
+
+function _showProgress(title) {
+  var els = _getProgressEls();
+  if (!els.dlg) return;
+  _progressState.cancelled = false;
+  els.title.textContent = title || '☁️ 正在备份到云端...';
+  els.fill.style.width = '0%';
+  els.pct.textContent = '0%';
+  // 重置所有阶段状态
+  var stageNames = ['hash', 'diff', 'upload', 'config', 'cleanup'];
+  for (var i = 0; i < stageNames.length; i++) {
+    var s = els.stages[stageNames[i]];
+    if (s) { s.className = 'progress-stage pending'; s.innerHTML = s.innerHTML.replace(/^[⏳✅❌⏸]/, '⏸').replace(/^[⏳✅❌⏸]/, '⏸'); }
+  }
+  els.dlg.classList.remove('hidden');
+  if (els.cancel) els.cancel.onclick = function () { _progressState.cancelled = true; };
+}
+
+function _hideProgress() {
+  var dlg = document.getElementById('dialog-backup-progress');
+  if (dlg) dlg.classList.add('hidden');
+}
+
+function _updateProgress(pct, stageKey, status, text) {
+  var els = _getProgressEls();
+  if (els.fill) els.fill.style.width = pct + '%';
+  if (els.pct) els.pct.textContent = pct + '%';
+  if (stageKey && els.stages[stageKey]) {
+    var s = els.stages[stageKey];
+    var icon = status === 'active' ? '⏳' : status === 'done' ? '✅' : status === 'error' ? '❌' : '⏸';
+    s.className = 'progress-stage ' + status;
+    s.innerHTML = icon + ' ' + (text || s.innerHTML.replace(/^[⏳✅❌⏸]\s*/, ''));
+  }
+}
+
+/** 检测是否需要首次迁移（云端有旧 ZIP 但无 manifest） */
+async function _checkMigrationNeeded() {
+  try {
+    var manifest = await webdavGetManifest();
+    if (manifest && manifest.version) return false; // manifest 已存在，无需迁移
+    var backups = await webdavListBackups();
+    return backups && Array.isArray(backups) && backups.length > 0; // 有旧 ZIP
+  } catch (e) { return false; }
+}
+
+/** 首次迁移：提示用户导出本地全量 ZIP，然后清理旧 ZIP 初始化 manifest */
+async function _doFirstMigration() {
+  var hasOld = await _checkMigrationNeeded();
+  if (!hasOld) return true; // 无需迁移，直接继续
+
+  return new Promise(function (resolve) {
+    // 弹窗：建议导出本地备份
+    var msg = '检测到云端有旧格式全量备份，即将切换为增量备份模式。\n建议先导出一份当前数据的本地备份：';
+    showImportConfirmAsync(msg, { title: '🔄 切换增量备份', okLabel: '📥 导出本地备份', cancelLabel: '跳过，直接切换', wider: true }).then(function () {
+      // 用户确认 → 导出本地 ZIP
+      if (typeof showToast === 'function') showToast('请在下载完成后等待备份继续...', 'info');
+      exportAll();
+      // 清理旧 ZIP 文件
+      webdavListBackups().then(function (files) {
+        if (Array.isArray(files)) {
+          var delTasks = files.map(function (f) { return webdavDeleteBackup(f.name).catch(function () {}); });
+          return Promise.all(delTasks);
+        }
+      }).then(function () {
+        resolve(true);
+      }).catch(function () { resolve(true); });
+    }).catch(function () {
+      // 用户跳过 → 也继续（旧 ZIP 后续 GC 会清理）
+      resolve(true);
+    });
+  });
+}
+
+/** 增量备份主函数 */
+async function _incrementalBackup(data, isSilent) {
+  var config = data.config;
+  var images = data.images;
+  var totalImages = images.length;
+
+  // 显示进度
+  if (!isSilent) _showProgress('☁️ 正在备份到云端...');
+  var cancelCheck = function () { return _progressState.cancelled; };
+
+  try {
+    // 阶段 1: 计算图片哈希
+    if (!isSilent) _updateProgress(0, 'hash', 'active', '计算图片哈希... (0/' + totalImages + ')');
+    var hashMap = {};
+    for (var i = 0; i < totalImages; i++) {
+      if (cancelCheck()) { if (!isSilent) _hideProgress(); return false; }
+      var img = images[i];
+      try {
+        hashMap[img.key] = await computeSHA256(img.blob);
+      } catch (e) { hashMap[img.key] = 'err_' + img.key; }
+      if (!isSilent && totalImages > 0) {
+        _updateProgress(Math.round((i + 1) / totalImages * 25), 'hash', 'active', '计算图片哈希... (' + (i + 1) + '/' + totalImages + ')');
+      }
+    }
+    if (!isSilent) _updateProgress(25, 'hash', 'done', '计算图片哈希... (' + totalImages + '/' + totalImages + ')');
+
+    // 阶段 2: 对比云端 manifest
+    if (!isSilent) _updateProgress(25, 'diff', 'active', '对比云端清单...');
+    if (cancelCheck()) { if (!isSilent) _hideProgress(); return false; }
+
+    var manifest = null;
+    try { manifest = await webdavGetManifest(); } catch (e) { manifest = null; }
+    if (!manifest || !manifest.images) manifest = { version: 1, images: {}, configs: [] };
+
+    // 找出新增/变更的图片（MD5 不在 manifest 中的）
+    var newImages = [];
+    var existingMd5s = new Set();
+    var manifestImages = manifest.images || {};
+    var keys = Object.keys(manifestImages);
+    for (var ki = 0; ki < keys.length; ki++) {
+      existingMd5s.add(manifestImages[keys[ki]].md5);
+    }
+
+    for (var j = 0; j < totalImages; j++) {
+      var md5 = hashMap[images[j].key];
+      if (!md5 || md5.startsWith('err_')) continue;
+      if (!existingMd5s.has(md5)) {
+        newImages.push({ key: images[j].key, blob: images[j].blob, md5: md5 });
+      }
+    }
+    if (!isSilent) _updateProgress(30, 'diff', 'done', '对比云端清单... (' + newImages.length + ' 张新图片)');
+
+    // 阶段 3: 上传新图片
+    var uploadedCount = 0;
+    if (newImages.length > 0) {
+      if (!isSilent) _updateProgress(30, 'upload', 'active', '上传图片... (0/' + newImages.length + ')');
+      for (var ni = 0; ni < newImages.length; ni++) {
+        if (cancelCheck()) { if (!isSilent) _hideProgress(); return false; }
+        try {
+          await webdavPutImage(newImages[ni].md5, newImages[ni].blob);
+          uploadedCount++;
+        } catch (e) {
+          if (!isSilent) console.warn('图片上传失败:', newImages[ni].key, e.message);
+        }
+        if (!isSilent) {
+          var upPct = 30 + Math.round((ni + 1) / newImages.length * 55);
+          _updateProgress(upPct, 'upload', 'active', '上传图片... (' + (ni + 1) + '/' + newImages.length + ')');
+        }
+      }
+    }
+    if (!isSilent) _updateProgress(85, 'upload', 'done', '上传图片... (' + uploadedCount + '/' + newImages.length + ')');
+
+    // 更新 manifest（记录所有图片的 MD5 和 refs）
+    var configName = _genConfigName();
+    for (var kj = 0; kj < totalImages; kj++) {
+      var img2 = images[kj];
+      var md5_2 = hashMap[img2.key];
+      if (!md5_2 || md5_2.startsWith('err_')) continue;
+      if (!manifestImages[img2.key]) {
+        manifestImages[img2.key] = { md5: md5_2, size: img2.blob.size, type: img2.blob.type || 'image/png', refs: [] };
+      }
+      // 更新 refs
+      var refs = manifestImages[img2.key].refs || [];
+      if (refs.indexOf(configName) === -1) refs.push(configName);
+      manifestImages[img2.key].refs = refs;
+    }
+
+    // 阶段 4: 保存配置快照 + 上传 manifest
+    if (!isSilent) _updateProgress(85, 'config', 'active', '保存配置快照...');
+    if (cancelCheck()) { if (!isSilent) _hideProgress(); return false; }
+
+    var configSnapshot = {
+      settings: config.settings || {},
+      groups: config.groups || [],
+      activeGroup: config.activeGroup || 0,
+      imageRefs: {}
+    };
+    for (var mk = 0; mk < totalImages; mk++) {
+      var k = images[mk].key;
+      if (hashMap[k] && !hashMap[k].startsWith('err_')) {
+        configSnapshot.imageRefs[k] = hashMap[k];
+      }
+    }
+
+    try { await webdavPutConfig(configName, configSnapshot); } catch (e) {
+      if (!isSilent) { _updateProgress(85, 'config', 'error', '保存配置失败: ' + e.message); _hideProgress(); }
+      return false;
+    }
+
+    // 更新 configs 列表
+    var configs = manifest.configs || [];
+    configs.unshift({ name: configName, time: new Date().toISOString(), cardCount: _countCards(config.groups) });
+    // 保留最近 5 个 config
+    var oldConfigs = configs.slice(5);
+    configs = configs.slice(0, 5);
+    manifest.configs = configs;
+    manifest.images = manifestImages;
+
+    try { await webdavPutManifest(manifest); } catch (e) {
+      if (!isSilent) { _updateProgress(85, 'config', 'error', '上传清单失败: ' + e.message); _hideProgress(); }
+      return false;
+    }
+    if (!isSilent) _updateProgress(92, 'config', 'done', '配置快照已保存');
+
+    // 阶段 5: 孤儿 GC — 清理无引用的图片和过期 config
+    if (!isSilent) _updateProgress(92, 'cleanup', 'active', '清理旧文件...');
+    // 收集所有被引用的 MD5
+    var referencedMd5s = new Set();
+    var allImages = manifest.images || {};
+    var imgKeys = Object.keys(allImages);
+    for (var ri = 0; ri < configs.length; ri++) {
+      var cfgName = configs[ri].name;
+      for (var rj = 0; rj < imgKeys.length; rj++) {
+        var refs2 = allImages[imgKeys[rj]].refs || [];
+        if (refs2.indexOf(cfgName) !== -1) {
+          referencedMd5s.add(allImages[imgKeys[rj]].md5);
+        }
+      }
+    }
+
+    // 删除过期 config 文件
+    for (var oc = 0; oc < oldConfigs.length; oc++) {
+      try { await webdavDeleteConfig(oldConfigs[oc].name); } catch (e) {}
+    }
+
+    // 列出云端 img 目录，删除无引用的图片
+    try {
+      var imgFiles = await webdavListImages();
+      if (Array.isArray(imgFiles)) {
+        for (var fi = 0; fi < imgFiles.length; fi++) {
+          var md5InCloud = imgFiles[fi].name.replace(/\.bin$/i, '');
+          if (md5InCloud && !referencedMd5s.has(md5InCloud)) {
+            try { await webdavDeleteImage(imgFiles[fi].name); } catch (e) {}
+          }
+        }
+      }
+    } catch (e) { /* GC 失败不影响主流程 */ }
+
+    // 清理 manifest.images 中无引用的条目
+    var cleanedImages = {};
+    for (var ci = 0; ci < imgKeys.length; ci++) {
+      var key = imgKeys[ci];
+      var item = allImages[key];
+      var itemRefs = item.refs || [];
+      var stillReferenced = false;
+      for (var sr = 0; sr < configs.length; sr++) {
+        if (itemRefs.indexOf(configs[sr].name) !== -1) { stillReferenced = true; break; }
+      }
+      if (stillReferenced) cleanedImages[key] = item;
+    }
+    manifest.images = cleanedImages;
+
+    if (!isSilent) _updateProgress(100, 'cleanup', 'done', '清理完成');
+
+    // 更新备份时间
+    setWebdavLastBackupFilename(configName);
+    setWebdavLastBackup(new Date().toISOString());
+
+    if (!isSilent) {
+      _updateProgress(100, 'cleanup', 'done', '备份完成！');
+      setTimeout(function () { _hideProgress(); }, 800);
+      if (typeof showToast === 'function') showToast('☁️ 增量备份完成' + (newImages.length > 0 ? '（' + uploadedCount + ' 张新图片已上传）' : ''), 'success');
+    }
+    return true;
+  } catch (e) {
+    if (!isSilent) { _hideProgress(); if (typeof showToast === 'function') showToast('备份失败: ' + e.message, 'error'); }
+    return false;
+  }
+}
+
+/** 统计卡片总数 */
+function _countCards(groups) {
+  if (!groups || !Array.isArray(groups)) return 0;
+  var total = 0;
+  for (var i = 0; i < groups.length; i++) {
+    total += (groups[i].cards || []).length;
+  }
+  return total;
+}
+
+/** v1.2.8: 增量备份入口（手动触发） */
+async function webdavIncrementalBackup() {
+  // 检查是否需要迁移
+  var needMigration = await _checkMigrationNeeded();
+  if (needMigration) {
+    var migrated = await _doFirstMigration();
+    if (!migrated) return;
+  }
+
+  // 收集数据
+  var data = await _collectAllData();
+  // 执行增量备份
+  var ok = await _incrementalBackup(data, false);
+  if (ok) {
+    // 提示导出本地 ZIP
+    setTimeout(function () {
+      var msg = '增量备份完成！建议同时导出一份本地全量备份：';
+      showImportConfirmAsync(msg, { title: '☁️ 备份完成', okLabel: '📥 导出本地备份', cancelLabel: '以后再说', wider: true }).then(function () { exportAll(); }).catch(function () {});
+    }, 1200);
+    // 清理旧 ZIP（如果还有残留）
+    webdavCleanupBackups(1).catch(function () {});
+  }
+}
+
+/** v1.2.8: 增量恢复入口 */
+async function webdavIncrementalRestore() {
+  // 获取 manifest
+  var manifest = null;
+  try { manifest = await webdavGetManifest(); } catch (e) {
+    if (typeof showToast === 'function') showToast('获取云端备份失败: ' + e.message, 'error');
+    return;
+  }
+  if (!manifest || !manifest.configs || manifest.configs.length === 0) {
+    // 回退到旧 ZIP 恢复：触发按钮 click 走原有流程
+    if (typeof showToast === 'function') showToast('云端暂无增量备份，列出旧格式备份...', 'info');
+    var btnRestore = document.getElementById('btn-webdav-restore');
+    if (btnRestore) {
+      // 临时解除增量恢复绑定，直接列出旧 ZIP
+      webdavListBackups().then(function (backupList) {
+        var versionPicker = document.getElementById('webdav-version-picker');
+        var versionList = document.getElementById('webdav-version-list');
+        if (!versionPicker || !versionList) return;
+        if (!Array.isArray(backupList) || backupList.length === 0) {
+          if (typeof showToast === 'function') showToast('云端暂无备份文件', 'warning');
+          return;
+        }
+        var html = '';
+        for (var i = 0; i < backupList.length; i++) {
+          var f = backupList[i];
+          var fn = f.name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+          var timeStr = (f.lastModified || '-').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          var checked = i === 0 ? ' checked' : '';
+          html += '<label class="webdav-version-item"><input type="radio" name="webdav-version" value="' + fn + '"' + checked + '><span class="webdav-version-info"><strong>' + fn + '</strong><br><small>' + timeStr + '</small></span><span class="version-delete" data-name="' + fn + '" data-type="zip" title="删除此备份">🗑️</span></label>';
+        }
+        versionList.innerHTML = html;
+        versionPicker.classList.remove('hidden');
+      }).catch(function () {
+        if (typeof showToast === 'function') showToast('无法连接 WebDAV', 'error');
+      });
+    }
+    return;
+  }
+
+  var configs = manifest.configs;
+  // 显示版本列表
+  var versionPicker = document.getElementById('webdav-version-picker');
+  var versionList = document.getElementById('webdav-version-list');
+  if (!versionPicker || !versionList) return;
+  var html = '';
+  for (var i = 0; i < configs.length; i++) {
+    var c = configs[i];
+    var checked = i === 0 ? ' checked' : '';
+    var timeStr = c.time ? new Date(c.time).toLocaleString('zh-CN') : '-';
+    html += '<label class="webdav-version-item"><input type="radio" name="webdav-version" value="' + c.name + '"' + checked + '><span class="webdav-version-info"><strong>' + timeStr + '</strong><br><small>' + c.cardCount + ' 张卡片</small></span><span class="version-delete" data-name="' + c.name + '" data-type="config" title="删除此备份">🗑️</span></label>';
+  }
+  versionList.innerHTML = html;
+  versionPicker.classList.remove('hidden');
+}
+
+/** v1.2.8: 执行增量恢复（下载选定版本的 config + 按需下载图片） */
+async function _doIncrementalRestore(configName) {
+  var msg = '从云端恢复将覆盖当前所有数据，是否继续？';
+  try { await showImportConfirmAsync(msg); } catch (e) { return; }
+
+  var loading = document.getElementById('backup-loading');
+  if (loading) loading.classList.remove('hidden');
+
+  try {
+    // 1. 下载配置快照
+    var config = await webdavGetConfig(configName);
+    if (!config || !config.groups) throw new Error('配置快照无效');
+
+    // 2. 按需下载图片
+    var imageRefs = config.imageRefs || {};
+    var md5Keys = Object.keys(imageRefs);
+    var db = await openImgDB();
+    var downloadedCount = 0;
+
+    if (md5Keys.length > 0) {
+      // 并行下载，每次最多 4 个
+      var batchSize = 4;
+      for (var bi = 0; bi < md5Keys.length; bi += batchSize) {
+        var batch = md5Keys.slice(bi, bi + batchSize);
+        var results = await Promise.all(batch.map(function (key) {
+          var md5 = imageRefs[key];
+          return webdavGetImage(md5).then(function (blob) {
+            return { key: key, blob: blob };
+          }).catch(function () { return null; });
+        }));
+
+        for (var ri = 0; ri < results.length; ri++) {
+          if (!results[ri]) continue;
+          try {
+            await new Promise(function (resolve, reject) {
+              var tx = db.transaction('images', 'readwrite');
+              tx.objectStore('images').put(results[ri].blob, results[ri].key);
+              tx.oncomplete = function () { resolve(); };
+              tx.onerror = function () { reject(tx.error); };
+            });
+            downloadedCount++;
+          } catch (e) { console.warn('写入图片失败:', results[ri].key, e); }
+        }
+      }
+    }
+
+    // 3. 写入配置到 storage
+    var syncFailed = false;
+    await new Promise(function (resolve) {
+      chrome.storage.sync.set({
+        settings: config.settings || {},
+        groups: config.groups || [],
+        activeGroup: config.activeGroup || 0
+      }, function () {
+        if (chrome.runtime.lastError) syncFailed = true;
+        resolve();
+      });
+    });
+    if (syncFailed) {
+      var fSettings = config.settings || {};
+      fSettings.storageFallback = 'local';
+      await new Promise(function (resolve) {
+        chrome.storage.local.set({ groups: config.groups || [], activeGroup: config.activeGroup || 0 }, resolve);
+      });
+      var ssf2 = false;
+      await new Promise(function (resolve) {
+        chrome.storage.sync.set({ settings: fSettings, groups: [], activeGroup: 0 }, function () {
+          if (chrome.runtime.lastError) ssf2 = true;
+          resolve();
+        });
+      });
+      if (ssf2) {
+        await new Promise(function (resolve) { chrome.storage.local.set({ settings: fSettings }, resolve); });
+      }
+    }
+
+    if (typeof collectCardImageGarbage === 'function') await collectCardImageGarbage();
+
+    setWebdavLastBackupFilename(configName);
+    setWebdavLastBackup(new Date().toISOString());
+
+    if (typeof showToast === 'function') showToast('☁️ 已从云端恢复（' + downloadedCount + ' 张图片），即将刷新...', 'success');
+    setTimeout(function () { window.location.reload(); }, 1500);
+  } catch (e) {
+    if (typeof showToast === 'function') showToast('恢复失败: ' + e.message, 'error');
+  } finally {
+    if (loading) loading.classList.add('hidden');
+  }
+}
 
 /** 导入图片到 IndexedDB */
 async function _importImages(unzipped, manifest) {
@@ -604,4 +1085,52 @@ function bindBackupEvents() {
   if (btnExport) btnExport.addEventListener('click', exportAll);
   if (btnImport) btnImport.addEventListener('click', importAll);
   if (btnReset)  btnReset.addEventListener('click', resetAll);
+
+  // v1.2.8: 版本列表删除按钮事件委托
+  var versionList = document.getElementById('webdav-version-list');
+  if (versionList) {
+    versionList.addEventListener('click', async function (e) {
+      var delBtn = e.target.closest('.version-delete');
+      if (!delBtn) return;
+      e.stopPropagation();
+      e.preventDefault();
+      var name = delBtn.getAttribute('data-name');
+      var type = delBtn.getAttribute('data-type');
+      if (!name) return;
+      try {
+        // 确认删除
+        await showImportConfirmAsync('确定要删除此备份版本吗？\n删除后无法恢复。', { title: '🗑️ 确认删除', okLabel: '删除', cancelLabel: '取消' });
+      } catch (e) { return; } // 用户取消
+      try {
+        if (type === 'zip') {
+          await webdavDeleteBackup(name);
+        } else if (type === 'config') {
+          await webdavDeleteConfig(name);
+          // 更新云端 manifest 移除该 config
+          try {
+            var m = await webdavGetManifest();
+            if (m && m.configs) {
+              m.configs = m.configs.filter(function (c) { return c.name !== name; });
+              await webdavPutManifest(m);
+            }
+          } catch (e) {}
+        }
+        // 从 DOM 移除该行
+        var label = delBtn.closest('.webdav-version-item');
+        if (label) {
+          var radio = label.querySelector('input[type="radio"]');
+          var wasChecked = radio && radio.checked;
+          label.remove();
+          // 如果删除的是选中项，自动选第一个
+          if (wasChecked) {
+            var first = versionList.querySelector('input[type="radio"]');
+            if (first) first.checked = true;
+          }
+        }
+        if (typeof showToast === 'function') showToast('已删除', 'info');
+      } catch (err) {
+        if (typeof showToast === 'function') showToast('删除失败: ' + err.message, 'error');
+      }
+    });
+  }
 }

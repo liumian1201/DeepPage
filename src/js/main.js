@@ -168,13 +168,18 @@ async function _autoBackupIfNeeded() {
     try { remoteTime = await webdavCheckConflict(); } catch (e) { return; }
     if (remoteTime && new Date(remoteTime).getTime() > wLastTs) return;
     try {
+      // v1.2.8: 自动备份走增量路径
       var data = await _collectAllData();
-      var zipBlob = await _buildZipBlob(data);
-      var fname = _genBackupFilename();
-      await webdavUpload(zipBlob, fname);
-      setWebdavLastBackupFilename(fname);
-      setWebdavLastBackup(new Date().toISOString());
-      webdavCleanupBackups(5).catch(function () {});
+      if (typeof _incrementalBackup === 'function') {
+        await _incrementalBackup(data, true);
+      } else {
+        var zipBlob = await _buildZipBlob(data);
+        var fname = _genBackupFilename();
+        await webdavUpload(zipBlob, fname);
+        setWebdavLastBackupFilename(fname);
+        setWebdavLastBackup(new Date().toISOString());
+        webdavCleanupBackups(5).catch(function () {});
+      }
     } catch (e) { /* 静默 */ }
     return;
   }

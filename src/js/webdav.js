@@ -10,7 +10,18 @@ var WEBDAV_MSG = {
   TEST: 'webdav:test',
   SILENT_PUT: 'webdav:silent-put',
   LIST: 'webdav:list',
-  DELETE: 'webdav:delete'
+  DELETE: 'webdav:delete',
+  // v1.2.8: 增量备份消息类型
+  MANIFEST_GET: 'webdav:manifest-get',
+  MANIFEST_PUT: 'webdav:manifest-put',
+  CONFIG_PUT: 'webdav:config-put',
+  CONFIG_GET: 'webdav:config-get',
+  CONFIG_LIST: 'webdav:config-list',
+  CONFIG_DELETE: 'webdav:config-delete',
+  IMG_PUT: 'webdav:img-put',
+  IMG_GET: 'webdav:img-get',
+  IMG_DELETE: 'webdav:img-delete',
+  IMG_LIST: 'webdav:img-list'
 };
 
 function _wdGetCreds() {
@@ -95,15 +106,99 @@ function _genBackupFilename() {
     + pad(now.getSeconds()) + '.zip';
 }
 
-/** 静默备份（beforeunload 调用，v1.2.6: 版本化文件名） */
+/** v1.2.8: 生成配置快照文件名 */
+function _genConfigName() {
+  var now = new Date();
+  var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
+  return now.getFullYear()
+    + pad(now.getMonth() + 1)
+    + pad(now.getDate()) + '_'
+    + pad(now.getHours())
+    + pad(now.getMinutes())
+    + pad(now.getSeconds()) + '.json';
+}
+
+// ==================== v1.2.8: 增量备份 API ====================
+
+/** 获取云端 manifest.json */
+async function webdavGetManifest() {
+  return _wdSend(WEBDAV_MSG.MANIFEST_GET);
+}
+
+/** 上传 manifest.json */
+async function webdavPutManifest(manifest) {
+  return _wdSend(WEBDAV_MSG.MANIFEST_PUT, { body: JSON.stringify(manifest) });
+}
+
+/** 上传配置快照 config/<name>.json */
+async function webdavPutConfig(name, config) {
+  return _wdSend(WEBDAV_MSG.CONFIG_PUT, { _filename: name, body: JSON.stringify(config) });
+}
+
+/** 下载配置快照 */
+async function webdavGetConfig(name) {
+  return _wdSend(WEBDAV_MSG.CONFIG_GET, { _filename: name });
+}
+
+/** 列出所有配置快照 */
+async function webdavListConfigs() {
+  return _wdSend(WEBDAV_MSG.CONFIG_LIST);
+}
+
+/** 删除配置快照 */
+async function webdavDeleteConfig(name) {
+  return _wdSend(WEBDAV_MSG.CONFIG_DELETE, { _filename: name });
+}
+
+/** 上传图片到 img/<md5>.bin */
+async function webdavPutImage(md5, blob) {
+  var buf = await blob.arrayBuffer();
+  return _wdSend(WEBDAV_MSG.IMG_PUT, { _filename: md5, body: Array.from(new Uint8Array(buf)), _mime: blob.type || 'image/png' });
+}
+
+/** 下载图片 */
+async function webdavGetImage(md5) {
+  var resp = await _wdSend(WEBDAV_MSG.IMG_GET, { _filename: md5 });
+  if (Array.isArray(resp)) return new Blob([new Uint8Array(resp)], { type: 'image/png' });
+  return new Blob([resp], { type: 'image/png' });
+}
+
+/** 删除图片 */
+async function webdavDeleteImage(md5) {
+  return _wdSend(WEBDAV_MSG.IMG_DELETE, { _filename: md5 });
+}
+
+/** 列出云端 img/ 目录所有文件 */
+async function webdavListImages() {
+  return _wdSend(WEBDAV_MSG.IMG_LIST);
+}
+
+/** 静默备份（beforeunload 调用，v1.2.8: 支持增量标记） */
 function webdavSilentPut(zipBlob) {
   _wdGetCreds().then(function (c) {
     if (!c.url) return;
-    var fname = _genBackupFilename();
-    return zipBlob.arrayBuffer().then(function (buf) {
-      // BUG-031: filename 写入在 SW 侧 silent-put 处理器中完成，避免 beforeunload 丢失
-      chrome.runtime.sendMessage({ type: WEBDAV_MSG.SILENT_PUT, payload: { body: Array.from(new Uint8Array(buf)), _filename: fname, _url: c.url, _user: c.user, _pass: c.pass } });
+    // v1.2.8: 传递增量标记，SW 侧尝试增量备份
+    chrome.runtime.sendMessage({ type: WEBDAV_MSG.SILENT_PUT, payload: { _incremental: true, _url: c.url, _user: c.user, _pass: c.pass } });
+  });
+}
+
+/** v1.2.8: 增量静默备份（传入收集好的数据） */
+function webdavSilentPutIncremental(data) {
+  if (!data || !data.config || !data.images) return;
+  _wdGetCreds().then(function (c) {
+    if (!c.url) return;
+    chrome.runtime.sendMessage({
+      type: WEBDAV_MSG.SILENT_PUT,
+      payload: {
+        _incremental: true,
+        _url: c.url, _user: c.user, _pass: c.pass,
+        _config: JSON.stringify(data.config),
+        _images: data.images.map(function (img) {
+          return { key: img.key, type: img.blob.type || 'image/png' };
+        })
+      }
     });
+    // 图片 Blob 无法通过 sendMessage 传递，SW 侧自行从 IndexedDB 读取
   });
 }
 

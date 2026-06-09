@@ -62,6 +62,18 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   if (request.type === 'webdav:list') { webdavProxy('PROPFIND_LIST', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
   if (request.type === 'webdav:delete') { webdavProxy('DELETE', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
 
+  // v1.2.8: 增量备份 — manifest / config / img 子路径操作
+  if (request.type === 'webdav:manifest-get') { webdavProxy('MANIFEST_GET', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
+  if (request.type === 'webdav:manifest-put') { webdavProxy('MANIFEST_PUT', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
+  if (request.type === 'webdav:config-put') { webdavProxy('CONFIG_PUT', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
+  if (request.type === 'webdav:config-get') { webdavProxy('CONFIG_GET', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
+  if (request.type === 'webdav:config-list') { webdavProxy('CONFIG_LIST', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
+  if (request.type === 'webdav:config-delete') { webdavProxy('CONFIG_DELETE', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
+  if (request.type === 'webdav:img-put') { webdavProxy('IMG_PUT', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
+  if (request.type === 'webdav:img-get') { webdavProxy('IMG_GET', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
+  if (request.type === 'webdav:img-delete') { webdavProxy('IMG_DELETE', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
+  if (request.type === 'webdav:img-list') { webdavProxy('IMG_LIST', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
+
   // v1.1.5: 网页截图 — 后台弹出窗口截图后关闭
   if (request.type === 'capture-screenshot') {
     var url = request.url;
@@ -175,6 +187,80 @@ async function webdavProxy(method, payload) {
     var res = await fetch(baseUrl, { method: 'OPTIONS', headers: headers });
     if (!res.ok) return { ok: false, error: '连接失败 ' + res.status };
     return { ok: true, data: 'connected' };
+  }
+
+  // v1.2.8: 增量备份子路径操作
+  var subPath = '';
+  if (method === 'MANIFEST_GET' || method === 'MANIFEST_PUT') subPath = 'manifest.json';
+  else if (method === 'CONFIG_LIST') subPath = 'config/';
+  else if (method === 'IMG_LIST') subPath = 'img/';
+  else if (method.startsWith('CONFIG_')) subPath = 'config/' + (payload._filename || 'latest.json');
+  else if (method.startsWith('IMG_') && method !== 'IMG_LIST') subPath = 'img/' + (payload._filename || 'unknown.bin');
+
+  if (subPath) {
+    var subUrl = baseUrl + '/' + subPath;
+    if (method === 'MANIFEST_GET' || method === 'CONFIG_GET' || method === 'IMG_GET') {
+      var res = await fetch(subUrl, { method: 'GET', headers: headers });
+      if (res.status === 404) return { ok: true, data: null };
+      if (!res.ok) return { ok: false, error: 'GET ' + res.status };
+      if (method === 'IMG_GET') {
+        var ab = await res.arrayBuffer();
+        return { ok: true, data: Array.from(new Uint8Array(ab)) };
+      }
+      var text = await res.text();
+      try { return { ok: true, data: JSON.parse(text) }; } catch (e) { return { ok: true, data: text }; }
+    }
+    if (method === 'MANIFEST_PUT' || method === 'CONFIG_PUT' || method === 'IMG_PUT') {
+      // 确保父目录存在
+      if (subPath.indexOf('/') !== -1) {
+        var dirPath = subPath.substring(0, subPath.lastIndexOf('/'));
+        try { await fetch(baseUrl + '/' + dirPath, { method: 'MKCOL', headers: headers }); } catch (e) {}
+      }
+      var body = payload.body;
+      if (typeof body === 'string') body = new TextEncoder().encode(body);
+      if (Array.isArray(body)) body = new Uint8Array(body);
+      if (!body || !body.byteLength) return { ok: false, error: 'empty body' };
+      var ct = payload._mime || (method === 'IMG_PUT' ? 'application/octet-stream' : 'application/json');
+      var putHeaders = Object.assign({}, headers, { 'Content-Type': ct });
+      var res = await fetch(subUrl, { method: 'PUT', headers: putHeaders, body: body });
+      if (!res.ok) return { ok: false, error: 'PUT ' + res.status };
+      return { ok: true, data: new Date().toISOString() };
+    }
+    if (method === 'CONFIG_LIST' || method === 'IMG_LIST') {
+      var listDir = method === 'CONFIG_LIST' ? 'config/' : 'img/';
+      var listUrl = baseUrl + '/' + listDir;
+      // PROPFIND on subdirectory
+      var subHeaders = Object.assign({}, headers, { Depth: '1' });
+      var res = await fetch(listUrl, { method: 'PROPFIND', headers: subHeaders });
+      if (res.status === 404) return { ok: true, data: [] };
+      if (!res.ok) return { ok: false, error: 'PROPFIND ' + res.status };
+      var text = await res.text();
+      var files = [];
+      var hrefRe = /<[^:>]*:href>([^<]+)<\/[^:>]*:href>/gi;
+      var lmRe = /<[^>]*getlastmodified[^>]*>([^<]+)<\/[^>]*getlastmodified[^>]*>/i;
+      var responses = text.split(/<D:response>/i);
+      for (var j = 0; j < responses.length; j++) {
+        var segment = responses[j];
+        hrefRe.lastIndex = 0;
+        var hm = hrefRe.exec(segment);
+        if (!hm) continue;
+        var h = hm[1];
+        // 跳过目录本身
+        if (h === '/' + listDir || h === listDir || h.endsWith('/' + listDir)) continue;
+        var parts = h.split('/');
+        var fn = parts[parts.length - 1];
+        if (!fn || fn === listDir.replace(/\/$/, '')) continue;
+        var lm = (segment.match(lmRe) || [])[1] || '';
+        files.push({ name: fn, lastModified: lm });
+      }
+      files.sort(function (a, b) { return b.lastModified.localeCompare(a.lastModified); });
+      return { ok: true, data: files };
+    }
+    if (method === 'CONFIG_DELETE' || method === 'IMG_DELETE') {
+      var res = await fetch(subUrl, { method: 'DELETE', headers: headers });
+      if (!res.ok && res.status !== 404) return { ok: false, error: 'DELETE ' + res.status };
+      return { ok: true, data: 'deleted' };
+    }
   }
 
   return { ok: false, error: 'unknown method' };
