@@ -579,6 +579,12 @@
   display: contents;
 }
 
+/* 窄屏 Flex 模式：卡片固定宽度优先，允许微缩适配临界宽度，每行独立居中 */
+.speeddial-grid.narrow-grid .card-wrapper {
+  flex: 0 1 var(--card-width, 270px);
+  min-width: 200px;
+}
+
 /* ---- 卡片外层包裹（v1.0.9） — 统一容器：背景+圆角+阴影 ---- */
 .card-wrapper {
   display: flex;

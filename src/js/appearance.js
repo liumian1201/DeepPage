@@ -37,17 +37,46 @@ function updateGridColumns(cols) {
     // 统计当前可见卡片数（排除 + 按钮）
     var cards = grid.querySelectorAll('.speeddial-card:not(.card-add)');
     var cardCount = cards.length;
-    // 至少 1 列，最多 cols 列
     var usedCols = Math.max(1, Math.min(cardCount, cols));
     var idealWidth = usedCols * w + (usedCols - 1) * gap;
+    var parentWidth = grid.parentElement ? grid.parentElement.clientWidth : window.innerWidth;
 
-    grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(' + w + 'px, 1fr))';
-    grid.style.width = idealWidth + 'px';
-    grid.style.maxWidth = '100%';
-    grid.style.marginLeft = 'auto';
-    grid.style.marginRight = 'auto';
+    if (idealWidth < parentWidth) {
+      // —— 宽屏模式：Grid + 精确宽度 + margin 居中 ——
+      grid.classList.remove('narrow-grid');
+      grid.style.display = 'grid';
+      grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(' + w + 'px, 1fr))';
+      grid.style.justifyItems = 'center';
+      grid.style.width = idealWidth + 'px';
+      grid.style.maxWidth = '';
+      grid.style.marginLeft = 'auto';
+      grid.style.marginRight = 'auto';
+      grid.style.gap = gap + 'px';
+    } else {
+      // —— 窄屏模式：Flexbox 自动换行，每行独立居中 ——
+      grid.classList.add('narrow-grid');
+      grid.style.display = 'flex';
+      grid.style.flexWrap = 'wrap';
+      grid.style.justifyContent = 'center';
+      grid.style.gap = gap + 'px';
+      grid.style.width = '';
+      grid.style.maxWidth = '100%';
+      grid.style.marginLeft = '';
+      grid.style.marginRight = '';
+      grid.style.setProperty('--card-width', w + 'px');
+    }
   });
 }
+
+// 窗口 resize 时重算 Grid（处理窄↔宽切换）
+var _gridResizeTimer = 0;
+window.addEventListener('resize', function () {
+  if (_gridResizeTimer) clearTimeout(_gridResizeTimer);
+  _gridResizeTimer = setTimeout(function () {
+    _gridResizeTimer = 0;
+    updateGridColumns();
+  }, 150);
+});
 
 function bindAppearancePreview(dom, onChanged) {
   ['bgColor', 'cardBgColor', 'cardTextColor'].forEach(function (key) {
