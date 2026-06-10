@@ -18,83 +18,36 @@ function applyAppearance(settings) {
   updateGridColumns(settings.columns);
 }
 
-function updateGridColumns(cols, force) {
+function updateGridColumns(cols) {
   // BUG-016: rAF 节流，避免 input 事件每帧触发 Grid layout 重算
-  if (!force && updateGridColumns._pending) return;
+  if (updateGridColumns._pending) return;
   updateGridColumns._pending = true;
   requestAnimationFrame(function () {
     updateGridColumns._pending = false;
     var grid = document.getElementById('speeddial-grid');
     if (!grid) return;
-    var section = grid.parentElement;
     if (cols === undefined) {
       var s = document.getElementById('setting-columns-slider');
       cols = s ? parseInt(s.value, 10) : 5;
     }
     var ws = document.getElementById('setting-card-width');
     var w = parseInt(ws ? ws.value : 270, 10);
-    var gap = 16;
-
-    // 统计当前可见卡片数（排除 + 按钮 & 隐藏分组中的卡片）
-    var allCards = grid.querySelectorAll('.speeddial-card:not(.card-add)');
-    var cardCount = 0;
-    for (var i = 0; i < allCards.length; i++) {
-      // 隐藏分组（display:none）中的卡片 offsetParent 为 null
-      if (allCards[i].offsetParent !== null) cardCount++;
-    }
-    var usedCols = Math.max(1, Math.min(cardCount, cols));
-    var idealWidth = usedCols * w + (usedCols - 1) * gap;
-    var parentWidth = window.innerWidth;
-
-    // 清理 Grid 自身样式
-    grid.style.display = '';
-    grid.style.gridTemplateColumns = '';
-    grid.style.justifyItems = '';
-    grid.style.justifyContent = '';
-    grid.style.flexWrap = '';
-    grid.style.width = '';
-    grid.style.maxWidth = '';
-    grid.style.marginLeft = '';
-    grid.style.marginRight = '';
-    grid.style.gap = '';
-    grid.classList.remove('narrow-grid');
-    // 清理父容器 section 可能残留的居中样式
-    if (section) {
-      section.style.display = '';
-      section.style.justifyContent = '';
-    }
-
-    if (cardCount > 0 && idealWidth < parentWidth) {
-      // —— 宽屏模式：Section 用 Flex 居中 Grid，Grid 自身精确宽度 ——
-      if (section) {
-        section.style.display = 'flex';
-        section.style.justifyContent = 'center';
-      }
-      grid.style.display = 'grid';
-      grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(' + w + 'px, 1fr))';
-      grid.style.justifyItems = 'center';
-      grid.style.width = idealWidth + 'px';
-      grid.style.gap = gap + 'px';
-    } else {
-      // —— 窄屏 / 无卡片模式：Flexbox 自动换行，每行独立居中 ——
-      grid.classList.add('narrow-grid');
-      grid.style.display = 'flex';
-      grid.style.flexWrap = 'wrap';
-      grid.style.justifyContent = 'center';
-      grid.style.gap = gap + 'px';
-      grid.style.maxWidth = '100%';
-      grid.style.setProperty('--card-width', w + 'px');
-    }
+    // v1.2.6: auto-fill 自动换行 + max-width 限最大列数（滑块值）+ margin auto 居中
+    grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(' + w + 'px, 1fr))';
+    var gap = 16; // 与 main.css .speeddial-grid gap 一致
+    grid.style.maxWidth = (cols * w + (cols - 1) * gap) + 'px';
+    grid.style.marginLeft = 'auto';
+    grid.style.marginRight = 'auto';
   });
 }
 
-// 窗口 resize 时重算 Grid（处理窄↔宽切换），force 绕过节流
+// 窗口 resize 时重算 Grid
 var _gridResizeTimer = 0;
 window.addEventListener('resize', function () {
   if (_gridResizeTimer) clearTimeout(_gridResizeTimer);
   _gridResizeTimer = setTimeout(function () {
     _gridResizeTimer = 0;
-    updateGridColumns(undefined, true);
+    updateGridColumns();
   }, 150);
 });
 
