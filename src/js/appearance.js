@@ -32,10 +32,18 @@ function updateGridColumns(cols) {
     }
     var ws = document.getElementById('setting-card-width');
     var w = parseInt(ws ? ws.value : 270, 10);
-    // v1.2.6: auto-fill 自动换行 + max-width 限最大列数（滑块值）+ margin auto 居中
-    grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(' + w + 'px, 1fr))';
     var gap = 16; // 与 main.css .speeddial-grid gap 一致
-    grid.style.maxWidth = (cols * w + (cols - 1) * gap) + 'px';
+
+    grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(' + w + 'px, 1fr))';
+
+    // 根据父容器宽度算实际能放几列（上限滑块列数）
+    var parentWidth = grid.parentElement ? grid.parentElement.clientWidth : window.innerWidth;
+    var actualCols = Math.max(1, Math.min(cols, Math.floor((parentWidth + gap) / (w + gap))));
+    var gridWidth = actualCols * w + (actualCols - 1) * gap;
+
+    // 宽屏：滑块列数为上限；窄屏：实际列数 < 滑块 → Grid 窄于父容器 → margin 居中
+    grid.style.width = gridWidth + 'px';
+    grid.style.maxWidth = '100%';
     grid.style.marginLeft = 'auto';
     grid.style.marginRight = 'auto';
   });
