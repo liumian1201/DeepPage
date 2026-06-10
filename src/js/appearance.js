@@ -26,6 +26,7 @@ function updateGridColumns(cols, force) {
     updateGridColumns._pending = false;
     var grid = document.getElementById('speeddial-grid');
     if (!grid) return;
+    var section = grid.parentElement;
     if (cols === undefined) {
       var s = document.getElementById('setting-columns-slider');
       cols = s ? parseInt(s.value, 10) : 5;
@@ -41,7 +42,7 @@ function updateGridColumns(cols, force) {
     var idealWidth = usedCols * w + (usedCols - 1) * gap;
     var parentWidth = window.innerWidth;
 
-    // 先彻底清理残留样式，再按模式设置
+    // 清理 Grid 自身样式
     grid.style.display = '';
     grid.style.gridTemplateColumns = '';
     grid.style.justifyItems = '';
@@ -53,16 +54,22 @@ function updateGridColumns(cols, force) {
     grid.style.marginRight = '';
     grid.style.gap = '';
     grid.classList.remove('narrow-grid');
+    // 清理父容器 section 可能残留的居中样式
+    if (section) {
+      section.style.display = '';
+      section.style.justifyContent = '';
+    }
 
     if (cardCount > 0 && idealWidth < parentWidth) {
-      // —— 宽屏模式：Grid + 精确宽度 + margin 居中 ——
+      // —— 宽屏模式：Section 用 Flex 居中 Grid，Grid 自身精确宽度 ——
+      if (section) {
+        section.style.display = 'flex';
+        section.style.justifyContent = 'center';
+      }
       grid.style.display = 'grid';
       grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(' + w + 'px, 1fr))';
       grid.style.justifyItems = 'center';
-      grid.style.justifyContent = 'center';
       grid.style.width = idealWidth + 'px';
-      grid.style.marginLeft = 'auto';
-      grid.style.marginRight = 'auto';
       grid.style.gap = gap + 'px';
     } else {
       // —— 窄屏 / 无卡片模式：Flexbox 自动换行，每行独立居中 ——
