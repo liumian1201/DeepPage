@@ -400,9 +400,9 @@ function applyDashboardLayout(settings) {
 
 /** 应用组件可见性 */
 function applyComponentVisibility(settings) {
-  const clockEl   = document.getElementById('dashboard-clock');
-  const lunarEl   = document.getElementById('dashboard-lunar');
-  const weatherEl = document.getElementById('dashboard-weather');
+  const clockEl   = document.getElementById('dash-clock');
+  const lunarEl   = document.getElementById('dash-lunar');
+  const weatherEl = document.getElementById('dash-weather');
 
   if (clockEl)   clockEl.style.display   = settings.showClock   ? '' : 'none';
   if (lunarEl)   lunarEl.style.display   = settings.showLunar   ? '' : 'none';
