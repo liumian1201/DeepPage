@@ -32,11 +32,18 @@ function updateGridColumns(cols) {
     }
     var ws = document.getElementById('setting-card-width');
     var w = parseInt(ws ? ws.value : 270, 10);
-    grid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(' + w + 'px, 1fr))';
     var gap = 16;
-    var gridW = (cols * w + (cols - 1) * gap) + 'px';
-    grid.style.width = gridW;
-    grid.style.maxWidth = gridW;
+
+    // 统计当前可见卡片数（排除 + 按钮）
+    var cards = grid.querySelectorAll('.speeddial-card:not(.card-add)');
+    var cardCount = cards.length;
+    // 至少 1 列，最多 cols 列
+    var usedCols = Math.max(1, Math.min(cardCount, cols));
+    var idealWidth = usedCols * w + (usedCols - 1) * gap;
+
+    grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(' + w + 'px, 1fr))';
+    grid.style.width = idealWidth + 'px';
+    grid.style.maxWidth = '100%';
     grid.style.marginLeft = 'auto';
     grid.style.marginRight = 'auto';
   });
