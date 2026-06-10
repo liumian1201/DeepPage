@@ -683,6 +683,11 @@
   box-sizing: border-box;
 }
 
+/* 本地图片 src 异步加载前隐藏，避免破图一闪 */
+.card-thumb-img[data-local="1"]:not([src]) {
+  visibility: hidden;
+}
+
 /* 兜底文字卡片（无自定义图时） */
 .card-fallback {
   width: 100%;

@@ -11,6 +11,10 @@
 - 自研 CSS Grid 坐标拖拽和 GridStack.js 均经过验证但不适合当前场景（3组件+fixed定位），已移除
 - 看板整体布局后续版本重做
 
+### 🐛 修复
+- **修复窄屏卡片模块整体不居中**：`updateGridColumns` 改为按父容器实际宽度 `floor((parentWidth+gap)/(cardWidth+gap))` 计算可容纳列数，设置精确 `width`（上限滑块列数）。宽屏按滑块列数、窄屏按实际列数，`margin:auto` 在所有分辨率下都能居中。同时添加窗口 `resize` 监听（150ms 防抖）自动重算。
+- **修复本地图片刷新时破图一闪**：IndexedDB 图片 `<img>` 初始无 `src`，等待 `loadLocalCardImages` 异步读取期间浏览器短暂显示破图占位符。加 CSS `.card-thumb-img[data-local="1"]:not([src]) { visibility: hidden }`，`src` 赋值后选择器失效自动显示，无布局抖动。
+
 ---
 
 ## v1.2.9 (2026-06-09)
