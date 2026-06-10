@@ -35,9 +35,13 @@ function updateGridColumns(cols, force) {
     var w = parseInt(ws ? ws.value : 270, 10);
     var gap = 16;
 
-    // 统计当前可见卡片数（排除 + 按钮）
-    var cards = grid.querySelectorAll('.speeddial-card:not(.card-add)');
-    var cardCount = cards.length;
+    // 统计当前可见卡片数（排除 + 按钮 & 隐藏分组中的卡片）
+    var allCards = grid.querySelectorAll('.speeddial-card:not(.card-add)');
+    var cardCount = 0;
+    for (var i = 0; i < allCards.length; i++) {
+      // 隐藏分组（display:none）中的卡片 offsetParent 为 null
+      if (allCards[i].offsetParent !== null) cardCount++;
+    }
     var usedCols = Math.max(1, Math.min(cardCount, cols));
     var idealWidth = usedCols * w + (usedCols - 1) * gap;
     var parentWidth = window.innerWidth;
