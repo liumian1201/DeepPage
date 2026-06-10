@@ -18,9 +18,9 @@ function applyAppearance(settings) {
   updateGridColumns(settings.columns);
 }
 
-function updateGridColumns(cols) {
+function updateGridColumns(cols, force) {
   // BUG-016: rAF 节流，避免 input 事件每帧触发 Grid layout 重算
-  if (updateGridColumns._pending) return;
+  if (!force && updateGridColumns._pending) return;
   updateGridColumns._pending = true;
   requestAnimationFrame(function () {
     updateGridColumns._pending = false;
@@ -39,42 +39,51 @@ function updateGridColumns(cols) {
     var cardCount = cards.length;
     var usedCols = Math.max(1, Math.min(cardCount, cols));
     var idealWidth = usedCols * w + (usedCols - 1) * gap;
-    var parentWidth = grid.parentElement ? grid.parentElement.clientWidth : window.innerWidth;
+    var parentWidth = window.innerWidth;
 
-    if (idealWidth < parentWidth) {
+    // 先彻底清理残留样式，再按模式设置
+    grid.style.display = '';
+    grid.style.gridTemplateColumns = '';
+    grid.style.justifyItems = '';
+    grid.style.justifyContent = '';
+    grid.style.flexWrap = '';
+    grid.style.width = '';
+    grid.style.maxWidth = '';
+    grid.style.marginLeft = '';
+    grid.style.marginRight = '';
+    grid.style.gap = '';
+    grid.classList.remove('narrow-grid');
+
+    if (cardCount > 0 && idealWidth < parentWidth) {
       // —— 宽屏模式：Grid + 精确宽度 + margin 居中 ——
-      grid.classList.remove('narrow-grid');
       grid.style.display = 'grid';
       grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(' + w + 'px, 1fr))';
       grid.style.justifyItems = 'center';
+      grid.style.justifyContent = 'center';
       grid.style.width = idealWidth + 'px';
-      grid.style.maxWidth = '';
       grid.style.marginLeft = 'auto';
       grid.style.marginRight = 'auto';
       grid.style.gap = gap + 'px';
     } else {
-      // —— 窄屏模式：Flexbox 自动换行，每行独立居中 ——
+      // —— 窄屏 / 无卡片模式：Flexbox 自动换行，每行独立居中 ——
       grid.classList.add('narrow-grid');
       grid.style.display = 'flex';
       grid.style.flexWrap = 'wrap';
       grid.style.justifyContent = 'center';
       grid.style.gap = gap + 'px';
-      grid.style.width = '';
       grid.style.maxWidth = '100%';
-      grid.style.marginLeft = '';
-      grid.style.marginRight = '';
       grid.style.setProperty('--card-width', w + 'px');
     }
   });
 }
 
-// 窗口 resize 时重算 Grid（处理窄↔宽切换）
+// 窗口 resize 时重算 Grid（处理窄↔宽切换），force 绕过节流
 var _gridResizeTimer = 0;
 window.addEventListener('resize', function () {
   if (_gridResizeTimer) clearTimeout(_gridResizeTimer);
   _gridResizeTimer = setTimeout(function () {
     _gridResizeTimer = 0;
-    updateGridColumns();
+    updateGridColumns(undefined, true);
   }, 150);
 });
 
