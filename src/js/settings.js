@@ -91,6 +91,7 @@ const domSettings = {
   // 卡片尺寸
   backupMode: document.getElementById('setting-backup-mode'),
   backupRemindDays: document.getElementById('setting-backup-remind-days'),
+  backupIncludeImages: document.getElementById('setting-backup-include-images'),
 
   cardWidth:     document.getElementById('setting-card-width'),
   cardWidthVal:  document.getElementById('card-width-val'),
@@ -154,6 +155,7 @@ function populateSettingsForm(settings) {
   if (domSettings.toggleDisableWheelSwitch) domSettings.toggleDisableWheelSwitch.checked = settings.disableWheelSwitch === true;
   if (domSettings.backupMode) domSettings.backupMode.value = settings.backupMode || 'off';
   if (domSettings.backupRemindDays) domSettings.backupRemindDays.value = settings.backupRemindDays || 7;
+  if (domSettings.backupIncludeImages) domSettings.backupIncludeImages.checked = settings.backupIncludeImages !== false;
   _updateBackupModeUI();
   if (domSettings.toggleLock) domSettings.toggleLock.checked = settings.isLocked === true;
   if (domSettings.toggleShowGroupIndicator) domSettings.toggleShowGroupIndicator.checked = settings.showGroupIndicator !== false;
@@ -446,6 +448,7 @@ function collectSettingsFromForm() {
     disableWheelSwitch: domSettings.toggleDisableWheelSwitch ? domSettings.toggleDisableWheelSwitch.checked : false,
     backupMode: domSettings.backupMode ? domSettings.backupMode.value : 'off',
     backupRemindDays: domSettings.backupRemindDays ? parseInt(domSettings.backupRemindDays.value, 10) : 7,
+    backupIncludeImages: domSettings.backupIncludeImages ? domSettings.backupIncludeImages.checked : true,
     showGroupName: domSettings.groupNameMode ? domSettings.groupNameMode.value : 'all',
     showGroupIndicator: domSettings.toggleShowGroupIndicator ? domSettings.toggleShowGroupIndicator.checked : true,
     dashboardLayout: domSettings.dashboardLayout ? domSettings.dashboardLayout.value : 'row',
@@ -600,6 +603,9 @@ function bindSettingsEvents() {
       domSettings.weatherRefreshVal.textContent = this.value + '分钟';
     });
     domSettings.weatherRefresh.addEventListener('change', onSettingChanged);
+  }
+  if (domSettings.backupIncludeImages) {
+    domSettings.backupIncludeImages.addEventListener('change', onSettingChanged);
   }
 
   // 壁纸模式切换 → 显示/隐藏对应控件

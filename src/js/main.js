@@ -130,11 +130,17 @@ async function init() {
   // v1.2.1: 打开页面后延迟自动备份（12h 限频 + 冲突检测）
   setTimeout(function () {
     _autoBackupIfNeeded();
+    // v1.3.3: 启动时顺带处理失败重试队列
+    if (typeof _processBackupRetry === 'function') _processBackupRetry();
   }, 5000);
 
   // v1.0.7: 离线指示器
   if (!navigator.onLine) document.body.classList.add('offline');
-  window.addEventListener('online', function () { document.body.classList.remove('offline'); });
+  window.addEventListener('online', function () {
+    document.body.classList.remove('offline');
+    // v1.3.3: 恢复联网后立即尝试补做失败的云端备份
+    if (typeof _processBackupRetry === 'function') _processBackupRetry();
+  });
   window.addEventListener('offline', function () { document.body.classList.add('offline'); });
 
   // 点击页面空白处自动聚焦搜索框（新标签页焦点在地址栏，需用户先点一下页面）
@@ -204,7 +210,8 @@ async function _autoBackupIfNeeded() {
       // v1.2.8: 自动备份走增量路径
       var data = await _collectAllData();
       if (typeof _incrementalBackup === 'function') {
-        await _incrementalBackup(data, true);
+        var incOk = await _incrementalBackup(data, true);
+        if (incOk === false) throw new Error('增量备份返回失败');
       } else {
         var zipBlob = await _buildZipBlob(data);
         var fname = _genBackupFilename();
@@ -213,7 +220,12 @@ async function _autoBackupIfNeeded() {
         setWebdavLastBackup(new Date().toISOString());
         webdavCleanupBackups(5).catch(function () {});
       }
-    } catch (e) { /* 静默 */ }
+      // v1.3.3: 成功则清空重试队列
+      if (typeof _clearBackupRetry === 'function') await _clearBackupRetry();
+    } catch (e) {
+      // v1.3.3: 失败不再静默丢弃 → 入重试队列（联网/下次启动按退避重试）
+      if (typeof _enqueueBackupRetry === 'function') await _enqueueBackupRetry(e.message || 'auto backup failed');
+    }
     return;
   }
 

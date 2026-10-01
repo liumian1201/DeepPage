@@ -91,6 +91,7 @@ var DEFAULT_SETTINGS = {
   backupRemind: true,
   backupMode: 'off',
   backupRemindDays: 7,
+  backupIncludeImages: true,   // v1.3.3: 关闭则云端只同步配置（不含图片）
   cardThemeColor: true
 };
 

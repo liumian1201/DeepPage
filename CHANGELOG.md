@@ -12,6 +12,11 @@
 
 > 实测说明：本机 headless Chromium 下首屏 JS 执行仅 4ms、静态 DOM 仅 637 个节点，脚本层可优化空间有限（首卡出现中位数 ~80ms，改动前后在噪声范围内）；本版实际收益集中在「设置面板初始化」与「遗留数据不再阻塞渲染」两处。
 
+### ☁️ WebDAV 备份增强
+- **配置快照完整性校验**：备份时把配置快照的 sha256 记入 manifest，恢复时比对；不匹配（云端文件损坏/被截断）直接中止并提示，不再静默导入坏数据；旧备份无 sha256 时自动跳过校验
+- **「仅配置」备份模式**：WebDAV 区新增「备份包含图片」开关（`backupIncludeImages`，默认开）。关闭后只上传配置快照、跳过图片上传，省流量与时间；恢复该版本时会提示不含图片
+- **失败重试队列**：云端备份失败不再静默丢弃 —— 写入 `chrome.storage.local` 队列（记录 attempts/reason/nextAt），在**恢复联网**与**下次启动**时按退避重试（2min → 10min → 30min），成功即清空队列；累计 4 次仍失败则停止并提示手动备份
+
 ### ♿ 无障碍（ARIA）
 - **弹窗语义**：11 个弹窗容器补 `role="dialog"` + `aria-modal="true"` + `aria-labelledby`（指向各自标题，标题缺 id 的补上）
 - **搜索框**：`role="searchbox"` + `aria-label`；本地卡片搜索下拉 `role="listbox"`，结果项 `role="option"`，并同步 `aria-expanded` / `aria-activedescendant`

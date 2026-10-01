@@ -344,7 +344,29 @@ function send(method, params, sessionId) {
   await evalJs('(() => { const i = document.getElementById("search-input"); i.value = ""; i.dispatchEvent(new Event("input", { bubbles: true })); i.blur(); return "ok"; })()');
   await sleep(300);
 
-  console.log('\n[8] 页面无 JS 报错');
+  console.log('\n[8] P1-8 备份增强（sha256 / 仅配置 / 重试队列）');
+  check('computeSHA256Text 结果正确', (await evalJs('computeSHA256Text("abc")')) === 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+  check('computeSHA256Text 同输入稳定', (await evalJs('(async () => (await computeSHA256Text("deeppage")) === (await computeSHA256Text("deeppage")))()')) === true);
+  check('computeSHA256Text 不同输入不同结果', (await evalJs('(async () => (await computeSHA256Text("a")) !== (await computeSHA256Text("b")))()')) === true);
+
+  await evalJs('(() => { const c = document.getElementById("setting-backup-include-images"); c.checked = false; c.dispatchEvent(new Event("change", { bubbles: true })); return "ok"; })()');
+  await sleep(700);
+  check('关闭「备份包含图片」写入设置', (await evalJs('currentSettings.backupIncludeImages')) === false);
+  await evalJs('(() => { const c = document.getElementById("setting-backup-include-images"); c.checked = true; c.dispatchEvent(new Event("change", { bubbles: true })); return "ok"; })()');
+  await sleep(700);
+  check('重新开启写回 true', (await evalJs('currentSettings.backupIncludeImages')) === true);
+
+  await evalJs('_clearBackupRetry()');
+  const job1 = JSON.parse(await evalJs('(async () => { await _enqueueBackupRetry("probe"); return JSON.stringify(await _getBackupRetry()); })()'));
+  check('入队记录 attempts 与 nextAt', job1.attempts === 1 && typeof job1.nextAt === 'number' && job1.reason === 'probe', job1);
+  check('退避时间在未来', (await evalJs('(async () => { const j = await _getBackupRetry(); return j.nextAt > Date.now(); })()')) === true);
+  check('未到退避时间时不执行重试', (await evalJs('(async () => await _processBackupRetry())()')) === false);
+  const job4 = JSON.parse(await evalJs('(async () => { await _enqueueBackupRetry("p2"); await _enqueueBackupRetry("p3"); await _enqueueBackupRetry("p4"); return JSON.stringify(await _getBackupRetry()); })()'));
+  check('累计 attempts 达 4 次', job4.attempts === 4, job4);
+  check('超过上限时清理队列', (await evalJs('(async () => { await _processBackupRetry(); return (await _getBackupRetry()) === null; })()')) === true);
+  await evalJs('_clearBackupRetry()');
+
+  console.log('\n[9] 页面无 JS 报错');
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);

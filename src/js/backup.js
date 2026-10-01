@@ -428,6 +428,68 @@ async function computeSHA256(blob) {
   return hex;
 }
 
+/** v1.3.3: 文本 sha256（用于配置快照完整性校验） */
+async function computeSHA256Text(text) {
+  var bytes = new TextEncoder().encode(text);
+  var hash = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(hash)).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+}
+
+/* ==================== v1.3.3: 备份重试队列 ====================
+   云端备份失败（断网/服务不可达）不再静默丢弃：写入 local 队列，联网或下次启动时按退避重试。
+   最多 3 次，之后清除并提示用户手动备份。
+*/
+var BACKUP_RETRY_KEY = 'webdav_retry_job';
+var BACKUP_RETRY_MAX = 3;
+var BACKUP_RETRY_BACKOFF_MS = [2 * 60 * 1000, 10 * 60 * 1000, 30 * 60 * 1000];
+
+function _enqueueBackupRetry(reason) {
+  return new Promise(function (resolve) {
+    chrome.storage.local.get([BACKUP_RETRY_KEY], function (r) {
+      var job = r[BACKUP_RETRY_KEY] || { attempts: 0 };
+      job.attempts = (job.attempts || 0) + 1;
+      job.reason = reason || job.reason || 'unknown';
+      job.lastAttemptAt = new Date().toISOString();
+      job.nextAt = Date.now() + (BACKUP_RETRY_BACKOFF_MS[Math.min(job.attempts - 1, BACKUP_RETRY_BACKOFF_MS.length - 1)]);
+      chrome.storage.local.set({ [BACKUP_RETRY_KEY]: job }, function () { resolve(job); });
+    });
+  });
+}
+
+function _clearBackupRetry() {
+  return new Promise(function (resolve) { chrome.storage.local.remove([BACKUP_RETRY_KEY], resolve); });
+}
+
+function _getBackupRetry() {
+  return new Promise(function (resolve) {
+    chrome.storage.local.get([BACKUP_RETRY_KEY], function (r) { resolve(r[BACKUP_RETRY_KEY] || null); });
+  });
+}
+
+/** 有待重试任务且已到退避时间 → 静默重试一次 */
+async function _processBackupRetry() {
+  var job = await _getBackupRetry();
+  if (!job) return false;
+  if (job.attempts >= BACKUP_RETRY_MAX) {
+    await _clearBackupRetry();
+    if (typeof showToast === 'function') showToast('⚠️ 云端备份连续失败 ' + job.attempts + ' 次，已停止重试，请手动备份', 'warning');
+    return false;
+  }
+  if (!navigator.onLine) return false;
+  if (job.nextAt && Date.now() < job.nextAt) return false;
+  try {
+    var data = await _collectAllData();
+    var ok = await _incrementalBackup(data, true);
+    if (ok === false) throw new Error('备份返回失败');
+    await _clearBackupRetry();
+    if (typeof showToast === 'function') showToast('✅ 云端备份重试成功', 'success');
+    return true;
+  } catch (e) {
+    await _enqueueBackupRetry(e.message || 'retry failed');
+    return false;
+  }
+}
+
 /** 进度弹窗 DOM 引用与状态 */
 var _progressState = { cancelled: false };
 
@@ -523,7 +585,9 @@ async function _doFirstMigration() {
 /** 增量备份主函数 */
 async function _incrementalBackup(data, isSilent) {
   var config = data.config;
-  var images = data.images;
+  // v1.3.3: 「仅配置」模式跳过图片，只上传配置快照（省流量/时间）
+  var configOnly = !!(config.settings && config.settings.backupIncludeImages === false);
+  var images = configOnly ? [] : data.images;
   var totalImages = images.length;
 
   // 显示进度
@@ -629,9 +693,17 @@ async function _incrementalBackup(data, isSilent) {
       return false;
     }
 
-    // 更新 configs 列表
+    // 更新 configs 列表（v1.3.3: 记录配置快照的 sha256，恢复时校验完整性）
     var configs = manifest.configs || [];
-    configs.unshift({ name: configName, time: new Date().toISOString(), cardCount: _countCards(config.groups) });
+    var configSha = null;
+    try { configSha = await computeSHA256Text(JSON.stringify(configSnapshot)); } catch (e) { configSha = null; }
+    configs.unshift({
+      name: configName,
+      time: new Date().toISOString(),
+      cardCount: _countCards(config.groups),
+      sha256: configSha,
+      configOnly: configOnly
+    });
     // 保留最近 5 个 config
     var oldConfigs = configs.slice(5);
     configs = configs.slice(0, 5);
@@ -811,6 +883,24 @@ async function _doIncrementalRestore(configName) {
     // 1. 下载配置快照
     var config = await webdavGetConfig(configName);
     if (!config || !config.groups) throw new Error('配置快照无效');
+
+    // v1.3.3: 完整性校验 —— 用 manifest 里记录的 sha256 比对，损坏/截断时中止
+    try {
+      var manifestForCheck = await webdavGetManifest();
+      var entry = (manifestForCheck && manifestForCheck.configs || []).find(function (c) { return c.name === configName; });
+      if (entry && entry.sha256) {
+        var actual = await computeSHA256Text(JSON.stringify(config));
+        if (actual !== entry.sha256) {
+          if (loading) loading.classList.add('hidden');
+          throw new Error('配置快照校验失败（sha256 不匹配），已中止恢复');
+        }
+      } else if (entry && entry.configOnly && typeof showToast === 'function') {
+        showToast('ℹ️ 该备份为「仅配置」模式，不包含图片', 'info');
+      }
+    } catch (e) {
+      if (/校验失败/.test(e.message)) throw e;
+      console.warn('[恢复] 完整性校验跳过:', e.message);
+    }
 
     // 2. 按需下载图片
     var imageRefs = config.imageRefs || {};
