@@ -216,6 +216,25 @@ DeepPage/
 
 ---
 
+## 🧪 本地开发与校验
+
+开发工具链只在仓库根目录，**不随扩展发布**（打包只取 `src/`）：
+
+```bash
+npm ci                # 安装 ESLint（唯一的开发依赖）
+npm run lint          # ESLint：未定义变量 / 重复声明 / 变量遮蔽 / 误用 == 等
+npm test              # 看板顺序逻辑桩测（零依赖，纯 Node）
+npm run test:e2e      # 真实浏览器 E2E（headless Chromium + CDP，无需 Playwright）
+npm run verify        # lint + 逻辑测试（提交前跑这个）
+npm run bump 1.3.2    # 版本号单一来源：manifest + package.json + README 徽章 + CHANGELOG 日期
+```
+
+- E2E 脚本用 `CHROME_BIN` 指定浏览器路径（默认 `/usr/bin/chromium`），找不到浏览器会优雅跳过。
+- 发版：`npm run bump <版本号>` → 补 CHANGELOG → 提交 → `git tag v<版本号>` → push。CI 会强制校验 tag 与 `manifest.json` 版本一致，不一致直接失败。
+- 代码规范：ESLint 配置里已按本项目「多脚本共享全局作用域」的架构自动收集跨文件符号，新增模块无需手工登记；测试脚本说明见 [tests/README.md](./tests/README.md)。
+
+---
+
 ## 🤝 贡献
 
 欢迎提交 Issue 和 Pull Request！

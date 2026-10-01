@@ -53,9 +53,6 @@ const LUNAR_DAYS = [
  */
 function getLunarDate(date) {
   date = date || new Date();
-  const year = date.getFullYear();
-  const month = date.getMonth() + 1;
-  const day = date.getDate();
 
   // 计算从 1900-01-31（农历 1900 年正月初一）到目标日期的天数差
   const baseDate = new Date(1900, 0, 31);
@@ -174,9 +171,9 @@ function initLunar() {
   const delay = tomorrow - now + 1000;
   // BUG-033: 递归 setTimeout 每次重新校准到次日 00:00:01，避免 setInterval 累积漂移
   function scheduleNext() {
-    var now = new Date();
-    var next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-    var ms = next - now + 1000;
+    var nowTs = new Date();
+    var next = new Date(nowTs.getFullYear(), nowTs.getMonth(), nowTs.getDate() + 1);
+    var ms = next - nowTs + 1000;
     setTimeout(function () {
       updateLunarDisplay();
       scheduleNext();

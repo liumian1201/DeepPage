@@ -14,12 +14,10 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 获取版本号
         id: version
@@ -70,6 +68,25 @@ jobs:
           done
           if [ "$FAIL" != "0" ]; then exit 1; fi
           echo "✅ JS 语法检查通过"
+
+      # v1.3.2: 发布前跑完整校验（lint + 逻辑测试），坏代码不进发布包
+      - name: 安装 Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 版本号全局一致性
+        run: node tools/bump-version.mjs --check --strict
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: 看板逻辑测试
+        run: npm test
 
       - name: 检查私钥状态
         id: key_check
@@ -134,7 +151,7 @@ jobs:
           echo "📦 发布文件: $FILES"
 
       - name: 创建 GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: "DeepPage v${{ steps.version.outputs.VERSION }}"
           body_path: /tmp/changelog.md

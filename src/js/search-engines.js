@@ -312,14 +312,13 @@ function _selectLocalSearchResult(index) {
   if (!item || !item.card || !item.card.url) return;
 
   // 复用全局 cardOpenMode + 访问计数
+  var mode = (typeof currentSettings !== 'undefined' && currentSettings) ? currentSettings.cardOpenMode : 'current';
   if (typeof incrementVisitCount === 'function') {
     // 需要先确保 card 在 speeddials 中可被找到，此处用卡片的 id 直接调
     // incrementVisitCount 仅搜当前分组，但搜索结果可能跨组 → 直接计数当前分组同名 ID
-    var mode = (typeof currentSettings !== 'undefined' && currentSettings) ? currentSettings.cardOpenMode : 'current';
     incrementVisitCount(item.card.id, mode === 'foreground');
   }
 
-  var mode = (typeof currentSettings !== 'undefined' && currentSettings) ? currentSettings.cardOpenMode : 'current';
   if (mode === 'foreground') {
     chrome.tabs.create({ url: item.card.url, active: true });
   } else if (mode === 'background') {

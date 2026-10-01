@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '_private/**'
+      - '**.md'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 安装 Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 版本号一致性
+        run: node tools/bump-version.mjs --check
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: 看板逻辑测试
+        run: npm test
+
+      - name: 真实浏览器 E2E
+        run: |
+          CHROME=$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)
+          if [ -z "$CHROME" ]; then
+            echo "⚠️ 未找到 Chrome/Chromium，跳过 E2E"
+            exit 0
+          fi
+          echo "使用浏览器: $CHROME"
+          CHROME_BIN="$CHROME" npm run test:e2e

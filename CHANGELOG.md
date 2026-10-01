@@ -1,5 +1,23 @@
 # DeepPage 更新日志
 
+## v1.3.2 (待发布) — 开发工具链与代码清理
+
+### 🛠️ 工程
+- **ESLint 护栏**：新增 `eslint.config.mjs`（ESLint 10 flat config）。针对本项目「16 个经典脚本共享全局作用域」的架构，跨文件符号由配置加载时扫描 `src/js/*.js` 顶层声明自动收集，新增模块无需手工登记；只拦运行时问题（未定义变量、重复声明、变量遮蔽、误用 `==`、不可达代码），不争论格式
+- **npm scripts**：`npm run lint` / `npm test` / `npm run test:e2e` / `npm run verify`
+- **版本号单一来源**：新增 `tools/bump-version.mjs`，一条命令同步 `manifest.json` + `package.json` + README 徽章 + CHANGELOG 日期；`--check` 供 CI 校验一致性，`--check --strict` 供发版流程卡住「待发布」状态
+- **CI**：新增 `.github/workflows/ci.yml`（push/PR 跑 版本一致性 + ESLint + 看板逻辑测试 + 真实浏览器 E2E）；release 流程升级为 `actions/checkout@v7` / `actions/setup-node@v7` / `softprops/action-gh-release@v3`，发布前增加 `npm ci` + lint + 测试门禁
+- **测试脚本入库**：零依赖验证脚本迁到公开仓库 `tests/`（逻辑桩测 + headless Chromium E2E），支持 `CHROME_BIN` 指定浏览器，无浏览器时优雅跳过
+
+### 🧹 代码清理（ESLint 首轮发现）
+- `search-engines.js`：本地搜索结果打开逻辑中 `var mode` 重复声明，收敛为单次声明（与 BUG-024 同类的作用域隐患）
+- `weather.js`：`weatherMeta` / `coords` 同函数内重复声明，改为复用已有绑定
+- `groups.js`：删除 `deleteGroup` 中已无用途的 `var cards`；分组指示器渲染的 `cls` 收敛为单次声明
+- `lunar.js`：删除 `getLunarDate` 中未使用的 `year/month/day`；`initLunar` 内部 `now` 遮蔽改名 `nowTs`
+- `cards.js`：`gi == activeGroupIndex`（字符串键与数字索引比较）加注释说明为有意为之，避免误改
+
+---
+
 ## v1.3.1 (2026-10-02) — 稳定性补丁
 
 ### 🧩 看板编辑态

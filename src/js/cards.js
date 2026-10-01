@@ -172,6 +172,7 @@ function _showCurrentGroup() {
   _syncCardHeights();
 
   Object.keys(_groupContainers).forEach(function (gi) {
+    // eslint-disable-next-line eqeqeq -- gi 是对象键（字符串），必须与数字索引宽松比较
     _groupContainers[gi].style.display = gi == activeGroupIndex ? 'contents' : 'none';
   });
 }

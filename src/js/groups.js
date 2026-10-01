@@ -18,10 +18,11 @@ function renderGroupDots() {
   var isTab = pos === 'top' || pos === 'bottom';
 
   groups.forEach(function (g, i) {
+    var cls;
     if (isTab) {
       if (mode === 'off') {
         // 不显示：圆点
-        var cls = i === activeGroupIndex ? 'group-dot active' : 'group-dot';
+        cls = i === activeGroupIndex ? 'group-dot active' : 'group-dot';
         html += '<div class="' + cls + '" data-group="' + i + '" title="' + escapeHtml(g.name || '未命名') + '"></div>';
       } else if (mode === 'active') {
         // 仅当前：当前组文字，其他圆点
@@ -32,11 +33,11 @@ function renderGroupDots() {
         }
       } else {
         // 全部：文字标签
-        var cls = i === activeGroupIndex ? 'group-tab active' : 'group-tab';
+        cls = i === activeGroupIndex ? 'group-tab active' : 'group-tab';
         html += '<div class="' + cls + '" data-group="' + i + '" title="' + escapeHtml(g.name || '未命名') + '">' + escapeHtml(g.name || '未命名') + '</div>';
       }
     } else {
-      var cls = i === activeGroupIndex ? 'group-dot active' : 'group-dot';
+      cls = i === activeGroupIndex ? 'group-dot active' : 'group-dot';
       var showName = mode === 'all' || (mode === 'active' && i === activeGroupIndex);
       var nameExtra = (mode === 'all') ? ' style="opacity:1"' : '';
       var nameLabel = showName ? '<span class="group-dot-name"' + nameExtra + '>' + escapeHtml(g.name || '未命名') + '</span>' : '';
@@ -128,8 +129,6 @@ async function doDeleteGroup() {
 
   // v1.2.1: 不在此处删除 IndexedDB 图片（保留给 bak 恢复用，GC 后续清理）
   // 原 deleteCardIcon 调用已移除
-
-  var cards = g.cards || [];
 
   groups.splice(index, 1);
   if (activeGroupIndex >= groups.length) activeGroupIndex = groups.length - 1;

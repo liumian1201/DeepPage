@@ -132,7 +132,7 @@ async function fetchAndDisplayWeather(settings) {
     else if (type === 'openweathermap') { weatherData = await fetchOpenWeatherMapWeather(settings); }
     else if (type === 'custom') { weatherData = await fetchCustomWeather(settings); }
     else { throw new Error('未知数据源'); }
-    var weatherMeta = await setWeatherCache(weatherData, type, settings.weatherCity || weatherData.city || '');
+    weatherMeta = await setWeatherCache(weatherData, type, settings.weatherCity || weatherData.city || '');
     renderWeather(weatherData, type, weatherMeta);
   } catch (err) {
     console.error('Weather error:', err);
@@ -178,7 +178,7 @@ async function getOpenMeteoCoords(settings) {
     } catch (e) {}
   }
   if (cached && cached.lat) return cached;
-  var coords = { lat: 39.9042, lon: 116.4074, city: city || '北京', source: 'default' };
+  coords = { lat: 39.9042, lon: 116.4074, city: city || '北京', source: 'default' };
   chrome.storage.local.set({ [OM_GEO_CACHE_KEY]: coords });
   return coords;
 }

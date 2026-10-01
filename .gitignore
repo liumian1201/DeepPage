@@ -15,9 +15,9 @@ desktop.ini
 *.swo
 *~
 
-# Node.js（如有）
+# Node.js 开发工具链（不随扩展发布，打包只取 src/）
 node_modules/
-package-lock.json
+# 注：package-lock.json 必须入库 —— CI 用 `npm ci` 复现依赖
 
 # 临时文件
 *.tmp
