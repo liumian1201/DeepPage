@@ -102,6 +102,8 @@ async function init() {
   setTimeout(_checkDashboardCollision, 500);
   window.addEventListener('resize', _debounceCollisionCheck);
   bindMainEvents();
+  // v1.3.3: 无障碍（焦点管理 / 图标按钮标注 / tab 状态 / Toast 播报）
+  if (typeof initA11y === 'function') initA11y();
   if (currentSettings && currentSettings.showClock) {
     initClock();
   }
@@ -762,6 +764,8 @@ function setLocked(state, silent) {
 /* ==================== Toast 通知 ==================== */
 function showToast(message, type) {
   type = type || 'info';
+  // v1.3.3: 保证 Toast 容器是 live region（屏幕阅读器播报）
+  if (typeof _a11yEnsureToastLiveRegion === 'function') _a11yEnsureToastLiveRegion();
   var container = document.querySelector('.toast-container');
   if (!container) {
     container = document.createElement('div');

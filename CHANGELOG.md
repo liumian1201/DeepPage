@@ -12,6 +12,15 @@
 
 > 实测说明：本机 headless Chromium 下首屏 JS 执行仅 4ms、静态 DOM 仅 637 个节点，脚本层可优化空间有限（首卡出现中位数 ~80ms，改动前后在噪声范围内）；本版实际收益集中在「设置面板初始化」与「遗留数据不再阻塞渲染」两处。
 
+### ♿ 无障碍（ARIA）
+- **弹窗语义**：11 个弹窗容器补 `role="dialog"` + `aria-modal="true"` + `aria-labelledby`（指向各自标题，标题缺 id 的补上）
+- **搜索框**：`role="searchbox"` + `aria-label`；本地卡片搜索下拉 `role="listbox"`，结果项 `role="option"`，并同步 `aria-expanded` / `aria-activedescendant`
+- **设置面板**：`role="dialog"` + `aria-label`；tab 补 `role="tablist"/"tab"/"tabpanel"` 与 `aria-selected` 同步
+- **焦点管理（新增 `js/a11y.js`）**：弹窗打开时焦点移入、关闭后归还给打开前的元素。实现上监听 overlay 的 `hidden` 类变化即可，无需改动各 open/close 函数；归还目标通过 `focusin` 历史回溯 —— 各 `open*` 是「先移除 hidden 再同步 focus 输入框」，MutationObserver 是微任务，回调时读 `activeElement` 会记错目标（实测踩到过）
+- **纯图标按钮**：自动用 `title` 补 `aria-label`（动态生成的卡片编辑/删除按钮在模板里显式标注）
+- **Toast**：容器为 `role="status" aria-live="polite"`，屏幕阅读器可播报
+- **分组指示器**：动态圆点补 `role="button"` + `aria-label` + `aria-current`
+
 ### 🔄 存储写入合并
 - **新增写入合并层**：`chrome.storage.sync` 有 `MAX_WRITE_OPERATIONS_PER_MINUTE = 120` 的硬配额，超限时写入会**静默失败**（原先 `saveToStorage` 直接吞掉 `lastError`）。现在对「高频且可重建」的数据做合并写：同一 key 在 500ms 窗口内只写最后一次（理论上限 120 次/分钟，正好卡在配额内），并在写入失败时打印告警
 - **接入高频路径**：滚轮连续切分组（`saveGroups(..., { coalesce: true })` + `saveActiveGroup`）、连点卡片的访问计数、设置变更（滑块/开关/引擎切换）

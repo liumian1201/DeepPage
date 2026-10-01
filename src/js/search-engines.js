@@ -266,7 +266,7 @@ function renderLocalSearchDropdown(originalQuery, total) {
     keywords.forEach(function (kw) {
       name = name.replace(new RegExp('(' + escapeRegExp(kw) + ')', 'gi'), '<mark>$1</mark>');
     });
-    html += '<div class="local-search-item" data-index="' + i + '">' +
+    html += '<div class="local-search-item" role="option" id="ls-opt-' + i + '" aria-selected="false" data-index="' + i + '">' +
       '<span class="ls-name">' + name + '</span>' +
       '<span class="ls-badge">📁 ' + escapeHtml(item.groupName) + '</span>' +
       '</div>';
@@ -297,11 +297,17 @@ function renderLocalSearchDropdown(originalQuery, total) {
   });
 
   dd.classList.remove('hidden');
+  // v1.3.3: listbox 展开状态同步给输入框（屏幕阅读器）
+  var input = document.getElementById('search-input');
+  if (input) input.setAttribute('aria-expanded', 'true');
 }
 
 function hideLocalSearchDropdown() {
   var dd = document.getElementById('local-search-dropdown');
   if (dd) dd.classList.add('hidden');
+  // v1.3.3: 收起时同步 aria 状态
+  var input = document.getElementById('search-input');
+  if (input) { input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); }
   _localSearchResults = [];
   _localSearchIndex = -1;
 }
@@ -337,8 +343,15 @@ function _updateLocalSearchHighlight() {
   var items = list.querySelectorAll('.local-search-item');
   items.forEach(function (el) {
     var idx = parseInt(el.dataset.index, 10);
-    el.classList.toggle('active', idx === _localSearchIndex);
+    var active = idx === _localSearchIndex;
+    el.classList.toggle('active', active);
+    el.setAttribute('aria-selected', active ? 'true' : 'false');   // v1.3.3
   });
+  // v1.3.3: 高亮项同步给输入框
+  var input = document.getElementById('search-input');
+  if (input && _localSearchIndex >= 0 && items[_localSearchIndex]) {
+    input.setAttribute('aria-activedescendant', 'ls-opt-' + _localSearchIndex);
+  }
   if (_localSearchIndex >= 0 && items[_localSearchIndex]) {
     items[_localSearchIndex].scrollIntoView({ block: 'nearest' });
   }

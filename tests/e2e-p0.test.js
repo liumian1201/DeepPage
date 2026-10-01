@@ -298,7 +298,53 @@ function send(method, params, sessionId) {
   check('结构性改动（不带 coalesce）立即落盘', (await evalJs('window.__writes.filter(k=>k==="groups").length')) === 1, await evalJs('JSON.stringify(window.__writes)'));
   await evalJs('chrome.storage.sync.set = window.__origSet;');
 
-  console.log('\n[7] 页面无 JS 报错');
+  console.log('\n[7] P1-4 ARIA 无障碍');
+  const ariaStatic = JSON.parse(await evalJs(`JSON.stringify((() => {
+    const out = { dialogs: [], missing: [], iconBtns: [] };
+    document.querySelectorAll('.dialog-overlay').forEach(d => {
+      const label = d.getAttribute('aria-labelledby');
+      out.dialogs.push({
+        id: d.id,
+        role: d.getAttribute('role'),
+        modal: d.getAttribute('aria-modal'),
+        labelOk: !!(label && document.getElementById(label)),
+      });
+    });
+    document.querySelectorAll('button').forEach(b => {
+      const text = (b.textContent || '').replace(/\\s/g, '');
+      if (text.length <= 1 && !b.getAttribute('aria-label')) out.iconBtns.push(b.id || b.className);
+    });
+    return out;
+  })())`));
+  check('全部弹窗都有 role=dialog', ariaStatic.dialogs.every(d => d.role === 'dialog'), ariaStatic.dialogs.filter(d => d.role !== 'dialog'));
+  check('全部弹窗都有 aria-modal', ariaStatic.dialogs.every(d => d.modal === 'true'));
+  check('全部弹窗 aria-labelledby 指向存在的元素', ariaStatic.dialogs.every(d => d.labelOk), ariaStatic.dialogs.filter(d => !d.labelOk));
+  check('纯图标按钮均已补 aria-label', ariaStatic.iconBtns.length === 0, ariaStatic.iconBtns);
+  check('搜索框 role=searchbox + aria-label', (await evalJs('document.getElementById("search-input").getAttribute("role")')) === 'searchbox' && (await evalJs('!!document.getElementById("search-input").getAttribute("aria-label")')));
+  check('设置面板 role=dialog + aria-label', (await evalJs('document.getElementById("settings-panel").getAttribute("role")')) === 'dialog');
+  check('tab 有 role=tab 且 aria-selected 唯一', (await evalJs('document.querySelectorAll(\'.settings-tabs [role="tab"][aria-selected="true"]\').length')) === 1);
+  check('Toast 容器是 live region', (await evalJs(`(() => { showToast('a11y 探针', 'info'); const c = document.querySelector('.toast-container'); return c.getAttribute('role') === 'status' && c.getAttribute('aria-live') === 'polite'; })()`)) === true);
+
+  // 焦点管理：打开弹窗焦点进入，关闭后归还
+  await evalJs('document.getElementById("group-add").focus()');
+  const beforeFocus = await evalJs('document.activeElement.id');
+  await evalJs('openAddDialog()');
+  await sleep(200);
+  check('弹窗打开后焦点移入弹窗内', (await evalJs('document.getElementById("dialog-card").contains(document.activeElement)')) === true, await evalJs('document.activeElement.id'));
+  await evalJs('closeDialog()');
+  await sleep(200);
+  const afterFocus = JSON.parse(await evalJs('JSON.stringify({id: document.activeElement.id, tag: document.activeElement.tagName, cls: document.activeElement.className, stack: _a11yFocusReturn.length})'));
+  check('弹窗关闭后焦点归还触发元素', afterFocus.id === beforeFocus, { beforeFocus, afterFocus });
+
+  // 本地搜索下拉的 listbox 语义
+  await evalJs('(() => { const i = document.getElementById("search-input"); i.value = ">git"; i.dispatchEvent(new Event("input", { bubbles: true })); return "ok"; })()');
+  await sleep(300);
+  check('本地搜索下拉 role=listbox 且输入框 aria-expanded=true', (await evalJs('document.getElementById("local-search-dropdown").getAttribute("role")')) === 'listbox' && (await evalJs('document.getElementById("search-input").getAttribute("aria-expanded")')) === 'true');
+  check('搜索结果项为 role=option', (await evalJs('document.querySelectorAll("#local-search-list [role=\\"option\\"]").length')) > 0);
+  await evalJs('(() => { const i = document.getElementById("search-input"); i.value = ""; i.dispatchEvent(new Event("input", { bubbles: true })); i.blur(); return "ok"; })()');
+  await sleep(300);
+
+  console.log('\n[8] 页面无 JS 报错');
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);

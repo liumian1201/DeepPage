@@ -50,13 +50,13 @@
     </div>
 
     <!-- ===== 搜索栏区域 ===== -->
-    <section class="search-section">
+    <section class="search-section" role="search">
       <div class="search-wrapper">
         <label for="search-input" class="sr-only">搜索网页</label>
         <span id="search-engine-icon" class="search-engine-icon" title="当前搜索引擎">🔍</span>        <div id="search-engine-dropdown" class="search-engine-dropdown hidden">
           <!-- 由 main.js 动态渲染 -->
         </div>
-        <div id="local-search-dropdown" class="local-search-dropdown hidden">
+        <div id="local-search-dropdown" class="local-search-dropdown hidden" role="listbox" aria-label="本地卡片搜索结果">
           <div id="local-search-list" class="local-search-list"></div>
           <div id="local-search-footer" class="local-search-footer"></div>
         </div>
@@ -64,6 +64,10 @@
           type="text"
           id="search-input"
           class="search-input"
+          role="searchbox"
+          aria-label="搜索网页或本地卡片"
+          aria-controls="local-search-dropdown"
+          aria-expanded="false"
           placeholder="搜索网页...（/ 聚焦 | > 搜本地卡片）"
           autocomplete="off"
           autofocus
@@ -109,24 +113,24 @@
     <button id="btn-dash-done" class="btn-dash-done" title="完成编辑">✅ 完成</button>
 
     <!-- ===== 设置面板（默认隐藏） ===== -->
-    <div id="settings-panel" class="settings-panel hidden">
+    <div id="settings-panel" class="settings-panel hidden" role="dialog" aria-modal="true" aria-label="设置面板">
       <div class="settings-panel-header">
         <h2>设置</h2>
         <button id="btn-settings-close" class="btn-close" title="关闭">&times;</button>
       </div>
       <div class="settings-panel-body">
 
-        <div class="settings-tabs">
-          <button class="tab-btn active" data-tab="general">⚙️ 功能</button>
-          <button class="tab-btn" data-tab="dashboard">📊 看板</button>
-          <button class="tab-btn" data-tab="appearance">🎨 外观</button>
-          <button class="tab-btn" data-tab="wallpaper">🖼️ 壁纸</button>
-          <button class="tab-btn" data-tab="weather">🌤️ 天气</button>
-          <button class="tab-btn" data-tab="data">💾 数据</button>
+        <div class="settings-tabs" role="tablist" aria-label="设置分类">
+          <button id="tab-btn-general" class="tab-btn active" data-tab="general" role="tab" aria-selected="true" aria-controls="tab-general">⚙️ 功能</button>
+          <button id="tab-btn-dashboard" class="tab-btn" data-tab="dashboard" role="tab" aria-selected="false" aria-controls="tab-dashboard">📊 看板</button>
+          <button id="tab-btn-appearance" class="tab-btn" data-tab="appearance" role="tab" aria-selected="false" aria-controls="tab-appearance">🎨 外观</button>
+          <button id="tab-btn-wallpaper" class="tab-btn" data-tab="wallpaper" role="tab" aria-selected="false" aria-controls="tab-wallpaper">🖼️ 壁纸</button>
+          <button id="tab-btn-weather" class="tab-btn" data-tab="weather" role="tab" aria-selected="false" aria-controls="tab-weather">🌤️ 天气</button>
+          <button id="tab-btn-data" class="tab-btn" data-tab="data" role="tab" aria-selected="false" aria-controls="tab-data">💾 数据</button>
         </div>
 
         <!-- ===== 功能 ===== -->
-        <div class="tab-content active" id="tab-general">
+        <div class="tab-content active" id="tab-general" role="tabpanel" aria-labelledby="tab-btn-general">
           <div class="setting-group">
             <div class="toggle-list">
               <label class="toggle-item"><input type="checkbox" id="toggle-lock"> 锁定界面（禁止拖拽、编辑、删除）</label>
@@ -220,7 +224,7 @@
         </div>
 
         <!-- ===== 看板 ===== -->
-        <div class="tab-content" id="tab-dashboard">
+        <div class="tab-content" id="tab-dashboard" role="tabpanel" aria-labelledby="tab-btn-dashboard">
           <div class="setting-group">
             <span class="setting-label">组件开关</span>
             <div class="toggle-list">
@@ -306,7 +310,7 @@
         </div>
 
         <!-- ===== 外观 ===== -->
-        <div class="tab-content" id="tab-appearance">
+        <div class="tab-content" id="tab-appearance" role="tabpanel" aria-labelledby="tab-btn-appearance">
           <div class="settings-section-title">🎨 视觉</div>
           <!-- 信息栏配色 -->
           <div class="setting-group">
@@ -399,7 +403,7 @@
         </div>
 
         <!-- ===== 壁纸 ===== -->
-        <div class="tab-content" id="tab-wallpaper">
+        <div class="tab-content" id="tab-wallpaper" role="tabpanel" aria-labelledby="tab-btn-wallpaper">
           <div class="setting-group">
             <label for="setting-wallpaper-mode">背景壁纸</label>
             <select id="setting-wallpaper-mode"><option value="bing">Bing 每日壁纸</option><option value="custom">自定义图片 URL</option><option value="none">纯色背景</option></select>
@@ -437,7 +441,7 @@
         </div>
 
         <!-- ===== 天气 ===== -->
-        <div class="tab-content" id="tab-weather">
+        <div class="tab-content" id="tab-weather" role="tabpanel" aria-labelledby="tab-btn-weather">
           <div class="setting-group">
             <label for="setting-weather-type">天气数据源</label>
             <select id="setting-weather-type"><option value="openmeteo">Open-Meteo（免费免 Key，推荐）</option><option value="hefeng">和风天气</option><option value="openweathermap">OpenWeatherMap</option><option value="custom">自定义 API</option></select>
@@ -466,7 +470,7 @@
         </div>
 
         <!-- ===== 数据 ===== -->
-        <div class="tab-content" id="tab-data">
+        <div class="tab-content" id="tab-data" role="tabpanel" aria-labelledby="tab-btn-data">
           <p class="backup-hint">一键导出/导入全部数据（配置 + 图片库），兼容旧版 .json 格式。</p>
           <div class="setting-group">
             <span class="setting-label">📦 备份与还原</span>
@@ -542,7 +546,7 @@
     <div id="settings-overlay" class="settings-overlay hidden"></div>
 
     <!-- ===== 添加/编辑卡片弹窗 ===== -->
-    <div id="dialog-card" class="dialog-overlay hidden">
+    <div id="dialog-card" class="dialog-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
       <div class="dialog-card">
         <h3 id="dialog-title">添加快捷方式</h3>
         <input type="text" id="dialog-name" placeholder="网站名称" autocomplete="off">
@@ -563,26 +567,26 @@
     </div>
 
     <!-- ===== 右键上下文菜单 ===== -->
-    <div id="context-menu" class="context-menu hidden">
-      <div class="context-menu-item" data-action="openForeground">🔗 前台打开</div>
-      <div class="context-menu-item" data-action="openBackground">🔗 后台打开</div>
-      <div class="context-menu-item" data-action="copyurl">📋 复制 URL</div>
-      <div class="context-menu-item" data-action="edit">✏️ 编辑</div>
-      <div class="context-menu-item" data-action="capture">📸 刷新截图</div>
-      <div class="context-menu-item has-sub" data-action="moveToGroup">📂 移动到分组 ▸</div>
-      <div class="context-menu-item danger" data-action="delete">🗑️ 删除</div>
+    <div id="context-menu" class="context-menu hidden" role="menu" aria-label="右键菜单">
+      <div role="menuitem" tabindex="-1" class="context-menu-item" data-action="openForeground">🔗 前台打开</div>
+      <div role="menuitem" tabindex="-1" class="context-menu-item" data-action="openBackground">🔗 后台打开</div>
+      <div role="menuitem" tabindex="-1" class="context-menu-item" data-action="copyurl">📋 复制 URL</div>
+      <div role="menuitem" tabindex="-1" class="context-menu-item" data-action="edit">✏️ 编辑</div>
+      <div role="menuitem" tabindex="-1" class="context-menu-item" data-action="capture">📸 刷新截图</div>
+      <div role="menuitem" tabindex="-1" class="context-menu-item has-sub" data-action="moveToGroup">📂 移动到分组 ▸</div>
+      <div role="menuitem" tabindex="-1" class="context-menu-item danger" data-action="delete">🗑️ 删除</div>
       <div class="context-menu-separator"></div>
-      <div class="context-menu-item" data-action="add">➕ 添加</div>
-      <div class="context-menu-item" data-action="refresh">🔄 刷新</div>
-      <div class="context-menu-item" data-action="nextWallpaper">🖼️ 下一张壁纸</div>
-      <div class="context-menu-item" data-action="batchCapture">📸 批量截图未封面卡片</div>
-      <div class="context-menu-item" data-action="settings">⚙️ 设置</div>
+      <div role="menuitem" tabindex="-1" class="context-menu-item" data-action="add">➕ 添加</div>
+      <div role="menuitem" tabindex="-1" class="context-menu-item" data-action="refresh">🔄 刷新</div>
+      <div role="menuitem" tabindex="-1" class="context-menu-item" data-action="nextWallpaper">🖼️ 下一张壁纸</div>
+      <div role="menuitem" tabindex="-1" class="context-menu-item" data-action="batchCapture">📸 批量截图未封面卡片</div>
+      <div role="menuitem" tabindex="-1" class="context-menu-item" data-action="settings">⚙️ 设置</div>
       <div class="context-menu-separator"></div>
-      <div class="context-menu-item danger" data-action="lock">🔒 锁定界面</div>
-      <div class="context-menu-item success" data-action="unlock">🔓 解锁界面</div>
+      <div role="menuitem" tabindex="-1" class="context-menu-item danger" data-action="lock">🔒 锁定界面</div>
+      <div role="menuitem" tabindex="-1" class="context-menu-item success" data-action="unlock">🔓 解锁界面</div>
       <!-- 分组右键菜单 -->
-      <div class="context-menu-item" data-action="groupRename" data-group="-1">✏️ 重命名分组</div>
-      <div class="context-menu-item danger" data-action="groupDelete" data-group="-1">🗑️ 删除分组</div>
+      <div role="menuitem" tabindex="-1" class="context-menu-item" data-action="groupRename" data-group="-1">✏️ 重命名分组</div>
+      <div role="menuitem" tabindex="-1" class="context-menu-item danger" data-action="groupDelete" data-group="-1">🗑️ 删除分组</div>
     </div>
 
     <!-- ===== 壁纸信息与导航按钮 ===== -->
@@ -598,7 +602,7 @@
     </div>
 
     <!-- ===== 分组名称弹窗 ===== -->
-    <div id="dialog-group" class="dialog-overlay hidden">
+    <div id="dialog-group" class="dialog-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="dialog-group-title">
       <div class="dialog-card dialog-confirm-card">
         <h3 id="dialog-group-title">新建分组</h3>
         <input type="text" id="dialog-group-name" placeholder="输入分组名称" autocomplete="off">
@@ -610,9 +614,9 @@
     </div>
 
     <!-- ===== 分组管理器弹窗 ===== -->
-    <div id="dialog-group-manager" class="dialog-overlay hidden">
+    <div id="dialog-group-manager" class="dialog-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="dialog-group-manager-title">
       <div class="dialog-card" style="width:420px">
-        <h3>📂 分组管理器</h3>
+        <h3 id="dialog-group-manager-title">📂 分组管理器</h3>
         <div id="group-manager-list" class="group-manager-list">
           <!-- 由 main.js 动态渲染 -->
         </div>
@@ -625,25 +629,25 @@
     </div>
 
     <!-- ===== 删除确认弹窗 ===== -->
-    <div id="dialog-confirm" class="dialog-overlay hidden">
+    <div id="dialog-confirm" class="dialog-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="dialog-confirm-title">
       <div class="dialog-card dialog-confirm-card">
-        <h3>确认删除</h3>
+        <h3 id="dialog-confirm-title">确认删除</h3>
         <p id="confirm-delete-name">确定要删除此快捷方式吗？</p>
         <label class="confirm-checkbox">
           <input type="checkbox" id="confirm-no-ask">
           不再提示
         </label>
         <div class="dialog-actions">
-          <button id="confirm-cancel" class="btn-secondary">否</button>
-          <button id="confirm-ok" class="btn-primary btn-danger">是</button>
+          <button id="confirm-cancel" class="btn-secondary" aria-label="取消">否</button>
+          <button id="confirm-ok" class="btn-primary btn-danger" aria-label="确认">是</button>
         </div>
       </div>
     </div>
 
     <!-- ===== 首次备份引导弹窗 ===== -->
-    <div id="dialog-backup-guide" class="dialog-overlay hidden">
+    <div id="dialog-backup-guide" class="dialog-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="dialog-backup-guide-title">
       <div class="dialog-card dialog-confirm-card">
-        <h3>📥 首次备份引导</h3>
+        <h3 id="dialog-backup-guide-title">📥 首次备份引导</h3>
         <p style="font-size:14px;color:var(--text-secondary);line-height:1.8;text-align:left;padding:0 8px">
           你已开启<strong>定时提醒模式</strong>。<br>
           DeepPage 需要一次初始备份来<strong>开始计时</strong>，之后会按你设定的周期自动提醒。<br><br>
@@ -657,9 +661,9 @@
     </div>
 
     <!-- ===== 重置确认弹窗 ===== -->
-    <div id="dialog-reset" class="dialog-overlay hidden">
+    <div id="dialog-reset" class="dialog-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="dialog-reset-title">
       <div class="dialog-card" style="width:380px">
-        <h3>⚠️ 重置全部数据</h3>
+        <h3 id="dialog-reset-title">⚠️ 重置全部数据</h3>
         <p style="font-size:14px;color:var(--text-secondary);margin:8px 0;line-height:1.6">
           此操作将永久清除以下所有数据：<br>
           • 所有分组及快捷导航卡片<br>
@@ -678,9 +682,9 @@
 
     <!-- ===== 导入确认弹窗 ===== -->
     <!-- 导入确认 -->
-    <div id="dialog-import-confirm" class="dialog-overlay hidden">
+    <div id="dialog-import-confirm" class="dialog-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="dialog-import-confirm-title">
       <div class="dialog-card dialog-confirm-card">
-        <h3>确认导入</h3>
+        <h3 id="dialog-import-confirm-title">确认导入</h3>
         <p id="import-confirm-msg">导入将覆盖当前数据，确定继续吗？</p>
         <div class="dialog-actions">
           <button id="import-confirm-cancel" class="btn-secondary">取消</button>
@@ -690,9 +694,9 @@
     </div>
 
     <!-- 重复卡片检测 -->
-    <div id="dialog-duplicate" class="dialog-overlay hidden">
+    <div id="dialog-duplicate" class="dialog-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="dialog-duplicate-title">
       <div class="dialog-card dialog-confirm-card">
-        <h3>重复卡片</h3>
+        <h3 id="dialog-duplicate-title">重复卡片</h3>
         <p id="duplicate-msg"></p>
         <div class="dialog-actions">
           <button id="duplicate-cancel" class="btn-secondary">取消</button>
@@ -702,9 +706,9 @@
     </div>
 
     <!-- ===== 搜索引擎管理器 ===== -->
-    <div id="dialog-search-engines" class="dialog-overlay hidden">
+    <div id="dialog-search-engines" class="dialog-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="dialog-search-engines-title">
       <div class="dialog-card" style="width:400px">
-        <h3>🔍 搜索引擎管理</h3>
+        <h3 id="dialog-search-engines-title">🔍 搜索引擎管理</h3>
         <div id="search-engine-list" class="search-engine-list">
           <!-- 由 main.js 动态渲染 -->
         </div>
@@ -722,7 +726,7 @@
     </div>
 
     <!-- ===== v1.2.8: 增量备份进度弹窗 ===== -->
-    <div id="dialog-backup-progress" class="dialog-overlay hidden">
+    <div id="dialog-backup-progress" class="dialog-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="backup-progress-title">
       <div class="dialog-card" style="width:440px">
         <h3 id="backup-progress-title">☁️ 正在备份到云端...</h3>
         <div class="progress-bar-track">
@@ -743,9 +747,9 @@
     </div>
 
     <!-- ===== v1.2.9: 重复卡片检查弹窗 ===== -->
-    <div id="dialog-duplicate-check" class="dialog-overlay hidden">
+    <div id="dialog-duplicate-check" class="dialog-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="dialog-duplicate-check-title">
       <div class="dialog-card" style="width:480px;max-height:70vh;display:flex;flex-direction:column">
-        <h3>🔍 重复卡片检查</h3>
+        <h3 id="dialog-duplicate-check-title">🔍 重复卡片检查</h3>
         <p id="dup-check-msg" style="font-size:14px;color:var(--text-secondary);margin:0"></p>
         <div id="dup-check-list" class="dup-check-list" style="flex:1;overflow-y:auto;margin:8px 0">
           <!-- 动态渲染 -->
@@ -775,6 +779,7 @@
   <script src="js/dashboard.js" defer></script>
   <script src="js/search-engines.js" defer></script>
   <script src="js/contextmenu.js" defer></script>
+  <script src="js/a11y.js" defer></script>
   <script src="js/settings-webdav.js" defer></script>
   <script src="js/main.js" defer></script>
 </body>
