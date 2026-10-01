@@ -366,7 +366,33 @@ function send(method, params, sessionId) {
   check('超过上限时清理队列', (await evalJs('(async () => { await _processBackupRetry(); return (await _getBackupRetry()) === null; })()')) === true);
   await evalJs('_clearBackupRetry()');
 
-  console.log('\n[9] 页面无 JS 报错');
+  console.log('\n[9] P1-9 单分组导出 / 导入');
+  const gid = await evalJs('groups[0].id');
+  const exported = JSON.parse(await evalJs(`(async () => JSON.stringify(await _buildGroupExport("${gid}")))()`));
+  check('导出结构正确', exported.type === 'deeppage-group' && exported.version === 1 && exported.group.name === (await evalJs('groups[0].name')), { type: exported.type, name: exported.group.name });
+  check('导出卡片数与分组一致', exported.group.cards.length === (await evalJs('groups[0].cards.length')), { exported: exported.group.cards.length, actual: await evalJs('groups[0].cards.length') });
+  check('导出卡片含 url/name 字段', exported.group.cards.every(c => !!c.url && !!c.name));
+
+  const beforeCount = await evalJs('groups.length');
+  const imported = JSON.parse(await evalJs(`(async () => JSON.stringify(await _applyGroupImport(${JSON.stringify(exported)})))()`));
+  check('导入后新增一个分组', (await evalJs('groups.length')) === beforeCount + 1);
+  check('导入卡片数一致', imported.cards.length === exported.group.cards.length, { imported: imported.cards.length });
+  check('重名自动加序号', imported.name === exported.group.name + ' (2)', imported.name);
+  const imported2 = JSON.parse(await evalJs(`(async () => JSON.stringify(await _applyGroupImport(${JSON.stringify(exported)})))()`));
+  check('再次导入序号递增', imported2.name === exported.group.name + ' (3)', imported2.name);
+
+  // 内联图片：导入后应落到 IndexedDB 并重映射为 idx: 键
+  const PNG_1PX = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const withImg = { type: 'deeppage-group', version: 1, group: { name: '带图分组', cards: [{ name: 'x', url: 'https://example.com/x', image: 'idx:origin' }] }, images: { 'idx:origin': PNG_1PX } };
+  const imgGroup = JSON.parse(await evalJs(`(async () => JSON.stringify(await _applyGroupImport(${JSON.stringify(withImg)})))()`));
+  check('导入内联图片 → 重映射为 idx: 键', /^idx:/.test(imgGroup.cards[0].image), imgGroup.cards[0].image);
+  check('idx 引用与 IndexedDB 键一致', imgGroup.cards[0].image === 'idx:cardimg_' + imgGroup.cards[0].id, imgGroup.cards[0].image);
+  check('图片确实写入 IndexedDB', (await evalJs(`(async () => { const b = await loadImage('cardimg_${imgGroup.cards[0].id}'); return b ? b.size : 0; })()`)) > 0);
+
+  check('非法文件被拒绝', (await evalJs('(async () => { try { await _applyGroupImport({ foo: 1 }); return "no-throw"; } catch (e) { return "rejected"; } })()')) === 'rejected');
+  check('空 url 卡片被跳过', (await evalJs(`(async () => { const g = await _applyGroupImport({ type: 'deeppage-group', version: 1, group: { name: '脏数据', cards: [{ name: 'a' }, { name: 'b', url: 'https://b.com' }] } }); return g.cards.length; })()`)) === 1);
+
+  console.log('\n[10] 页面无 JS 报错');
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);

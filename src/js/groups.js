@@ -237,6 +237,11 @@ function openGroupManager() {
   var closeBtn = document.getElementById('group-mgr-close');
   var cancelBtn = document.getElementById('group-mgr-cancel');
   var addBtn = document.getElementById('group-mgr-add');
+  var importBtn = document.getElementById('group-mgr-import');
+  if (importBtn) importBtn.onclick = function () {
+    // v1.3.3: 导入分组（导入完成后刷新列表）
+    if (typeof importGroup === 'function') importGroup();
+  };
   if (closeBtn) closeBtn.onclick = closeGroupManager;
   if (cancelBtn) cancelBtn.onclick = closeGroupManager;
   if (addBtn) addBtn.onclick = function () {
@@ -280,6 +285,7 @@ function renderGroupManagerList() {
       '<span class="mgr-card-count">' + cardCount + '</span>' +
       '<input class="group-mgr-name" value="' + escapeHtml(g.name) + '" data-index="' + i + '">' +
       '<div class="group-mgr-actions">' +
+      '<button class="group-mgr-btn" data-action="mgr-export" data-index="' + i + '" title="导出此分组">📤</button>' +
       '<button class="group-mgr-btn" data-action="mgr-up" data-index="' + i + '" title="上移">▲</button>' +
       '<button class="group-mgr-btn" data-action="mgr-down" data-index="' + i + '" title="下移">▼</button>' +
       '<button class="group-mgr-btn danger" data-action="mgr-delete" data-index="' + i + '" title="删除">✕</button>' +
@@ -310,6 +316,9 @@ function renderGroupManagerList() {
         swapGroups(idx, idx - 1);
       } else if (action === 'mgr-down' && idx < groups.length - 1) {
         swapGroups(idx, idx + 1);
+      } else if (action === 'mgr-export') {
+        // v1.3.3: 单分组导出
+        if (typeof exportGroup === 'function' && groups[idx]) exportGroup(groups[idx].id);
       } else if (action === 'mgr-delete') {
         deleteGroup(idx);
         renderGroupManagerList();

@@ -1155,6 +1155,145 @@ function downloadFile(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+/* ==================== v1.3.3: 单分组导出 / 导入 ====================
+   用于把一套 speed dial 分享给别人，或单独备份某个分组。
+   格式：{ type:'deeppage-group', version:1, group:{name, sortMode, cards:[...]}, images:{key: dataURL} }
+   本地图片（IndexedDB 中的 idx: 键）以 dataURL 内联，保证接收方拿到完整分组。
+*/
+
+/** 组装分组导出数据（纯逻辑，便于测试） */
+async function _buildGroupExport(groupId) {
+  var group = (groups || []).find(function (g) { return g.id === groupId; });
+  if (!group) throw new Error('分组不存在');
+  var out = {
+    type: 'deeppage-group',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    group: {
+      name: group.name || '未命名',
+      sortMode: group.sortMode || 'manual',
+      cards: (group.cards || []).map(function (c) {
+        return {
+          name: c.name, url: c.url, color: c.color,
+          visitCount: c.visitCount || 0, createdAt: c.createdAt || 0,
+          lastOpened: c.lastOpened || 0, image: c.image || ''
+        };
+      })
+    },
+    images: {}
+  };
+  // 内联本地图片（仅 idx: 前缀的是 IndexedDB 里的图）
+  for (var i = 0; i < (group.cards || []).length; i++) {
+    var img = group.cards[i].image;
+    if (!img || img.indexOf('idx:') !== 0) continue;
+    try {
+      var blob = await loadImage(img);
+      if (blob) out.images[img] = await new Promise(function (resolve) {
+        var fr = new FileReader();
+        fr.onload = function () { resolve(fr.result); };
+        fr.onerror = function () { resolve(null); };
+        fr.readAsDataURL(blob);
+      });
+    } catch (e) { /* 图片缺失则跳过 */ }
+  }
+  return out;
+}
+
+/** dataURL → Blob（不用 fetch：扩展页 CSP 的 connect-src 不含 data:，会被拦截） */
+function _dataUrlToBlob(dataUrl) {
+  var parts = String(dataUrl).split(',');
+  var mime = (parts[0].match(/:(.*?);/) || [])[1] || 'image/png';
+  var bin = atob(parts[1] || '');
+  var bytes = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+/** 把导出的分组数据写入本地（新增一个分组，图片重新落到 IndexedDB） */
+async function _applyGroupImport(data) {
+  if (!data || data.type !== 'deeppage-group' || !data.group || !Array.isArray(data.group.cards)) {
+    throw new Error('不是有效的 DeepPage 分组文件');
+  }
+  var baseName = (data.group.name || '导入分组').slice(0, 40);
+  var name = baseName;
+  var n = 2;
+  while ((groups || []).some(function (g) { return g.name === name; })) { name = baseName + ' (' + n + ')'; n++; }
+
+  var newGroup = {
+    id: 'g' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+    name: name,
+    sortMode: data.group.sortMode || 'manual',
+    cards: []
+  };
+
+  for (var i = 0; i < data.group.cards.length; i++) {
+    var c = data.group.cards[i];
+    if (!c || !c.url) continue;
+    var card = {
+      id: Date.now() + '_' + i + '_' + Math.floor(Math.random() * 10000),
+      name: c.name || c.url,
+      url: c.url,
+      color: c.color || '#4285f4',
+      visitCount: c.visitCount || 0,
+      createdAt: c.createdAt || Date.now(),
+      lastOpened: c.lastOpened || 0,
+      image: ''
+    };
+    // 恢复内联图片到 IndexedDB，并重映射 image 键
+    if (c.image && data.images && data.images[c.image]) {
+      try {
+        var blob = _dataUrlToBlob(data.images[c.image]);
+        var key = 'cardimg_' + card.id;
+        await saveImage(key, blob);
+        // 约定：image = 'idx:' + IndexedDB 键（cards.js 用 card.image.replace('idx:','') 取值）
+        card.image = 'idx:' + key;
+      } catch (e) { console.warn('[导入分组] 图片恢复失败:', e.message); }
+    } else if (c.image && c.image.indexOf('http') === 0) {
+      card.image = c.image;   // 远端图片 URL 原样保留
+    }
+    newGroup.cards.push(card);
+  }
+
+  groups.push(newGroup);
+  await saveGroups(groups);   // 结构性改动：立即落盘
+  if (typeof renderGroupDots === 'function') renderGroupDots();
+  return newGroup;
+}
+
+/** 导出分组为 .json 文件 */
+async function exportGroup(groupId) {
+  try {
+    var data = await _buildGroupExport(groupId);
+    var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = (data.group.name || 'group').replace(/[\\/:*?"<>|]/g, '_') + '_DeepPage分组.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+    showToast('📤 已导出分组「' + data.group.name + '」（' + data.group.cards.length + ' 张卡片）', 'success');
+  } catch (e) {
+    showToast('导出分组失败: ' + e.message, 'error');
+  }
+}
+
+/** 从文件导入分组 */
+function importGroup() {
+  pickFile('.json', async function (file) {
+    try {
+      var text = await file.text();
+      var data = JSON.parse(text);
+      var g = await _applyGroupImport(data);
+      if (typeof renderSpeeddials === 'function') renderSpeeddials();
+      showToast('📥 已导入分组「' + g.name + '」（' + g.cards.length + ' 张卡片）', 'success');
+    } catch (e) {
+      showToast('导入分组失败: ' + e.message, 'error');
+    }
+  });
+}
+
 function pickFile(accept, callback) {
   var input = document.createElement('input');
   input.type = 'file';
