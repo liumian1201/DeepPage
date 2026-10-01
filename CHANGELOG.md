@@ -1,5 +1,23 @@
 # DeepPage 更新日志
 
+## v1.3.1 (待发布) — 稳定性补丁
+
+### 🧩 看板编辑态
+- **ESC 退出编辑态**：此前进入「✋ 编辑组件顺序」后按 ESC 无反应，现接入统一 ESC 链（第 11 层）直接退出
+- **锁定后无法编辑看板**：「✋ 编辑组件顺序」按钮在界面锁定时置灰禁用；若锁定前正处于编辑态，锁定会强制退出
+- **连点箭头不再狂写云端**：顺序保存改为 300ms 防抖 + 顺序未变化不写盘 + 已在最左/最右时点击不写盘；退出编辑态立即落盘。原实现每点一次箭头就全量写一次 `chrome.storage.sync`，连点容易触发同步写入配额限制
+- **箭头改为事件委托**：绑定在 `#dashboard-grid` 上，后续版本动态增删看板组件无需重新绑定
+
+### 🔒 安全
+- **SW 代理协议白名单**：新增 `isProxyUrlAllowed()`，Service Worker 代理只放行 `http:` / `https:`，阻断 `file:` / `chrome:` / `chrome-extension:` / `data:` / `javascript:` / `blob:` 等协议；覆盖天气代理、图片代理、WebDAV 代理、网页截图窗口
+- 说明：`host_permissions` 保持 `<all_urls>` 不变 —— 网页截图（`scripting`）、图片代理、本地 http WebDAV 都依赖 CORS 绕过能力，收窄权限需配合 `optional_host_permissions` + 运行时授权，留待后续版本
+
+### 🛠️ 工程
+- **CI 版本一致性校验**：打 tag 时校验 `manifest.json` 的 `version` 与 tag 是否一致、`manifest_version` 是否为 3，不一致直接失败（此前只检查文件存在，打错 tag 会静默发出错版本包）
+- **CI 语法自检**：发布前对全部 JS 执行 `node --check`，语法错误不进发布包
+
+---
+
 ## v1.3.0 (2026-06-10) — 看板编辑态
 
 ### 🧩 看板组件换位

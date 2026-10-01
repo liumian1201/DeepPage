@@ -682,7 +682,12 @@ function bindKeyboardShortcuts() {
           return;
         }
       }
-      // 8. 右键菜单
+      // 11. 看板编辑态（v1.3.1）
+      if (typeof isDashEditing === 'function' && isDashEditing()) {
+        toggleDashEdit();
+        return;
+      }
+      // 12. 右键菜单
       hideContextMenu();
     }
   });
@@ -702,6 +707,15 @@ function setLocked(state, silent) {
     lockIcon.textContent = state ? '🔒' : '🔓';
     lockIcon.title = state ? '界面已锁定' : '界面已解锁';
     lockIcon.className = state ? 'lock-icon locked' : 'lock-icon';
+  }
+  // v1.3.1: 锁定时禁用看板编辑入口，并强制退出已开启的编辑态
+  var dashEditBtn = document.getElementById('btn-dash-edit');
+  if (dashEditBtn) {
+    dashEditBtn.disabled = state;
+    dashEditBtn.title = state ? '界面已锁定，无法编辑看板' : '';
+  }
+  if (state && typeof isDashEditing === 'function' && isDashEditing()) {
+    toggleDashEdit();
   }
   if (currentSettings) {
     currentSettings.isLocked = state;

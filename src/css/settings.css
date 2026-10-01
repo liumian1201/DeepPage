@@ -369,6 +369,17 @@
   border-color: var(--accent);
 }
 
+/* v1.3.1: 禁用态（界面锁定时看板编辑按钮） */
+.btn-backup:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-backup:disabled:hover {
+  background: var(--bg-input);
+  border-color: var(--border-color);
+}
+
 .btn-reset-danger {
   padding: 10px 14px;
   border: 1px solid #d93025;

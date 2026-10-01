@@ -38,6 +38,39 @@ jobs:
           fi
           echo "✅ manifest.json 存在"
 
+      # v1.3.1: 版本一致性校验 —— 防止打错 tag 静默发出错版本包
+      - name: 校验版本号一致性
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          MANIFEST_VERSION=$(node -p "require('./src/manifest.json').version")
+          MANIFEST_V=$(node -p "require('./src/manifest.json').manifest_version")
+          if [ "$MANIFEST_V" != "3" ]; then
+            echo "❌ manifest_version 应为 3，实际为 $MANIFEST_V"
+            exit 1
+          fi
+          if [ "$VERSION" != "$MANIFEST_VERSION" ]; then
+            echo "❌ 版本不一致：tag/输入 = $VERSION，manifest.json = $MANIFEST_VERSION"
+            echo "   请先同步 src/manifest.json 的 version 字段再打 tag"
+            exit 1
+          fi
+          echo "✅ 版本一致: $MANIFEST_VERSION (Manifest V$MANIFEST_V)"
+
+      # v1.3.1: 改动文件语法自检（语法错误不进发布包）
+      - name: 语法自检
+        run: |
+          FAIL=0
+          for f in src/js/*.js src/background.js; do
+            case "$f" in
+              *fflate.min.js) continue ;;
+            esac
+            if ! node --check "$f"; then
+              echo "❌ 语法错误: $f"
+              FAIL=1
+            fi
+          done
+          if [ "$FAIL" != "0" ]; then exit 1; fi
+          echo "✅ JS 语法检查通过"
+
       - name: 检查私钥状态
         id: key_check
         run: |

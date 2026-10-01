@@ -7,8 +7,28 @@
 
 // ---- 消息代理 ----
 
+/**
+ * v1.3.1 (BUG-018 安全侧修复): SW 代理协议白名单
+ * 只允许 http:/https:，阻断 file: / chrome: / chrome-extension: / data: / javascript: 等
+ * 说明：host_permissions 仍为 <all_urls> —— 截图(scripting)、图片代理、WebDAV(含本地 http NAS)
+ *       都依赖 CORS 绕过能力，权限收窄需配合 optional_host_permissions + 运行时授权，另行处理。
+ */
+function isProxyUrlAllowed(url) {
+  if (typeof url !== 'string' || !url) return false;
+  try {
+    var u = new URL(url);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch (e) {
+    return false;
+  }
+}
+
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   if (request.type === 'weather-fetch') {
+    if (!isProxyUrlAllowed(request.url)) {
+      sendResponse({ ok: false, error: 'unsupported protocol' });
+      return false;
+    }
     fetch(request.url)
       .then(function (res) { return res.text(); })
       .then(function (text) { sendResponse({ ok: true, data: text }); })
@@ -17,6 +37,10 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   }
 
   if (request.type === 'image-fetch') {
+    if (!isProxyUrlAllowed(request.url)) {
+      sendResponse({ ok: false, error: 'unsupported protocol' });
+      return false;
+    }
     fetch(request.url)
       .then(function (res) { return res.blob(); })
       .then(function (blob) {
@@ -119,6 +143,10 @@ async function webdavProxy(method, payload) {
   }
   if (!url || !user || !pass) {
     return { ok: false, error: 'WebDAV 未配置' };
+  }
+  // v1.3.1: 协议白名单（允许本地 http WebDAV，阻断其它协议）
+  if (!isProxyUrlAllowed(url)) {
+    return { ok: false, error: 'WebDAV 地址必须是 http/https' };
   }
   var baseUrl = url.replace(/\/$/, '');
   var auth = 'Basic ' + btoa(user + ':' + atob(pass));
@@ -285,6 +313,10 @@ async function webdavProxy(method, payload) {
 // ---- 网页截图（v1.1.5） ----
 
 async function captureScreenshot(url) {
+  // v1.3.1: 只对 http/https 页面开截图窗口（chrome:// / file:// 无法注入脚本）
+  if (!isProxyUrlAllowed(url)) {
+    throw new Error('unsupported protocol');
+  }
   var win = await chrome.windows.create({
     url: url,
     type: 'normal',
@@ -375,6 +407,10 @@ async function captureScreenshot(url) {
 
 /** 自动截取单个页面：打开窗口 → 等加载 → 截图 → 关闭 */
 async function batchCaptureOne(url) {
+  // v1.3.1: 同 captureScreenshot，仅允许 http/https
+  if (!isProxyUrlAllowed(url)) {
+    throw new Error('unsupported protocol');
+  }
   var win = await chrome.windows.create({
     url: url,
     type: 'normal',
