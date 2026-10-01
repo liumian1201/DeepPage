@@ -6,11 +6,22 @@
   "chrome_url_overrides": {
     "newtab": "index.html"
   },
-  "permissions": ["storage", "unlimitedStorage", "tabs", "contextMenus", "scripting"],
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "tabs",
+    "contextMenus",
+    "scripting"
+  ],
   "background": {
     "service_worker": "background.js"
   },
-  "host_permissions": ["<all_urls>"],
+  "host_permissions": [
+    "https://*/*"
+  ],
+  "optional_host_permissions": [
+    "http://*/*"
+  ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: *; connect-src *"
   },

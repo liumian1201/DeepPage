@@ -1,4 +1,42 @@
 /* ============================================================
+   v1.3.3: 运行时权限 —— http 站点改为可选权限（optional_host_permissions）
+   Chrome 要求 permissions.request 必须由用户手势触发，因此各按钮点击处理器
+   应在最前面调用本函数（不要在 await 之后才调用）。
+   ============================================================ */
+
+/** 是否已获得 http 站点权限 */
+function hasHttpHostPermission() {
+  return new Promise(function (resolve) {
+    try {
+      chrome.permissions.contains({ origins: ['http://*/*'] }, function (has) { resolve(!!has); });
+    } catch (e) { resolve(false); }
+  });
+}
+
+/** 申请 http 站点权限（需用户手势；返回是否已获得） */
+function requestHttpHostPermission() {
+  return new Promise(function (resolve) {
+    try {
+      chrome.permissions.request({ origins: ['http://*/*'] }, function (granted) {
+        if (chrome.runtime.lastError) console.warn('[权限] 申请失败:', chrome.runtime.lastError.message);
+        resolve(!!granted);
+      });
+    } catch (e) { resolve(false); }
+  });
+}
+
+/** 目标 URL 需要 http 权限时确保已授权；https/无协议直接通过 */
+async function ensurePermissionForUrl(url) {
+  if (!/^http:\/\//i.test(url || '')) return true;
+  if (await hasHttpHostPermission()) return true;
+  var granted = await requestHttpHostPermission();
+  if (!granted && typeof showToast === 'function') {
+    showToast('需要「访问 http 网站」权限才能使用该地址（如本地 NAS），已跳过', 'warning');
+  }
+  return granted;
+}
+
+/* ============================================================
    webdav.js — WebDAV 云备份前端 API 层（v1.2.0）
    所有网络请求通过 background.js SW 代理，彻底免疫 CORS
    ============================================================ */

@@ -31,6 +31,8 @@ function initWebdavSection() {
   // ---- 测试连接 ----
   var btnTest = document.getElementById('btn-webdav-test');
   if (btnTest) btnTest.addEventListener('click', async function () {
+    // v1.3.3: http 地址（本地 NAS 等）需先申请可选权限
+    if (!(await ensurePermissionForUrl(webdavUrlEl.value.trim()))) return;
     _showWStatus('正在测试连接...');
     try {
       await new Promise(function (r) {
@@ -85,6 +87,7 @@ function initWebdavSection() {
   // ---- 立即备份（v1.2.8: 增量备份） ----
   var btnBackup = document.getElementById('btn-webdav-backup');
   if (btnBackup) btnBackup.addEventListener('click', async function () {
+    if (!(await ensurePermissionForUrl(webdavUrlEl.value.trim()))) return;
     if (typeof webdavIncrementalBackup === 'function') {
       webdavIncrementalBackup();
     } else {
@@ -110,6 +113,7 @@ function initWebdavSection() {
 
   // 显示备份版本选择器
   async function _showVersionPicker() {
+    if (!(await ensurePermissionForUrl(webdavUrlEl.value.trim()))) return;
     _showWStatus('正在获取备份列表...');
     var backupList = [];
     try { backupList = await webdavListBackups(); } catch (e) {

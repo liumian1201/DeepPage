@@ -567,6 +567,8 @@ function closeDialog() {
 async function refreshCardCapture(cardId) {
   var card = speeddials.find(function (c) { return c.id === cardId; });
   if (!card || !card.url) { showToast('卡片无效', 'error'); return; }
+  // v1.3.3: http 页面截图需可选权限，否则无法注入截图按钮
+  if (typeof ensurePermissionForUrl === 'function' && !(await ensurePermissionForUrl(card.url))) return;
   showToast('正在截取 ' + card.name + ' ...', 'info');
 
   chrome.runtime.sendMessage({ type: 'capture-screenshot', url: card.url }, async function (resp) {

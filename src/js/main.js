@@ -833,6 +833,19 @@ async function startBatchCapture() {
     return;
   }
 
+  // v1.3.3: 目标含 http 页面时先申请可选权限（Chrome 137+ 起 http 不再默认授权）
+  var httpTargets = targets.filter(function (t) { return /^http:\/\//i.test(t.url); });
+  if (httpTargets.length > 0 && typeof hasHttpHostPermission === 'function') {
+    if (!(await hasHttpHostPermission())) {
+      var granted = typeof requestHttpHostPermission === 'function' ? await requestHttpHostPermission() : false;
+      if (!granted) {
+        targets = targets.filter(function (t) { return !/^http:\/\//i.test(t.url); });
+        showToast('⚠️ 未授予 http 访问权限，已跳过 ' + httpTargets.length + ' 张 http 页面', 'warning');
+        if (targets.length === 0) return;
+      }
+    }
+  }
+
   // 显示进度弹窗
   var progDlg = document.getElementById('dialog-backup-progress');
   var progTitle = document.getElementById('backup-progress-title');

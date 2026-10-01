@@ -392,7 +392,19 @@ function send(method, params, sessionId) {
   check('非法文件被拒绝', (await evalJs('(async () => { try { await _applyGroupImport({ foo: 1 }); return "no-throw"; } catch (e) { return "rejected"; } })()')) === 'rejected');
   check('空 url 卡片被跳过', (await evalJs(`(async () => { const g = await _applyGroupImport({ type: 'deeppage-group', version: 1, group: { name: '脏数据', cards: [{ name: 'a' }, { name: 'b', url: 'https://b.com' }] } }); return g.cards.length; })()`)) === 1);
 
-  console.log('\n[10] 页面无 JS 报错');
+  console.log('\n[10] P1-10 权限收窄 + 运行时授权');
+  const mf = JSON.parse(await evalJs('JSON.stringify(chrome.runtime.getManifest())'));
+  check('host_permissions 已收窄为 https', JSON.stringify(mf.host_permissions) === JSON.stringify(['https://*/*']), mf.host_permissions);
+  check('http 改为可选权限', JSON.stringify(mf.optional_host_permissions) === JSON.stringify(['http://*/*']), mf.optional_host_permissions);
+  check('hasHttpHostPermission 返回布尔且不抛错', (await evalJs('(async () => typeof (await hasHttpHostPermission()))()')) === 'boolean');
+  check('https 地址无需申请权限', (await evalJs('(async () => await ensurePermissionForUrl("https://example.com/x"))()')) === true);
+  check('无协议地址直接放行', (await evalJs('(async () => await ensurePermissionForUrl(""))()')) === true);
+  const httpResult = await evalJs('(async () => typeof (await ensurePermissionForUrl("http://192.168.1.1/dav")))()');
+  check('http 地址返回布尔（未授权时不抛错、走降级）', httpResult === 'boolean', httpResult);
+  check('WebDAV 按钮已接入权限守卫', (await evalJs('typeof ensurePermissionForUrl === "function" && typeof requestHttpHostPermission === "function"')));
+  check('批量截图已接入 http 权限降级', (await evalJs('startBatchCapture.toString().includes("httpTargets")')));
+
+  console.log('\n[11] 页面无 JS 报错');
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);

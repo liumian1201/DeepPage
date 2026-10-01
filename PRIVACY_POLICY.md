@@ -53,7 +53,8 @@ DeepPage 会向以下第三方服务发起请求：
 | `tabs` | 卡片打开方式控制 + 网页截图窗口管理 |
 | `contextMenus` | 浏览器右键菜单「添加到 DeepPage」 |
 | `scripting` | 重复卡片检测弹出确认框 |
-| `host_permissions (<all_urls>)` | 天气 API、Bing 壁纸、网页截图、图片下载代理 |
+| `host_permissions (https://*/*)` | 天气 API、Bing 壁纸、网页截图、图片下载代理（默认仅 https） |
+| `optional_host_permissions (http://*/*)` | **按需申请**：仅当您使用 http 地址（如本地 NAS 的 WebDAV、http 页面截图）时才会弹窗请求；不授权不影响其它功能 |
 
 ## 数据控制
 
