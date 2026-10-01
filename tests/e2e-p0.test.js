@@ -23,8 +23,8 @@ function extensionId(dir) {
   const h = crypto.createHash('sha256').update(dir, 'utf8').digest('hex').slice(0, 32);
   return h.split('').map(c => String.fromCharCode(97 + parseInt(c, 16))).join('');
 }
-const EXT_ID = extensionId(SRC);
-console.log('扩展 ID:', EXT_ID);
+let EXT_ID = extensionId(SRC); // 按路径推导仅作兜底；真实 ID 从浏览器 target 发现
+console.log('按路径推导的扩展 ID:', EXT_ID);
 
 fs.rmSync(PROFILE, { recursive: true, force: true });
 const chrome = spawn(CHROME, [
@@ -83,6 +83,30 @@ function send(method, params, sessionId) {
       consoleErrors.push('EXCEPTION: ' + (msg.params.exceptionDetails.exception?.description || msg.params.exceptionDetails.text));
     }
   };
+
+  // 真实扩展 ID 从浏览器里发现：MV3 的 background service worker target URL 形如
+  // chrome-extension://<id>/background.js —— 不依赖「按路径哈希推导」这一脆弱假设
+  async function resolveExtensionId() {
+    for (let i = 0; i < 40; i++) {
+      try {
+        const { targetInfos } = await send('Target.getTargets');
+        for (const t of targetInfos) {
+          const m = /^chrome-extension:\/\/([a-p]{32})\//.exec(t.url || '');
+          if (m) return m[1];
+        }
+      } catch (e) { /* 忽略，继续轮询 */ }
+      await sleep(300);
+    }
+    return null;
+  }
+
+  const discovered = await resolveExtensionId();
+  if (discovered && discovered !== EXT_ID) {
+    console.log(`扩展 ID 以浏览器为准: ${discovered}（路径推导得到 ${EXT_ID}，已改用前者）`);
+    EXT_ID = discovered;
+  } else if (!discovered) {
+    console.warn('⚠️ 未能从浏览器发现扩展 ID，回退到路径推导值');
+  }
 
   const target = await send('Target.createTarget', { url: `chrome-extension://${EXT_ID}/index.html` });
   const attached = await send('Target.attachToTarget', { targetId: target.targetId, flatten: true });
