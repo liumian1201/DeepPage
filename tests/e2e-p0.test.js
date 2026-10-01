@@ -240,7 +240,26 @@ function send(method, params, sessionId) {
   check('解锁后可正常进入编辑态', (await evalJs('isDashEditing()')) === true);
   await evalJs('toggleDashEdit()');
 
-  console.log('\n[5] 页面无 JS 报错');
+  console.log('\n[5] P1-7 设置面板延迟初始化');
+  check('启动阶段未构建面板状态', (await evalJs('_settingsPanelReady')) === false);
+  check('启动即已应用外观尺寸变量（不依赖面板）', await evalJs('getComputedStyle(document.documentElement).getPropertyValue("--card-width").trim().length > 0'));
+  const gridCols = await evalJs('document.getElementById("speeddial-grid").style.gridTemplateColumns');
+  check('Grid 列宽来自 CSS 变量（未依赖滑块默认值）', gridCols.includes('minmax'), gridCols);
+  check('齿轮按钮可打开面板（懒初始化不阻断入口）', await evalJs('(()=>{document.getElementById("btn-settings").click();return !document.getElementById("settings-panel").classList.contains("hidden");})()'));
+  check('面板打开后已完成初始化', (await evalJs('_settingsPanelReady')) === true);
+  check('表单已回填列数', (await evalJs('document.getElementById("setting-columns-slider").value')) === (await evalJs('String(currentSettings.columns || 5)')));
+  check('表单已回填卡片宽度', (await evalJs('document.getElementById("setting-card-width").value')) === (await evalJs('String(currentSettings.cardWidth || 270)')));
+  // 面板事件是首次打开时才绑定的 —— 验证绑定真的生效（改列数应写入 settings）
+  const beforeCols = await evalJs('currentSettings.columns');
+  await evalJs('(()=>{const s=document.getElementById("setting-columns-slider");s.value="4";s.dispatchEvent(new Event("change",{bubbles:true}));})()');
+  await sleep(600);
+  const afterCols = await evalJs('currentSettings.columns');
+  check('面板事件已绑定（改列数生效）', afterCols === 4 && beforeCols !== 4, { beforeCols, afterCols });
+  await evalJs('(()=>{const s=document.getElementById("setting-columns-slider");s.value="' + beforeCols + '";s.dispatchEvent(new Event("change",{bubbles:true}));})()');
+  await sleep(400);
+  await evalJs('closeSettingsPanel()');
+
+  console.log('\n[6] 页面无 JS 报错');
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);

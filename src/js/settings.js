@@ -108,12 +108,31 @@ const domSettings = {
 };
 
 /* ---------- 初始化 ---------- */
+var _settingsPanelReady = false;
+
+/**
+ * v1.3.3: 启动关键路径 —— 只做「渲染卡片前必须完成」的事：
+ *   读设置 + 应用主题/列数/可见性/外观变量。
+ * 表单填值与面板事件绑定推迟到首次打开面板（ensureSettingsPanelReady），
+ * 首屏省下约 60 个表单元素读写与数十个监听器。
+ */
 async function initSettings() {
   currentSettings = await getSettings();
-  populateSettingsForm(currentSettings);
   applyAllSettings(currentSettings);
+  // 外观尺寸类 CSS 变量（--card-width/--card-height/--card-radius/--card-opacity）必须在首屏就位，
+  // 否则卡片会先按默认尺寸渲染再跳变
+  if (typeof applyAppearance === 'function') applyAppearance(currentSettings);
+  // 齿轮按钮必须启动即可用，否则面板永远打不开（其余面板事件延迟绑定）
+  if (domSettings.btnOpen) domSettings.btnOpen.addEventListener('click', openSettingsPanel);
+}
+
+/** v1.3.3: 首次打开设置面板时才构建表单状态并绑定面板事件（幂等） */
+function ensureSettingsPanelReady() {
+  if (_settingsPanelReady) return;
+  _settingsPanelReady = true;
+  populateSettingsForm(currentSettings || {});
   bindSettingsEvents();
-  // 初始化外观实时预览
+  // 初始化外观实时预览（含表单回填 + 预览绑定）
   initAppearance(domSettings, currentSettings, onAppearanceChanged);
   // 初始化数据管理按钮
   bindBackupEvents();
@@ -468,6 +487,7 @@ function collectSettingsFromForm() {
 
 /* ---------- 面板开关 ---------- */
 function openSettingsPanel() {
+  ensureSettingsPanelReady(); // v1.3.3: 首次打开时才构建表单/绑定事件
   domSettings.panel.classList.remove('hidden');
   domSettings.overlay.classList.remove('hidden');
   // 重置面板位置
@@ -486,7 +506,8 @@ function closeSettingsPanel() {
 
 /* ---------- 事件绑定 ---------- */
 function bindSettingsEvents() {
-  domSettings.btnOpen.addEventListener('click', openSettingsPanel);
+  // 注：齿轮按钮（domSettings.btnOpen）已在 initSettings 中绑定 ——
+  // 面板事件延迟到首次打开才绑定，若在此处绑定会导致面板打不开
   domSettings.btnClose.addEventListener('click', closeSettingsPanel);
   // 遮罩不再响应点击关闭（与首次备份引导弹窗一致）
 

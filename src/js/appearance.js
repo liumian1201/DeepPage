@@ -30,8 +30,9 @@ function updateGridColumns(cols) {
       var s = document.getElementById('setting-columns-slider');
       cols = s ? parseInt(s.value, 10) : 5;
     }
-    var ws = document.getElementById('setting-card-width');
-    var w = parseInt(ws ? ws.value : 270, 10);
+    // v1.3.3: 卡片宽度改从 CSS 变量读取，不再读设置面板的滑块 ——
+    // 面板已改为「首次打开才初始化」，此时滑块可能仍是 HTML 默认值（270）
+    var w = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--card-width'), 10) || 270;
     var gap = 16; // 与 main.css .speeddial-grid gap 一致
 
     grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(' + w + 'px, 1fr))';

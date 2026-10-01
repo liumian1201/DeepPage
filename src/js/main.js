@@ -1,4 +1,4 @@
-﻿/* ============================================================
+/* ============================================================
    main.js — 主程序入口
    负责：初始化、事件绑定、键盘快捷键、锁定/解锁、Toast 通知
    卡片/分组/拖拽/搜索/右键菜单已拆分至独立模块
@@ -38,8 +38,32 @@ const domMain = {
   confirmCancel:    document.getElementById('confirm-cancel')
 };
 
+/* ==================== 首屏调度（v1.3.3） ==================== */
+
+/** 首屏性能标记：dp-init-start → dp-cards-rendered，供测试/诊断读取 */
+function _markFirstRender() {
+  if (!window.performance || !performance.mark) return;
+  try {
+    performance.mark('dp-cards-rendered');
+    performance.measure('dp-first-render', 'dp-init-start', 'dp-cards-rendered');
+  } catch (e) { /* 忽略 */ }
+}
+
+/** 把非关键任务排到首屏之后：优先空闲回调，200ms 超时兜底（后台页 rIC 可能不触发） */
+function _scheduleAfterFirstPaint(fn) {
+  var ran = false;
+  function run() {
+    if (ran) return;
+    ran = true;
+    try { fn(); } catch (e) { console.warn('after-first-paint task failed:', e); }
+  }
+  if (window.requestIdleCallback) requestIdleCallback(run, { timeout: 200 });
+  else setTimeout(run, 0);
+}
+
 /* ==================== 初始化 ==================== */
 async function init() {
+  if (window.performance && performance.mark) performance.mark('dp-init-start');
   await initSettings();
   groups = await getGroups();
   activeGroupIndex = await getActiveGroup();
@@ -57,17 +81,23 @@ async function init() {
     });
   }
 
-  // v1.0.3: 迁移现有 URL 图标到本地缓存
-  if (typeof migrateCardIcons === 'function') await migrateCardIcons();
-  // v1.0.9: 为旧卡片补全 visitCount / createdAt 字段
+  // v1.0.9: 为旧卡片补全 visitCount / createdAt 字段（同步且廉价，需在排序渲染前完成）
   if (typeof migrateCardFields === 'function') migrateCardFields();
-  // v1.1.0+: 清理 IndexedDB 无主卡片图标
-  if (typeof collectCardImageGarbage === 'function') collectCardImageGarbage();
 
   // v1.3.0: 初始化 GridStack 看板拖拽
   if (typeof initDashboardGrid === 'function') initDashboardGrid();
 
   renderSpeeddials();
+  _markFirstRender();
+
+  // v1.3.3: 非关键任务排到首屏之后 ——
+  //   图标迁移要逐张发网络请求（原来是 await 在渲染前，卡片多时明显拖慢首屏）、
+  //   GC 要扫 IndexedDB、壁纸要拉图，都不该挡第一帧
+  _scheduleAfterFirstPaint(function () {
+    if (typeof migrateCardIcons === 'function') migrateCardIcons();
+    if (typeof collectCardImageGarbage === 'function') collectCardImageGarbage();
+    initWallpaper();
+  });
   // v1.2.6: 延迟碰撞检测，等 DOM 布局稳定后再判断
   setTimeout(_checkDashboardCollision, 500);
   window.addEventListener('resize', _debounceCollisionCheck);
@@ -81,7 +111,6 @@ async function init() {
   if (currentSettings && currentSettings.showWeather) {
     initWeather();
   }
-  initWallpaper();
   initContextMenu();
   renderGroupDots();
 
