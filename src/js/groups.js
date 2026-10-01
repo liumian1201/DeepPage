@@ -83,7 +83,8 @@ async function switchGroup(index) {
   if (typeof _debounceCollisionCheck === 'function') _debounceCollisionCheck();
   // 异步保存，不阻塞 UI；延迟释放 _savingGroups 确保 onChanged 被拦截
   if (typeof _savingGroups !== 'undefined') _savingGroups = true;
-  saveGroups(groups);
+  // v1.3.3: 滚轮连续切分组会产生突发写入 → 合并写（结构性改动仍走立即写）
+  saveGroups(groups, { coalesce: true });
   saveActiveGroup(activeGroupIndex);
   setTimeout(function () { _savingGroups = false; }, 200);
 }

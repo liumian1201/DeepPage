@@ -85,6 +85,8 @@ function dedupCardIds(groups, manifest, unzipped) {
 
 async function exportAll() {
   try {
+    // v1.3.3: 合并写窗口内可能有未落盘的设置/分组 → 导出前先 flush，否则备份的是旧数据
+    if (typeof flushSyncWrites === 'function') await flushSyncWrites();
     // 1. 读取配置（sync + local 回退，确保超限数据也被导出）
     var config = await new Promise(function (resolve) {
       chrome.storage.sync.get(null, function (result) { resolve(result); });
@@ -152,6 +154,8 @@ async function exportAll() {
 function importAll() {
   var _importCancelled = false;
   pickFile('.zip,.json', async function (file) {
+    // v1.3.3: 先把合并写窗口内的待写数据落盘，否则它可能在导入完成后才落地，把导入的数据覆盖回去
+    if (typeof flushSyncWrites === 'function') await flushSyncWrites();
     var loading = document.getElementById('backup-loading');
     if (loading) loading.classList.remove('hidden');
 
@@ -317,7 +321,9 @@ function resetAll() {
   // 点击空白处不再关闭弹窗
 }
 
-function doResetAll() {
+async function doResetAll() {
+  // v1.3.3: 先落盘再清空，避免清空后仍有待写数据落地
+  if (typeof flushSyncWrites === 'function') await flushSyncWrites();
   var fallback = setTimeout(function () { window.location.reload(); }, 5000);
 
   // 清理 sync + local（大容量回退数据在 local）
@@ -981,6 +987,8 @@ function updateWebdavStatus() {
 
 /** 收集全量数据（供 WebDAV 备份复用 exportAll 逻辑） */
 async function _collectAllData() {
+  // v1.3.3: 同上，读云端数据前先落盘
+  if (typeof flushSyncWrites === 'function') await flushSyncWrites();
   // v1.2.6: 并行读取 sync 和 IndexedDB
   var [syncData, db] = await Promise.all([
     new Promise(function (resolve) {

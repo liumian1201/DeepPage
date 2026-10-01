@@ -259,7 +259,46 @@ function send(method, params, sessionId) {
   await sleep(400);
   await evalJs('closeSettingsPanel()');
 
-  console.log('\n[6] 页面无 JS 报错');
+  console.log('\n[6] P1-6 sync 写入合并');
+  check('注入写入计数器', (await evalJs(`(() => {
+    window.__writes = [];
+    window.__origSet = chrome.storage.sync.set.bind(chrome.storage.sync);
+    chrome.storage.sync.set = function (items, cb) { window.__writes.push(Object.keys(items)[0]); return window.__origSet(items, cb); };
+    return 'ok';
+  })()`)) === 'ok');
+  // 连发 12 次设置保存（模拟拖滑块 / 连点开关）
+  await evalJs('(() => { for (let i = 0; i < 12; i++) { currentSettings.__probe = i; saveSettings(currentSettings); } return "ok"; })()');
+  check('合并窗口内未立即写盘', (await evalJs('window.__writes.filter(k=>k==="settings").length')) === 0);
+  await sleep(1000);
+  check('12 次连发只落盘 1 次', (await evalJs('window.__writes.filter(k=>k==="settings").length')) === 1, await evalJs('JSON.stringify(window.__writes)'));
+  check('落盘的是最后一次的值', (await evalJs('new Promise(r=>chrome.storage.sync.get("settings",d=>r(String((d.settings||{}).__probe))))')) === '11');
+
+  // 连续切分组（模拟滚轮）：groups 与 activeGroup 各只写一次
+  await evalJs('(() => { window.__writes.length = 0; for (let i = 0; i < 5; i++) { activeGroupIndex = i % groups.length; saveGroups(groups, { coalesce: true }); saveActiveGroup(activeGroupIndex); } return "ok"; })()');
+  await sleep(1200);
+  const w2 = JSON.parse(await evalJs('JSON.stringify(window.__writes)'));
+  check('连续切组：groups 只写 1 次', w2.filter(k => k === 'groups').length === 1, w2);
+  check('连续切组：activeGroup 只写 1 次', w2.filter(k => k === 'activeGroup').length === 1, w2);
+
+  // flush 立即落盘（导出/导入/关页前的兜底）
+  await evalJs('window.__writes.length = 0; currentSettings.__probe2 = 1; saveSettings(currentSettings);');
+  check('未 flush 前不写盘', (await evalJs('window.__writes.length')) === 0);
+  await evalJs('flushSyncWrites()');
+  await sleep(300);
+  check('flushSyncWrites 立即落盘', (await evalJs('window.__writes.length')) >= 1, await evalJs('JSON.stringify(window.__writes)'));
+  await evalJs('chrome.storage.sync.set = window.__origSet;');
+
+  // 安全属性：结构性数据（增删改卡片/分组）必须立即落盘，不能被合并写拖延
+  await evalJs(`(() => {
+    window.__writes = [];
+    chrome.storage.sync.set = function (items, cb) { window.__writes.push(Object.keys(items)[0]); return window.__origSet(items, cb); };
+    return 'ok';
+  })()`);
+  await evalJs('(async () => { await saveGroups(groups); return "ok"; })()');
+  check('结构性改动（不带 coalesce）立即落盘', (await evalJs('window.__writes.filter(k=>k==="groups").length')) === 1, await evalJs('JSON.stringify(window.__writes)'));
+  await evalJs('chrome.storage.sync.set = window.__origSet;');
+
+  console.log('\n[7] 页面无 JS 报错');
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);

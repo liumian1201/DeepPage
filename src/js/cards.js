@@ -684,7 +684,8 @@ async function incrementVisitCount(cardId, render) {
       if (cards[ci].id === cardId) {
         cards[ci].visitCount = (cards[ci].visitCount || 0) + 1;
         cards[ci].lastOpened = now;
-        await saveGroups(groups);
+        // v1.3.3: 连续点卡片会逐次写盘 → 合并写
+        await saveGroups(groups, { coalesce: true });
         // 仅在当前活动分组时才更新 speeddials 和重渲染
         if (gi === activeGroupIndex) {
           speeddials = cards;

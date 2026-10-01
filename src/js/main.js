@@ -294,7 +294,10 @@ function _debounceCollisionCheck() {
 
 chrome.storage.onChanged.addListener(function (changes, areaName) {
   if (areaName !== 'sync') return;
-  if (changes.groups && !_savingGroups) {
+  // v1.3.3: 合并写可能在本页写入后 ≤500ms 才落地，onChanged 回声需按「本页写入」判定，
+  // 只靠 _savingGroups 的时间窗会漏判 → 自触发一次多余渲染
+  var _selfGroupsWrite = typeof isSelfSyncWrite === 'function' && isSelfSyncWrite('groups');
+  if (changes.groups && !_savingGroups && !_selfGroupsWrite) {
     var newGroups = changes.groups.newValue;
     if (newGroups && Array.isArray(newGroups)) {
       groups = newGroups;

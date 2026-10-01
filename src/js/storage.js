@@ -102,13 +102,76 @@ function loadFromStorage(key, defaultValue) {
   });
 }
 
-function saveToStorage(key, value) {
+/* ==================== 写入合并层（v1.3.3） ====================
+   chrome.storage.sync 有 MAX_WRITE_OPERATIONS_PER_MINUTE = 120 的硬配额，
+   超限时写入会静默失败（lastError）。滚轮切分组、连点卡片、拖设置滑块都会产生突发写入，
+   因此对「高频且可重建」的数据（settings / activeGroup / 访问计数）做合并写：
+   同一 key 在窗口内只写最后一次，窗口取 500ms（理论上限 120 次/分钟，正好卡在配额内）。
+   结构性数据（增删改卡片、分组增删）仍走立即写，避免崩溃/关页丢用户数据。
+*/
+
+var SYNC_WRITE_COALESCE_MS = 500;
+var _pendingSyncWrites = {};   // key → { value, afterFlush }
+var _pendingWriteTimers = {};  // key → timerId
+var _selfWriteAt = {};         // key → 本页写入时间戳（用于忽略 onChanged 回声）
+
+/** 立即写入 sync；失败只告警不抛（回退逻辑由调用方决定） */
+function _writeSyncKey(key, value) {
   return new Promise(function (resolve) {
     chrome.storage.sync.set({ [key]: value }, function () {
-      if (chrome.runtime.lastError) { /* 静默消费：超限由 saveGroups 回退处理 */ }
+      _selfWriteAt[key] = Date.now();
+      if (chrome.runtime.lastError) {
+        console.warn('[storage] sync 写入失败（' + key + '）:', chrome.runtime.lastError.message);
+      }
       resolve();
     });
   });
+}
+
+/** 合并写：窗口内多次调用只保留最后一次；afterFlush 在真正写完后执行（如超限回退、菜单刷新） */
+function scheduleSyncWrite(key, value, afterFlush) {
+  _pendingSyncWrites[key] = { value: value, afterFlush: afterFlush };
+  if (_pendingWriteTimers[key]) clearTimeout(_pendingWriteTimers[key]);
+  _pendingWriteTimers[key] = setTimeout(function () {
+    flushSyncWrites([key]);
+  }, SYNC_WRITE_COALESCE_MS);
+}
+
+/** 立即写出待写数据（key 数组省略则全部）；pagehide / 导出导入前调用 */
+function flushSyncWrites(keys) {
+  var list = keys || Object.keys(_pendingSyncWrites);
+  var jobs = [];
+  list.forEach(function (key) {
+    var job = _pendingSyncWrites[key];
+    if (!job) return;
+    delete _pendingSyncWrites[key];
+    if (_pendingWriteTimers[key]) {
+      clearTimeout(_pendingWriteTimers[key]);
+      delete _pendingWriteTimers[key];
+    }
+    var p = _writeSyncKey(key, job.value);
+    if (typeof job.afterFlush === 'function') {
+      p = p.then(function () { return job.afterFlush(); });
+    }
+    jobs.push(p);
+  });
+  return Promise.all(jobs);
+}
+
+/** 某 key 最近是否由本页写入（onChanged 回声判定，避免合并写晚到触发自刷新） */
+function isSelfSyncWrite(key, withinMs) {
+  var t = _selfWriteAt[key];
+  return !!t && (Date.now() - t) < (withinMs || 1500);
+}
+
+// 关页/切后台前尽力落盘（合并写窗口内的数据不丢）
+window.addEventListener('pagehide', function () { flushSyncWrites(); });
+document.addEventListener('visibilitychange', function () {
+  if (document.hidden) flushSyncWrites();
+});
+
+function saveToStorage(key, value) {
+  return _writeSyncKey(key, value);
 }
 
 /** chrome.storage.local 读写封装（供 wallpaper.js / weather.js 使用） */
@@ -148,7 +211,8 @@ async function getGroups() {
   return DEFAULT_GROUPS;
 }
 
-async function saveGroups(groups) {
+async function saveGroups(groups, opts) {
+  opts = opts || {};
   // v1.2.1: 写入前保存上一版快照到 local（后悔药）
   if (typeof getGroups === 'function') {
     try {
@@ -158,11 +222,26 @@ async function saveGroups(groups) {
       }
     } catch (e) { console.error('local_bak save failed:', e); }
   }
+
+  // v1.3.3: 高频路径（滚轮切分组 / 访问计数）走合并写，避免连续触发 120 次/分钟配额；
+  // 超限回退校验与右键菜单刷新挂到真正写完之后
+  if (opts.coalesce) {
+    scheduleSyncWrite(STORAGE_KEYS.GROUPS, groups, function () {
+      return _verifyGroupsWrite(groups);
+    });
+    return;
+  }
+
   // BUG-028: _savingGroups 未定义时默认视为已在保存中，避免误复位
   var _wasSaving = typeof _savingGroups !== 'undefined' ? _savingGroups : true;
   if (typeof _savingGroups !== 'undefined') _savingGroups = true;
   await saveToStorage(STORAGE_KEYS.GROUPS, groups);
   if (typeof _savingGroups !== 'undefined' && !_wasSaving) _savingGroups = false;
+  await _verifyGroupsWrite(groups);
+}
+
+/** 写入后校验：sync 超限被拒时回退到 local（同时刷新右键菜单） */
+async function _verifyGroupsWrite(groups) {
   // 同步存储超限时自动回退到本地存储
   await new Promise(function (resolve) {
     chrome.storage.sync.get([STORAGE_KEYS.GROUPS], function (result) {
@@ -184,7 +263,8 @@ async function getActiveGroup() {
 }
 
 async function saveActiveGroup(index) {
-  await saveToStorage(STORAGE_KEYS.ACTIVE_GROUP, index);
+  // v1.3.3: 滚轮连续切分组会产生突发写入 → 合并写（local 仍立即写，保证回退路径新鲜）
+  scheduleSyncWrite(STORAGE_KEYS.ACTIVE_GROUP, index);
   saveToLocal(STORAGE_KEYS.ACTIVE_GROUP, index);
 }
 
@@ -228,5 +308,7 @@ async function getSettings() {
 }
 
 async function saveSettings(settings) {
-  return saveToStorage(STORAGE_KEYS.SETTINGS, settings);
+  // v1.3.3: 设置变更频繁且可重建（滑块/开关/引擎切换）→ 合并写；
+  // 真正需要落盘的时刻（导出、导入、关页）由 flushSyncWrites 兜底
+  scheduleSyncWrite(STORAGE_KEYS.SETTINGS, settings);
 }
