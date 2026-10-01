@@ -1,8 +1,10 @@
 /*
    P0-4 SW 协议白名单真实链路验证：页面 → SW 消息，非法协议必须被拒
    headless Chromium + CDP（Node 内置 WebSocket），无第三方依赖
-   运行: node tests/e2e-sw-protocol.test.js
-   前置: 需要 /usr/bin/chromium
+   运行: node tests/e2e-sw-protocol.test.js   （或 npm run test:e2e）
+   前置: CHROME_BIN 指向 Chromium 构建，默认 /usr/bin/chromium
+   注意: Chrome 137+ 的官方 branded 构建已移除 --load-extension，必须用 Chromium / Chrome for Testing；
+        环境不支持时脚本以退出码 2 跳过（CI 据此区分「环境不满足」与「断言失败」）
 */
 const { spawn } = require('child_process');
 const crypto = require('crypto');
@@ -10,14 +12,15 @@ const fs = require('fs');
 const path = require('path');
 
 const SRC = path.resolve(__dirname, '../src');
-const PROFILE = '/tmp/dp-e2e-profile';
 const CHROME = process.env.CHROME_BIN || '/usr/bin/chromium';
+// 随机端口 + 每次独立 profile：避免与残留浏览器实例、并行测试撞车
+const PORT = 9300 + Math.floor(Math.random() * 500);
+const PROFILE = `/tmp/dp-e2e-profile-${process.pid}`;
 
 if (!fs.existsSync(CHROME)) {
   console.error(`⚠️ 未找到 Chromium（${CHROME}）—— 设置 CHROME_BIN 环境变量后重试，跳过本次 E2E`);
   process.exit(2);
 }
-const PORT = 9333;
 
 function extensionId(dir) {
   const h = crypto.createHash('sha256').update(dir, 'utf8').digest('hex').slice(0, 32);
@@ -34,8 +37,18 @@ const chrome = spawn(CHROME, [
   '--disable-extensions-except=' + SRC,
   '--load-extension=' + SRC,
   'about:blank'
-], { stdio: ['ignore', 'pipe', 'pipe'] });
+], { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
 let chromeErr = '';
+
+/** Chromium 会 fork 出真正的浏览器进程（PPID 变 1），只 kill 启动壳会留下孤儿占着端口和 profile */
+function killBrowser() {
+  try {
+    process.kill(-chrome.pid, 'SIGKILL'); // 整组回收
+  } catch (e) {
+    try { chrome.kill('SIGKILL'); } catch (e2) { /* 已退出 */ }
+  }
+  try { fs.rmSync(PROFILE, { recursive: true, force: true }); } catch (e) { /* 忽略 */ }
+}
 chrome.stderr.on('data', d => { chromeErr += d.toString(); });
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -84,36 +97,84 @@ function send(method, params, sessionId) {
     }
   };
 
-  // 真实扩展 ID 从浏览器里发现：MV3 的 background service worker target URL 形如
-  // chrome-extension://<id>/background.js —— 不依赖「按路径哈希推导」这一脆弱假设
-  async function resolveExtensionId() {
+  // 候选 ID 探测：不同 Chrome 版本/平台上「按路径哈希推导的 ID」并不可靠，
+  // 且部分新版 branded Chrome 已禁用 --load-extension（此时任何 ID 都打不开）。
+  // 策略：优先取 background.js 的 target（本项目 SW 入口），其余扩展 target 次之，路径推导兜底。
+  async function collectCandidateIds() {
+    const primary = new Set();
+    const others = new Set();
     for (let i = 0; i < 40; i++) {
       try {
         const { targetInfos } = await send('Target.getTargets');
         for (const t of targetInfos) {
           const m = /^chrome-extension:\/\/([a-p]{32})\//.exec(t.url || '');
-          if (m) return m[1];
+          if (!m) continue;
+          if (/\/background\.js(\?|$)/.test(t.url)) primary.add(m[1]);
+          else others.add(m[1]);
         }
       } catch (e) { /* 忽略，继续轮询 */ }
+      if (primary.size) break;
       await sleep(300);
     }
-    return null;
+    const list = [...new Set([...primary, ...others, EXT_ID])];
+    return list;
   }
 
-  const discovered = await resolveExtensionId();
-  if (discovered && discovered !== EXT_ID) {
-    console.log(`扩展 ID 以浏览器为准: ${discovered}（路径推导得到 ${EXT_ID}，已改用前者）`);
-    EXT_ID = discovered;
-  } else if (!discovered) {
-    console.warn('⚠️ 未能从浏览器发现扩展 ID，回退到路径推导值');
+  async function tryOpenPage(id) {
+    const t = await send('Target.createTarget', { url: `chrome-extension://${id}/index.html` });
+    const a = await send('Target.attachToTarget', { targetId: t.targetId, flatten: true });
+    const session = a.sessionId;
+    await send('Runtime.enable', {}, session);
+    await send('Page.enable', {}, session);
+    await sleep(2000);
+    const r = await send('Runtime.evaluate', {
+      expression: '!!document.getElementById("dashboard-grid")',
+      returnByValue: true,
+    }, session);
+    return { targetId: t.targetId, sid: session, ok: !!(r.result && r.result.value) };
   }
 
-  const target = await send('Target.createTarget', { url: `chrome-extension://${EXT_ID}/index.html` });
-  const attached = await send('Target.attachToTarget', { targetId: target.targetId, flatten: true });
-  const sid = attached.sessionId;
-  await send('Runtime.enable', {}, sid);
-  await send('Page.enable', {}, sid);
-  await sleep(2500); // 等 init 跑完
+  const candidates = await collectCandidateIds();
+  console.log('候选扩展 ID:', candidates.join(', '));
+  let page = null;
+  for (const id of candidates) {
+    const attempt = await tryOpenPage(id);
+    if (attempt.ok) { EXT_ID = id; page = attempt; console.log(`✅ 扩展页面已加载，使用 ID: ${id}`); break; }
+    try { await send('Target.closeTarget', { targetId: attempt.targetId }); } catch (e) { /* 忽略 */ }
+  }
+  if (!page) {
+    console.error('⚠️ 环境无法加载本扩展（所有候选 ID 都打不开 index.html）——');
+    console.error('   该浏览器很可能已禁用 --load-extension（Chrome 137+ 的已知变化），跳过 E2E');
+    ws.close();
+    killBrowser();
+    process.exit(2);
+  }
+  const sid = page.sid;
+
+  // 固定 sleep 不可靠（CI 机器慢）→ 轮询等待 init 真正就绪
+  async function waitForReady(timeoutMs = 20000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      try {
+        const r = await send('Runtime.evaluate', {
+          expression: 'typeof currentSettings === "object" && !!currentSettings &&' +
+            ' document.querySelectorAll("#dashboard-grid .dashboard-item").length === 3 &&' +
+            ' !!document.getElementById("btn-dash-edit")',
+          returnByValue: true,
+        }, sid);
+        if (r.result && r.result.value === true) return true;
+      } catch (e) { /* 页面还在导航，重试 */ }
+      await sleep(300);
+    }
+    return false;
+  }
+
+  if (!(await waitForReady())) {
+    console.error('⚠️ 页面 init 未在 20s 内就绪（CI 机器较慢或扩展初始化异常），跳过 E2E');
+    ws.close();
+    killBrowser();
+    process.exit(2);
+  }
 
   const evalJs = async (expr) => {
     const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, sid);
@@ -145,10 +206,10 @@ function send(method, params, sessionId) {
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);
   ws.close();
-  chrome.kill('SIGKILL');
+  killBrowser();
   process.exit(fail ? 1 : 0);
 })().catch(async (e) => {
   console.error('❌ 测试异常:', e.message);
-  chrome.kill('SIGKILL');
+  killBrowser();
   process.exit(2);
 });

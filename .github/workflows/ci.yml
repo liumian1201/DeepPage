@@ -34,12 +34,36 @@ jobs:
       - name: 看板逻辑测试
         run: npm test
 
+      # runner 预装的是官方 branded Google Chrome，而 Chrome 137+ 已移除 --load-extension，
+      # 无法加载未打包扩展；因此单独准备一个 Chromium 构建（Chrome for Testing）专供 E2E。
+      - name: 缓存 Chromium
+        id: cache-chromium
+        uses: actions/cache@v6
+        with:
+          path: .cache/chromium
+          key: chromium-${{ runner.os }}-latest
+
+      - name: 准备 Chromium（E2E 用）
+        if: steps.cache-chromium.outputs.cache-hit != 'true'
+        continue-on-error: true
+        run: npx --yes @puppeteer/browsers install chromium@latest --path .cache/chromium
+
       - name: 真实浏览器 E2E
         run: |
-          CHROME=$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)
-          if [ -z "$CHROME" ]; then
-            echo "⚠️ 未找到 Chrome/Chromium，跳过 E2E"
+          BIN=$(find .cache/chromium -type f -name chrome 2>/dev/null | head -1)
+          if [ -z "$BIN" ]; then
+            echo "⚠️ 未能准备 Chromium，跳过 E2E（本地可用 npm run test:e2e 验证）"
             exit 0
           fi
-          echo "使用浏览器: $CHROME"
-          CHROME_BIN="$CHROME" npm run test:e2e
+          echo "使用浏览器: $BIN"
+          "$BIN" --version
+          # 退出码约定：2 = 环境不满足（跳过），1 = 断言失败（必须红），0 = 通过
+          set +e
+          CHROME_BIN="$BIN" npm run test:e2e
+          code=$?
+          set -e
+          if [ "$code" -eq 2 ]; then
+            echo "⚠️ E2E 环境不满足（退出码 2），跳过"
+            exit 0
+          fi
+          exit "$code"

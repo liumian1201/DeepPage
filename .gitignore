@@ -19,6 +19,9 @@ desktop.ini
 node_modules/
 # 注：package-lock.json 必须入库 —— CI 用 `npm ci` 复现依赖
 
+# CI 下载的 Chromium（E2E 专用，体积大不入库）
+.cache/
+
 # 临时文件
 *.tmp
 *.log
