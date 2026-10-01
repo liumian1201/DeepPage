@@ -29,7 +29,14 @@ const checkMode = argv.includes('--check');
 const strict = argv.includes('--strict');
 const dryRun = argv.includes('--dry-run');
 const dateArgIdx = argv.indexOf('--date');
-const today = dateArgIdx >= 0 ? argv[dateArgIdx + 1] : new Date().toISOString().slice(0, 10);
+
+/** 本地日期（不能用 toISOString：那是 UTC，UTC+8 凌晨发版会写成前一天） */
+function localDate(d = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+const today = dateArgIdx >= 0 ? argv[dateArgIdx + 1] : localDate();
 const version = argv.find((a) => !a.startsWith('--') && a !== today);
 
 const read = (p) => fs.readFileSync(p, 'utf8');

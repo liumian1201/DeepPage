@@ -1,6 +1,6 @@
 # DeepPage 更新日志
 
-## v1.3.2 (待发布) — 开发工具链与代码清理
+## v1.3.2 (2026-10-02) — 开发工具链与代码清理
 
 ### 🛠️ 工程
 - **ESLint 护栏**：新增 `eslint.config.mjs`（ESLint 10 flat config）。针对本项目「16 个经典脚本共享全局作用域」的架构，跨文件符号由配置加载时扫描 `src/js/*.js` 顶层声明自动收集，新增模块无需手工登记；只拦运行时问题（未定义变量、重复声明、变量遮蔽、误用 `==`、不可达代码），不争论格式
@@ -8,6 +8,7 @@
 - **版本号单一来源**：新增 `tools/bump-version.mjs`，一条命令同步 `manifest.json` + `package.json` + README 徽章 + CHANGELOG 日期；`--check` 供 CI 校验一致性，`--check --strict` 供发版流程卡住「待发布」状态
 - **CI**：新增 `.github/workflows/ci.yml`（push/PR 跑 版本一致性 + ESLint + 看板逻辑测试 + 真实浏览器 E2E）；release 流程升级为 `actions/checkout@v7` / `actions/setup-node@v7` / `softprops/action-gh-release@v3`，发布前增加 `npm ci` + lint + 测试门禁
 - **测试脚本入库**：零依赖验证脚本迁到公开仓库 `tests/`（逻辑桩测 + headless Chromium E2E），支持 `CHROME_BIN` 指定浏览器，无浏览器时优雅跳过
+- **E2E 稳定性与 CI 适配**：扩展 ID 改为从浏览器 CDP target 发现（不再依赖目录路径哈希推导）；随机调试端口 + 每次独立 profile；按进程组回收浏览器（Chromium 会把真正进程孤儿化，只杀启动壳会残留实例污染下一轮）；轮询等待页面 init 与 storage 落盘，去掉固定 sleep。CI 侧改用 Chrome for Testing（Chromium）—— `--load-extension` 已被 Chrome 137+ 官方 branded 构建移除；退出码约定 `0` 通过 / `1` 断言失败 / `2` 环境不满足（CI 跳过而非误报）
 
 ### 🧹 代码清理（ESLint 首轮发现）
 - `search-engines.js`：本地搜索结果打开逻辑中 `var mode` 重复声明，收敛为单次声明（与 BUG-024 同类的作用域隐患）
