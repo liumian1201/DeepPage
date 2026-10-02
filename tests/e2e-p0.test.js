@@ -473,6 +473,22 @@ function send(method, params, sessionId) {
   check('弹窗已加宽（≥460px）', (await evalJs('document.querySelector("#dialog-group-manager .dialog-card").offsetWidth')) >= 460);
   check('底部按钮均为单行（nowrap 且高度正常）', mgrBtns.length === 4 && mgrBtns.every(b => b.ws === 'nowrap' && b.h <= 44), mgrBtns);
   check('按钮未被压缩（宽度 ≥ 48px）', mgrBtns.every(b => b.w >= 48), mgrBtns);
+  const align = JSON.parse(await evalJs(`(() => {
+    const dlg = document.querySelector('#dialog-group-manager .dialog-card');
+    const row = dlg.querySelector('.dialog-actions');
+    const btns = [...row.querySelectorAll('button')];
+    const dr = dlg.getBoundingClientRect();
+    const first = btns[0].getBoundingClientRect();
+    const last = btns[btns.length - 1].getBoundingClientRect();
+    const input = document.querySelector('.group-mgr-name').getBoundingClientRect();
+    return JSON.stringify({
+      left: Math.round(first.left - dr.left),
+      right: Math.round(dr.right - last.right),
+      inputW: Math.round(input.width),
+    });
+  })()`));
+  check('底部按钮居中（左右留白差 ≤ 8px）', Math.abs(align.left - align.right) <= 8, align);
+  check('分组名输入框已收窄（≤ 220px）', align.inputW <= 220, align.inputW);
   const rowBtns = JSON.parse(await evalJs(`JSON.stringify([...document.querySelectorAll('#group-manager-list .group-mgr-btn')].map(b => b.offsetWidth))`));
   check('行内操作按钮未被压缩', rowBtns.length > 0 && rowBtns.every(w => w >= 26), rowBtns);
   await evalJs('closeGroupManager()');

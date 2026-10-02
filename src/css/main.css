@@ -210,6 +210,7 @@
 .group-mgr-name {
   flex: 1;
   min-width: 0;        /* 允许输入框收缩而不是把右侧按钮挤出容器 */
+  max-width: 200px;    /* 分组名通常很短，不撑满整行，右侧留白更透气 */
   font-size: 14px;
   color: var(--text-primary);
   cursor: pointer;
@@ -234,6 +235,12 @@
   display: flex;
   gap: 6px;
   flex-shrink: 0;      /* 操作按钮不参与压缩，避免贴住输入框 */
+  margin-left: auto;   /* 始终贴右，输入框变窄时也不会让按钮飘到中间 */
+}
+
+/* 分组管理器：底部按钮居中（其余弹窗保持右对齐），避免左侧留白大于右侧的失衡感 */
+#dialog-group-manager .dialog-actions {
+  justify-content: center;
 }
 
 .group-mgr-btn {
