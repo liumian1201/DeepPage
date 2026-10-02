@@ -230,7 +230,11 @@ async function applyWallpaper(settings) {
   var mode = settings.wallpaperMode || 'bing';
   try {
     if (mode === 'bing') { body.classList.add('wallpaper-bing'); await applyBingWallpaper(settings); }
-    else if (mode === 'custom') await applyCustomWallpaper(settings.wallpaperUrl);
+    else if (mode === 'custom') {
+      // v1.5.0: 本地多图优先；列表为空时回退到旧的单图/URL 逻辑
+      var applied = await applyLocalWallpapers(settings);
+      if (!applied) await applyCustomWallpaper(settings.wallpaperUrl);
+    }
   } catch (e) {
     console.warn('壁纸加载失败:', e);
   }
@@ -303,15 +307,23 @@ async function loadWallpaperFromDB() {
 
 var _currentBlobUrl = null;
 
-function setBackgroundImage(url) {
+/**
+ * @param {string} url 图片地址
+ * @param {number} [opacityOverride] 该张壁纸自己的遮罩（v1.5.0 单张遮罩）；
+ *        不传则用全局 wallpaperOpacity。必须在 onload 里用同一个值 ——
+ *        否则异步 onload 会用全局值覆盖调用方刚设好的单张遮罩
+ */
+function setBackgroundImage(url, opacityOverride) {
   var prevBlob = _currentBlobUrl;
   var body = document.body;
   var img = new Image();
   img.onload = function () {
     body.style.backgroundImage = 'url("' + url.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '') + '")';
     body.classList.add('has-wallpaper');
-    // 同步当前遮罩透明度到新壁纸
-    var opacity = (currentSettings && currentSettings.wallpaperOpacity !== undefined) ? currentSettings.wallpaperOpacity : 30;
+    // 同步遮罩透明度到新壁纸（单张优先）
+    var opacity = (opacityOverride !== undefined && opacityOverride !== null)
+      ? opacityOverride
+      : ((currentSettings && currentSettings.wallpaperOpacity !== undefined) ? currentSettings.wallpaperOpacity : 30);
     document.documentElement.style.setProperty('--wallpaper-opacity', opacity / 100);
     // CSS 已内部持有图片，Blob URL 可安全释放
     if (url.startsWith('blob:')) _currentBlobUrl = url;
@@ -325,6 +337,188 @@ function setBackgroundImage(url) {
     if (prevBlob && prevBlob.startsWith('blob:')) URL.revokeObjectURL(prevBlob);
   };
   img.src = url;
+}
+
+/* ========== v1.5.0: 本地多图壁纸 + 轮播 + 单张遮罩 ========== */
+
+var LOCAL_WP_ROTATE_IDX_KEY = 'wallpaper_rotate_idx';
+
+function getLocalWallpapers(settings) {
+  var list = (settings || currentSettings || {}).localWallpapers;
+  return Array.isArray(list) ? list : [];
+}
+
+/**
+ * 选出当前应展示的本地壁纸下标
+ *   off      → 0（固定第一张）
+ *   newtab   → 每次新标签页 +1（序号存 local，多标签页各自递增）
+ *   interval → 按时间片计算 floor(now / interval)，所有标签页一致且到点自动切换
+ */
+async function _pickLocalWallpaperIndex(list, settings) {
+  var mode = settings.wallpaperRotate || 'off';
+  if (list.length <= 1) return 0;
+  if (mode === 'newtab') {
+    var cur = await new Promise(function (r) {
+      chrome.storage.local.get([LOCAL_WP_ROTATE_IDX_KEY], function (d) { r(d[LOCAL_WP_ROTATE_IDX_KEY] || 0); });
+    });
+    var next = (cur + 1) % list.length;
+    chrome.storage.local.set({ [LOCAL_WP_ROTATE_IDX_KEY]: next });
+    return next;
+  }
+  if (mode === 'interval') {
+    var min = settings.wallpaperRotateMin || 30;
+    return Math.floor(Date.now() / (min * 60000)) % list.length;
+  }
+  return 0;
+}
+
+/** 应用本地多图壁纸（含单张独立遮罩） */
+async function applyLocalWallpapers(settings) {
+  var list = getLocalWallpapers(settings);
+  if (list.length === 0) return false;
+  var idx = await _pickLocalWallpaperIndex(list, settings);
+  var item = list[idx];
+  var blob = await loadImage(item.key);
+  if (!blob) { console.warn('本地壁纸缺失:', item.key); return false; }
+  // 单张遮罩优先，未设置则沿用全局；一并传给 setBackgroundImage，避免 onload 回调覆盖
+  var opacity = (item.opacity !== undefined && item.opacity !== null)
+    ? item.opacity
+    : (settings.wallpaperOpacity !== undefined ? settings.wallpaperOpacity : 30);
+  setBackgroundImage(URL.createObjectURL(blob), opacity);
+  document.documentElement.style.setProperty('--wallpaper-opacity', opacity / 100);
+  if (typeof updateWallpaperInfo === 'function') {
+    updateWallpaperInfo({ copyright: item.name || '本地壁纸' }, idx, list.length);
+  }
+  return true;
+}
+
+/** 保存本地壁纸列表 */
+function saveLocalWallpapers(list) {
+  if (!currentSettings) currentSettings = {};
+  currentSettings.localWallpapers = list;
+  if (typeof saveSettings === 'function') saveSettings(currentSettings);
+}
+
+/** 添加多张本地壁纸（文件来自 input 或拖拽） */
+async function addLocalWallpapers(files) {
+  var list = getLocalWallpapers().slice();
+  var added = 0;
+  for (var i = 0; i < files.length; i++) {
+    var f = files[i];
+    if (!f || !/^image\//.test(f.type)) continue;
+    if (f.size > 20 * 1024 * 1024) { console.warn('跳过过大的壁纸:', f.name); continue; }
+    try {
+      var key = await uploadImage(f, 'wp_');
+      list.push({ key: key, name: f.name || ('壁纸 ' + (list.length + 1)), opacity: null });
+      added++;
+    } catch (e) { console.warn('壁纸保存失败:', e.message); }
+  }
+  if (added === 0) return 0;
+  saveLocalWallpapers(list);
+  renderLocalWallpaperList();
+  if (typeof showToast === 'function') showToast('已添加 ' + added + ' 张本地壁纸', 'success');
+  await applyLocalWallpapers(currentSettings);
+  return added;
+}
+
+/** 删除一张本地壁纸 */
+async function deleteLocalWallpaper(key) {
+  var list = getLocalWallpapers().filter(function (it) { return it.key !== key; });
+  saveLocalWallpapers(list);
+  try { await deleteImage(key); } catch (e) { /* 忽略 */ }
+  renderLocalWallpaperList();
+  if (list.length === 0) {
+    // 列表清空 → 回到无自定义壁纸状态
+    document.body.style.backgroundImage = '';
+    document.body.classList.remove('has-wallpaper');
+  } else {
+    await applyLocalWallpapers(currentSettings);
+  }
+}
+
+/** 设置某张壁纸的独立遮罩（null = 跟随全局） */
+function setLocalWallpaperOpacity(key, opacity) {
+  var list = getLocalWallpapers();
+  var it = list.find(function (x) { return x.key === key; });
+  if (!it) return;
+  it.opacity = (opacity === null || opacity === undefined || opacity === '') ? null : parseInt(opacity, 10);
+  saveLocalWallpapers(list);
+  renderLocalWallpaperList();          // 同步该项标签/滑块，避免 UI 与数据不一致
+  applyLocalWallpapers(currentSettings);
+}
+
+/** 渲染本地壁纸列表（缩略图 + 单张遮罩 + 删除） */
+function renderLocalWallpaperList() {
+  var wrap = document.getElementById('local-wallpaper-list');
+  if (!wrap) return;
+  var list = getLocalWallpapers();
+  if (list.length === 0) {
+    wrap.innerHTML = '<div class="lw-empty">还没有本地壁纸，点下面的按钮添加（可多选）</div>';
+    return;
+  }
+  var globalOp = (currentSettings && currentSettings.wallpaperOpacity !== undefined) ? currentSettings.wallpaperOpacity : 30;
+  wrap.innerHTML = list.map(function (it, i) {
+    var op = (it.opacity === undefined || it.opacity === null) ? '' : it.opacity;
+    return '<div class="lw-item" data-key="' + escapeHtml(it.key) + '">' +
+      '<img class="lw-thumb" data-key="' + escapeHtml(it.key) + '" alt="' + escapeHtml(it.name) + '">' +
+      '<div class="lw-meta">' +
+        '<span class="lw-name" title="' + escapeHtml(it.name) + '">' + (i + 1) + '. ' + escapeHtml(it.name) + '</span>' +
+        '<div class="lw-opacity">' +
+          '<span class="lw-op-label">遮罩</span>' +
+          '<input type="range" class="lw-op" data-key="' + escapeHtml(it.key) + '" min="0" max="100" step="5" value="' + (op === '' ? globalOp : op) + '">' +
+          '<span class="lw-op-val">' + (op === '' ? '跟随全局' : op + '%') + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<button class="lw-del" data-key="' + escapeHtml(it.key) + '" title="删除这张壁纸" aria-label="删除壁纸">✕</button>' +
+      '</div>';
+  }).join('');
+
+  // 缩略图（异步读 IndexedDB，读完即回收 Blob URL）
+  wrap.querySelectorAll('.lw-thumb').forEach(function (imgEl) {
+    loadImage(imgEl.dataset.key).then(function (blob) {
+      if (!blob) return;
+      var u = URL.createObjectURL(blob);
+      imgEl.src = u;
+      imgEl.onload = function () { URL.revokeObjectURL(u); };
+    });
+  });
+  wrap.querySelectorAll('.lw-del').forEach(function (btn) {
+    btn.addEventListener('click', function (e) { e.stopPropagation(); deleteLocalWallpaper(this.dataset.key); });
+  });
+  wrap.querySelectorAll('.lw-op').forEach(function (slider) {
+    slider.addEventListener('input', function () {
+      var val = this.parentElement.querySelector('.lw-op-val');
+      if (val) val.textContent = this.value + '%';
+      document.documentElement.style.setProperty('--wallpaper-opacity', this.value / 100);
+    });
+    slider.addEventListener('change', function () { setLocalWallpaperOpacity(this.dataset.key, this.value); });
+  });
+}
+
+/** 绑定列表相关的上传/轮播控件（由设置面板初始化时调用） */
+function initLocalWallpaperUI() {
+  renderLocalWallpaperList();
+  var multiBtn = document.getElementById('btn-wallpaper-upload-multi');
+  var multiInput = document.getElementById('wallpaper-file-input-multi');
+  if (multiBtn && multiInput) {
+    multiBtn.addEventListener('click', function () { multiInput.click(); });
+    multiInput.addEventListener('change', function () {
+      if (this.files && this.files.length) addLocalWallpapers(this.files);
+      this.value = '';
+    });
+  }
+  var rotateSel = document.getElementById('setting-wallpaper-rotate');
+  if (rotateSel) {
+    var syncRow = function () {
+      var row = document.getElementById('wallpaper-rotate-min-row');
+      if (row) row.style.display = rotateSel.value === 'interval' ? '' : 'none';
+    };
+    rotateSel.addEventListener('change', function () {
+      syncRow();
+      if (typeof onSettingChanged === 'function') onSettingChanged();
+    });
+    syncRow();
+  }
 }
 
 /* ========== 初始化 ========== */

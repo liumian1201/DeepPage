@@ -39,6 +39,9 @@ var DEFAULT_SETTINGS = {
   showTodo: true,          // v1.5.0: 看板待办组件
   todoItems: [],
   searchSuggestions: false,   // v1.5.0: 历史/书签搜索建议（需可选权限）
+  localWallpapers: [],        // v1.5.0: 本地多图壁纸 [{ key, name, opacity }]
+  wallpaperRotate: 'off',     // off | newtab | interval
+  wallpaperRotateMin: 30,
   theme: 'light',
   showAddButton: true,
   showCardTitle: true,

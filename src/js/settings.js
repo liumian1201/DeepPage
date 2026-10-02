@@ -45,6 +45,9 @@ const domSettings = {
   noneWallpaperGroup: document.getElementById('none-wallpaper-group'),
   wallpaperColor: document.getElementById('setting-wallpaper-color'),
   wallpaperOpacity: document.getElementById('setting-wallpaper-opacity'),
+  wallpaperRotate: document.getElementById('setting-wallpaper-rotate'),
+  wallpaperRotateMin: document.getElementById('setting-wallpaper-rotate-min'),
+  wallpaperRotateMinVal: document.getElementById('wallpaper-rotate-min-val'),
   wallpaperOpacityVal: document.getElementById('wallpaper-opacity-val'),
   bingWallpaperGroup: document.getElementById('bing-wallpaper-group'),
   bingRegion:    document.getElementById('setting-bing-region'),
@@ -133,6 +136,8 @@ function ensureSettingsPanelReady() {
   initAppearance(domSettings, currentSettings, onAppearanceChanged);
   // 初始化数据管理按钮
   bindBackupEvents();
+  // v1.5.0: 本地多图壁纸列表 + 轮播控件
+  if (typeof initLocalWallpaperUI === 'function') initLocalWallpaperUI();
 }
 
 /** 将设置数据填入表单 */
@@ -185,6 +190,9 @@ function populateSettingsForm(settings) {
   if (domSettings.wallpaperColor) domSettings.wallpaperColor.value = settings.wallpaperColor || '#1a1a2e';
   var wo = settings.wallpaperOpacity !== undefined ? settings.wallpaperOpacity : 30;
   if (domSettings.wallpaperOpacity) domSettings.wallpaperOpacity.value = wo;
+  if (domSettings.wallpaperRotate) domSettings.wallpaperRotate.value = settings.wallpaperRotate || 'off';
+  if (domSettings.wallpaperRotateMin) domSettings.wallpaperRotateMin.value = settings.wallpaperRotateMin || 30;
+  if (domSettings.wallpaperRotateMinVal) domSettings.wallpaperRotateMinVal.textContent = (settings.wallpaperRotateMin || 30) + ' 分钟';
   if (domSettings.wallpaperOpacityVal) domSettings.wallpaperOpacityVal.textContent = wo + '%';
   if (domSettings.bingRegion) domSettings.bingRegion.value = settings.bingRegion || 'zh-CN';
   if (domSettings.bingUHD) domSettings.bingUHD.checked = settings.bingUHD === true;
@@ -476,6 +484,8 @@ function collectSettingsFromForm() {
     wallpaperUrl:  domSettings.wallpaperUrl.value.trim(),
     wallpaperColor: domSettings.wallpaperColor ? domSettings.wallpaperColor.value : '#1a1a2e',
     wallpaperOpacity: domSettings.wallpaperOpacity ? parseInt(domSettings.wallpaperOpacity.value, 10) : 30,
+    wallpaperRotate: domSettings.wallpaperRotate ? domSettings.wallpaperRotate.value : 'off',
+    wallpaperRotateMin: domSettings.wallpaperRotateMin ? parseInt(domSettings.wallpaperRotateMin.value, 10) : 30,
     bingRegion:    domSettings.bingRegion ? domSettings.bingRegion.value : 'zh-CN',
     bingUHD:       domSettings.bingUHD ? domSettings.bingUHD.checked : false,
     bingAutoRefresh: domSettings.bingAutoRefresh ? domSettings.bingAutoRefresh.checked : true,
@@ -605,6 +615,14 @@ function bindSettingsEvents() {
   }
   if (domSettings.backupIncludeImages) {
     domSettings.backupIncludeImages.addEventListener('change', onSettingChanged);
+  }
+
+  // v1.5.0: 壁纸轮播间隔
+  if (domSettings.wallpaperRotateMin && domSettings.wallpaperRotateMinVal) {
+    domSettings.wallpaperRotateMin.addEventListener('input', function () {
+      domSettings.wallpaperRotateMinVal.textContent = this.value + ' 分钟';
+    });
+    domSettings.wallpaperRotateMin.addEventListener('change', onSettingChanged);
   }
 
   // 壁纸模式切换 → 显示/隐藏对应控件

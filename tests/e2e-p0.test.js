@@ -688,7 +688,62 @@ function send(method, params, sessionId) {
   await evalJs('closeSettingsPanel()');
   await sleep(300);
 
-  console.log('\n[17] 页面无 JS 报错');
+  console.log('\n[17] P3-7 本地多图壁纸 + 轮播 + 单张遮罩');
+  // 面板已在上一步关闭，重新打开以初始化壁纸 UI
+  await evalJs('openSettingsPanel()');
+  await sleep(400);
+  check('多图壁纸 UI 已渲染', (await evalJs('!!document.getElementById("local-wallpaper-list") && !!document.getElementById("btn-wallpaper-upload-multi") && !!document.getElementById("setting-wallpaper-rotate")')) === true);
+  check('轮播默认关闭且间隔行隐藏', (await evalJs('document.getElementById("setting-wallpaper-rotate").value')) === 'off' && (await evalJs('getComputedStyle(document.getElementById("wallpaper-rotate-min-row")).display')) === 'none');
+
+  // 用内存中的 1x1 PNG 构造 File，走真实上传路径
+  const added = await evalJs(`(async () => {
+    const b64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const f1 = new File([bytes], '壁纸A.png', { type: 'image/png' });
+    const f2 = new File([bytes], '壁纸B.png', { type: 'image/png' });
+    return await addLocalWallpapers([f1, f2]);
+  })()`);
+  check('添加两张本地壁纸', added === 2, added);
+  check('写入 settings.localWallpapers', (await evalJs('getLocalWallpapers().length')) === 2);
+  check('列表渲染 2 项', (await evalJs('document.querySelectorAll("#local-wallpaper-list .lw-item").length')) === 2);
+  check('缩略图已加载', (await evalJs('(() => { const im = document.querySelector("#local-wallpaper-list .lw-thumb"); return !!im && im.src.indexOf("blob:") === 0; })()')) === true);
+
+  // 单张独立遮罩
+  const wpKey = await evalJs('getLocalWallpapers()[0].key');
+  await evalJs(`setLocalWallpaperOpacity('${wpKey}', 75)`);
+  await sleep(500);
+  check('单张遮罩写入该张', (await evalJs('getLocalWallpapers()[0].opacity')) === 75);
+  check('单张遮罩生效到 CSS 变量', (await evalJs('getComputedStyle(document.documentElement).getPropertyValue("--wallpaper-opacity").trim()')) === '0.75', await evalJs('getComputedStyle(document.documentElement).getPropertyValue("--wallpaper-opacity")'));
+  await evalJs(`setLocalWallpaperOpacity('${wpKey}', null)`);
+  await sleep(300);
+  check('清除后回退为跟随全局', (await evalJs('getLocalWallpapers()[0].opacity')) === null);
+
+  // 轮播：newtab 每次递增；interval 按时间片固定
+  await evalJs(`(async () => { currentSettings.wallpaperRotate = 'newtab'; const a = await _pickLocalWallpaperIndex(getLocalWallpapers(), currentSettings); const b = await _pickLocalWallpaperIndex(getLocalWallpapers(), currentSettings); return JSON.stringify([a, b]); })()`);
+  const rot = JSON.parse(await evalJs(`(async () => { const a = await _pickLocalWallpaperIndex(getLocalWallpapers(), currentSettings); const b = await _pickLocalWallpaperIndex(getLocalWallpapers(), currentSettings); return JSON.stringify([a, b]); })()`));
+  check('newtab 模式逐次递增', rot[1] === (rot[0] + 1) % 2, rot);
+  const rot2 = JSON.parse(await evalJs(`(async () => { currentSettings.wallpaperRotate = 'interval'; currentSettings.wallpaperRotateMin = 30; const a = await _pickLocalWallpaperIndex(getLocalWallpapers(), currentSettings); const b = await _pickLocalWallpaperIndex(getLocalWallpapers(), currentSettings); return JSON.stringify([a, b]); })()`));
+  check('interval 模式同一时间片内固定', rot2[0] === rot2[1] && rot2[0] >= 0 && rot2[0] < 2, rot2);
+
+  // 应用与删除
+  await evalJs(`(async () => { currentSettings.wallpaperMode = 'custom'; currentSettings.wallpaperRotate = 'off'; await applyWallpaper(currentSettings); return 'ok'; })()`);
+  await sleep(800);
+  check('应用本地壁纸后 body 有 has-wallpaper', (await evalJs('document.body.classList.contains("has-wallpaper")')) === true);
+  check('背景图为 blob URL', (await evalJs('document.body.style.backgroundImage.indexOf("blob:") !== -1')) === true);
+  await evalJs(`deleteLocalWallpaper('${wpKey}')`);
+  await sleep(600);
+  check('删除后列表剩 1 张', (await evalJs('getLocalWallpapers().length')) === 1);
+  check('IndexedDB 中已删除', (await evalJs(`(async () => (await loadImage('${wpKey}')) === undefined)()`)) === true);
+  // 清理：清空列表避免影响后续断言
+  await evalJs('(async () => { const keys = getLocalWallpapers().map(x => x.key); for (const k of keys) { await deleteLocalWallpaper(k); } return "ok"; })()');
+  await sleep(600);
+  check('清空后列表为空', (await evalJs('getLocalWallpapers().length')) === 0);
+  await evalJs('closeSettingsPanel()');
+  await sleep(300);
+
+  console.log('\n[18] 页面无 JS 报错');
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);

@@ -423,6 +423,27 @@
               <button id="btn-wallpaper-upload" class="btn-upload">📁 上传本地壁纸</button>
               <input type="file" id="wallpaper-file-input" accept="image/*" class="hidden">
             </div>
+            <div class="lw-section">
+              <label>本地壁纸轮播（可多张，支持单张遮罩）</label>
+              <div id="local-wallpaper-list" class="local-wallpaper-list"></div>
+              <div class="upload-row">
+                <button id="btn-wallpaper-upload-multi" class="btn-upload">📁 添加本地壁纸（可多选）</button>
+                <input type="file" id="wallpaper-file-input-multi" accept="image/*" multiple class="hidden">
+              </div>
+            </div>
+            <div class="lw-rotate">
+              <label for="setting-wallpaper-rotate">轮播方式</label>
+              <select id="setting-wallpaper-rotate">
+                <option value="off">不轮播（固定第一张）</option>
+                <option value="newtab">每次新标签页换一张</option>
+                <option value="interval">按时间间隔自动切换</option>
+              </select>
+              <div class="setting-inline-row" id="wallpaper-rotate-min-row" style="display:none">
+                <label for="setting-wallpaper-rotate-min" class="setting-inline-label">切换间隔</label>
+                <span id="wallpaper-rotate-min-val" class="slider-val">30 分钟</span>
+                <input type="range" id="setting-wallpaper-rotate-min" min="5" max="240" step="5" value="30">
+              </div>
+            </div>
           </div>
           <div id="none-wallpaper-group" class="setting-group hidden">
             <label for="setting-wallpaper-color">纯色背景</label>

@@ -562,6 +562,63 @@
 }
 
 /* --------------------- 上传按钮 --------------------- */
+/* --------------------- v1.5.0: 本地多图壁纸 --------------------- */
+.lw-section { margin-top: 10px; }
+.lw-rotate { margin-top: 10px; }
+.lw-rotate select {
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--btn-radius);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 13px;
+}
+.local-wallpaper-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.lw-empty { color: var(--text-muted, #888); font-size: 12px; padding: 4px 0; }
+.lw-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+}
+.lw-thumb {
+  width: 56px; height: 34px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: var(--bg-input);
+  flex-shrink: 0;
+}
+.lw-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.lw-name {
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lw-opacity { display: flex; align-items: center; gap: 6px; }
+.lw-op-label, .lw-op-val { font-size: 11px; color: var(--text-secondary); flex-shrink: 0; }
+.lw-op-val { min-width: 52px; }
+.lw-op { flex: 1; min-width: 0; }
+.lw-del {
+  flex-shrink: 0;
+  border: none; background: none; cursor: pointer;
+  color: var(--text-secondary); font-size: 13px;
+  padding: 2px 4px; border-radius: 4px;
+}
+.lw-del:hover { color: #d93025; background: var(--accent-light); }
+
 .btn-upload {
   padding: 8px 14px;
   border: 1px dashed var(--border-color);
