@@ -1,6 +1,6 @@
 {
   "name": "deeppage",
-  "version": "1.3.3",
+  "version": "1.4.0",
   "private": true,
   "description": "DeepPage — Chrome 新标签页扩展（开发工具链，不随扩展发布）",
   "scripts": {
