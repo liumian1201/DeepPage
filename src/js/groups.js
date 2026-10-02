@@ -10,8 +10,10 @@ function renderGroupDots() {
   if (!showIndicator) return;
 
   var html = '';
-  var sel = document.getElementById('setting-group-name-mode');
-  var mode = sel ? sel.value : 'all';
+  // v1.5.4: 显示规则必须读设置数据，不能读设置面板里的下拉框 ——
+  // 面板是懒初始化的，未打开时下拉框只有 HTML 默认值（第一个选项「仅当前组」），
+  // 于是每次刷新后指示器都被"限定"成仅当前组，看起来像设置保存不了
+  var mode = (currentSettings && currentSettings.showGroupName) || 'all';
   if (mode !== 'all' && mode !== 'active' && mode !== 'off') mode = 'all';
 
   var pos = domMain.groupIndicator.getAttribute('data-position') || 'left';

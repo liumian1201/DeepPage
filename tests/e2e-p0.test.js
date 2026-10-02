@@ -919,11 +919,66 @@ function send(method, params, sessionId) {
   await evalJs('closeSettingsPanel()');
   await sleep(300);
 
+  console.log('\n[19] 分组名显示规则（不打开设置面板也必须生效）');
+  // 先确保有两个分组，然后分别写入三种规则并刷新页面断言
+  await evalJs(`(async () => {
+    if (groups.length < 2) { groups.push({ id: 'gn_test', name: '测试组', cards: [] }); await saveGroups(groups); }
+    return 'ok';
+  })()`);
+  const groupCount = await evalJs('groups.length');
+
+  async function setGroupNameModeAndReload(mode) {
+    await send('Page.navigate', { url: `chrome-extension://${EXT_ID}/index.html` }, sid);
+    await sleep(1300);
+    await waitForReady();
+    await evalJs(`(async () => {
+      await flushSyncWrites();
+      const s = Object.assign({}, currentSettings);
+      s.showGroupName = ${JSON.stringify(mode)};
+      currentSettings = s;
+      await new Promise(r => chrome.storage.sync.set({ settings: s }, r));
+      return 'ok';
+    })()`);
+    await send('Page.navigate', { url: `chrome-extension://${EXT_ID}/index.html` }, sid);
+    await sleep(1500);
+    await waitForReady();
+    return JSON.parse(await evalJs(`JSON.stringify((() => {
+      const ind = document.getElementById('group-indicator');
+      return {
+        names: ind.querySelectorAll('.group-dot-name, .group-tab').length,
+        tabs: ind.querySelectorAll('.group-tab').length,
+        dots: ind.querySelectorAll('.group-dot').length,
+        panelOpen: !document.getElementById('settings-panel').classList.contains('hidden'),
+        selectValue: document.getElementById('setting-group-name-mode').value,
+        setting: currentSettings.showGroupName
+      };
+    })())`));
+  }
+
+  const gnAll = await setGroupNameModeAndReload('all');
+  check('规则=全部：刷新后显示所有组名（且未打开设置面板）', gnAll.names === groupCount && !gnAll.panelOpen, gnAll);
+  const gnActive = await setGroupNameModeAndReload('active');
+  check('规则=仅当前组：只显示当前组名', gnActive.names === 1, gnActive);
+  const gnOff = await setGroupNameModeAndReload('off');
+  check('规则=不显示：只有圆点没有组名', gnOff.names === 0 && gnOff.dots === groupCount, gnOff);
+  check('设置值原样保存（未被下拉框默认值覆盖）', gnOff.setting === 'off' && gnActive.setting === 'active', { off: gnOff.setting, active: gnActive.setting });
+
+  // 面板里改下拉框 → 应用并落盘
+  await evalJs('openSettingsPanel()');
+  await sleep(500);
+  check('面板回填为已保存的规则', (await evalJs('document.getElementById("setting-group-name-mode").value')) === 'off');
+  await evalJs(`(() => { const sel = document.getElementById('setting-group-name-mode'); sel.value = 'all'; sel.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; })()`);
+  await sleep(900);
+  check('面板切换后立即生效', (await evalJs(`document.querySelectorAll('#group-indicator .group-dot-name, #group-indicator .group-tab').length`)) === groupCount, await evalJs(`document.querySelectorAll('#group-indicator .group-dot-name, #group-indicator .group-tab').length`));
+  check('面板切换后写入设置', (await evalJs('currentSettings.showGroupName')) === 'all');
+  await evalJs('closeSettingsPanel()');
+  await sleep(300);
+
   // 自测过滤规则：外部服务网络错误应被忽略（CI 上真实出现过），真实 JS 异常仍会被捕获
   await evalJs('console.error("Open-Meteo error: fetch failed（测试注入，应被忽略）")');
   await sleep(200);
 
-  console.log('\n[19] 版式回归（看板不强制换行 / 信息条不压搜索栏与卡片）');
+  console.log('\n[20] 版式回归（看板不强制换行 / 信息条不压搜索栏与卡片）');
   await evalJs('closeSettingsPanel()');
   await sleep(300);
   const layout = JSON.parse(await evalJs(`JSON.stringify((() => {
@@ -946,7 +1001,7 @@ function send(method, params, sessionId) {
   const vw = await evalJs('window.innerWidth');
   check('看板占满可用宽度（94vw，无固定像素上限）', dashW / vw > 0.9, { dashW, vw });
 
-  console.log('\n[20] 页面无 JS 报错');
+  console.log('\n[21] 页面无 JS 报错');
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);

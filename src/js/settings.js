@@ -164,7 +164,10 @@ function populateSettingsForm(settings) {
   _updateBackupModeUI();
   if (domSettings.toggleLock) domSettings.toggleLock.checked = settings.isLocked === true;
   if (domSettings.toggleShowGroupIndicator) domSettings.toggleShowGroupIndicator.checked = settings.showGroupIndicator !== false;
-  if (domSettings.groupNameMode) domSettings.groupNameMode.value = settings.showGroupName || 'all';
+  if (domSettings.groupNameMode) {
+    var gnm = settings.showGroupName;
+    domSettings.groupNameMode.value = (gnm === 'all' || gnm === 'active' || gnm === 'off') ? gnm : 'all';
+  }
   domSettings.toggleShowSearch.checked = settings.showSearch !== false;
   if (domSettings.cardOpenMode) domSettings.cardOpenMode.value = settings.cardOpenMode || 'current';
   var cmt = settings.cardsMarginTop || 0;
