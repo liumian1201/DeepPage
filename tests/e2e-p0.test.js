@@ -422,9 +422,9 @@ function send(method, params, sessionId) {
   console.log('\n[11] P2 看板 12 列栅格 / 跨列 / 拖拽 / 数据迁移');
   check('组件注册表含 4 个组件（P3-4 新增待办）', (await evalJs('DASHBOARD_WIDGETS.length')) === 4, await evalJs('DASHBOARD_WIDGETS.map(w=>w.id).join(",")'));
   check('组件默认跨列合计仍为 12', (await evalJs('DASHBOARD_WIDGETS.reduce((n,w)=>n+w.defaultSpan,0)')) === 12, await evalJs('DASHBOARD_WIDGETS.reduce((n,w)=>n+w.defaultSpan,0)'));
-  check('栅格为 12 列', (await evalJs('getComputedStyle(document.getElementById("dashboard-grid")).gridTemplateColumns.split(" ").length')) === 12);
-  const spans = JSON.parse(await evalJs('JSON.stringify([...document.querySelectorAll("#dashboard-grid .dashboard-item")].map(e=>[e.dataset.widget, e.style.gridColumn]))'));
-  check('每个组件都写入了 grid-column', spans.every(x => /^span \d+$/.test(x[1])), spans);
+  check('看板为 12 列宽度模型（flex）', (await evalJs('getComputedStyle(document.getElementById("dashboard-grid")).display')) === 'flex' && (await evalJs('getComputedStyle(document.getElementById("dashboard-grid")).justifyContent')) === 'center');
+  const spans = JSON.parse(await evalJs(`JSON.stringify([...document.querySelectorAll('#dashboard-grid .dashboard-item')].map(e => [e.dataset.widget, e.style.getPropertyValue('--dash-n')]))`));
+  check('每个组件都写入了 --dash-n', spans.every(x => /^\d+$/.test(x[1])), spans);
   check('布局模型覆盖全部注册组件', (await evalJs('(() => { const l = getDashboardLayout(); return Object.keys(l).length === DASHBOARD_WIDGETS.length && DASHBOARD_WIDGETS.every(w => typeof l[w.id].order === "number" && typeof l[w.id].span === "number"); })()')) === true);
 
   // 跨列调节：−/＋ 按钮 + 上下限钳制
@@ -433,7 +433,7 @@ function send(method, params, sessionId) {
   await evalJs('document.querySelector(\'[data-widget="clock"] .dash-span-grow\').click()');
   await sleep(500);
   check('＋ 增大跨列', (await evalJs('getDashboardLayout().clock.span')) === spanBefore + 1, { spanBefore, after: await evalJs('getDashboardLayout().clock.span') });
-  check('跨列写入 DOM', (await evalJs('document.querySelector(\'[data-widget="clock"]\').style.gridColumn')) === 'span ' + (spanBefore + 1));
+  check('跨列写入 DOM', (await evalJs(`document.querySelector('[data-widget="clock"]').style.getPropertyValue('--dash-n')`)) === String(spanBefore + 1), await evalJs(`document.querySelector('[data-widget="clock"]').style.getPropertyValue('--dash-n')`));
   // 钳制到 12
   for (let i = 0; i < 15; i++) await evalJs('document.querySelector(\'[data-widget="clock"] .dash-span-grow\').click()');
   await sleep(600);
@@ -453,9 +453,38 @@ function send(method, params, sessionId) {
   const limitFlash = await evalJs(`(() => { document.querySelector('[data-widget="clock"] .dash-span-shrink').click(); return document.querySelector('[data-widget="clock"]').classList.contains('dash-span-limit'); })()`);
   check('到最小宽度时给出抖动反馈（不再静默无反应）', limitFlash === true);
   check('缩到 1 列后组件仍占一行（不换行）', (await evalJs(`new Set([...document.querySelectorAll('#dashboard-grid .dashboard-item')].map(el => Math.round(el.getBoundingClientRect().bottom))).size`)) === 1);
+  // v1.5.3: 变窄不再缩放字号（用户反馈：卡片缩小文字也跟着变小）
+  const fontAtMin = await evalJs(`getComputedStyle(document.querySelector('[data-widget="clock"] .clock-time')).fontSize`);
+  check('缩到 1 列后时钟字号不变', fontAtMin === (await evalJs(`(() => { const el = document.createElement('div'); el.className = 'clock-time'; document.body.appendChild(el); const fs = getComputedStyle(el).fontSize; el.remove(); return fs; })()`)) || fontAtMin === '32px', { fontAtMin });
+
   // 复原为默认
   await evalJs(`(async () => { const l = getDashboardLayout(); DASHBOARD_WIDGETS.forEach(w => { l[w.id].span = w.defaultSpan; l[w.id].order = DASHBOARD_WIDGETS.indexOf(w); }); _saveLayout(l); return 'ok'; })()`);
   await sleep(700);
+  const fontAtDefault = await evalJs(`getComputedStyle(document.querySelector('[data-widget="clock"] .clock-time')).fontSize`);
+  check('列宽变化不影响字号（1 列与默认列宽一致）', fontAtMin === fontAtDefault, { fontAtMin, fontAtDefault });
+
+  // v1.5.3: 跨列合计小于 12 → 整行居中（此前 grid 会把内容全部挤到左边）
+  await evalJs(`(async () => { const l = getDashboardLayout(); l.clock.span = 2; l.weather.span = 2; l.todo.span = 2; l.lunar.span = 2; _saveLayout(l); return 'ok'; })()`);
+  await sleep(800);
+  const centerBox = JSON.parse(await evalJs(`JSON.stringify((() => {
+    const grid = document.getElementById('dashboard-grid');
+    const items = [...grid.querySelectorAll('.dashboard-item')];
+    const g = grid.getBoundingClientRect();
+    const left = Math.min(...items.map(e => e.getBoundingClientRect().left)) - g.left;
+    const right = g.right - Math.max(...items.map(e => e.getBoundingClientRect().right));
+    return { left: Math.round(left), right: Math.round(right), row: new Set(items.map(e => Math.round(e.getBoundingClientRect().bottom))).size };
+  })())`));
+  check('跨列合计 < 12 时整行居中（左右留白近似相等）', Math.abs(centerBox.left - centerBox.right) <= 2 && centerBox.row === 1, centerBox);
+  await evalJs(`(async () => { const l = getDashboardLayout(); DASHBOARD_WIDGETS.forEach(w => { l[w.id].span = w.defaultSpan; l[w.id].order = DASHBOARD_WIDGETS.indexOf(w); }); _saveLayout(l); return 'ok'; })()`);
+  await sleep(700);
+  const fullBox = JSON.parse(await evalJs(`JSON.stringify((() => {
+    const grid = document.getElementById('dashboard-grid');
+    const items = [...grid.querySelectorAll('.dashboard-item')];
+    const g = grid.getBoundingClientRect();
+    return { left: Math.round(Math.min(...items.map(e => e.getBoundingClientRect().left)) - g.left), right: Math.round(g.right - Math.max(...items.map(e => e.getBoundingClientRect().right))),
+      n: items.map(e => e.style.getPropertyValue('--dash-n')), model: Object.fromEntries(DASHBOARD_WIDGETS.map(w => [w.id, getDashboardLayout()[w.id].span])) };
+  })())`));
+  check('合计 = 12 时铺满一行（左右无多余留白）', fullBox.left <= 2 && fullBox.right <= 2, fullBox);
 
   // 拖拽换位
   const orderBefore = JSON.parse(await evalJs('JSON.stringify(Object.fromEntries(Object.entries(getDashboardLayout()).map(([k,v])=>[k,v.order])))'));
@@ -532,6 +561,12 @@ function send(method, params, sessionId) {
   await evalJs(`(() => { const sel = document.getElementById('setting-dashboard-layout'); sel.value = 'column'; sel.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; })()`);
   await sleep(800);
   check('切到垂直排列后 data-layout=column', (await evalJs('document.getElementById("dashboard-grid").getAttribute("data-layout")')) === 'column');
+  const colBox = JSON.parse(await evalJs(`JSON.stringify((() => {
+    const items = [...document.querySelectorAll('#dashboard-grid .dashboard-item')];
+    const rs = items.map(e => e.getBoundingClientRect());
+    return { tops: new Set(rs.map(r => Math.round(r.top))).size, lefts: new Set(rs.map(r => Math.round(r.left))).size, widths: new Set(rs.map(r => Math.round(r.width))).size };
+  })())`));
+  check('垂直排列：组件上下堆叠且等宽', colBox.tops === 4 && colBox.lefts === 1 && colBox.widths === 1, colBox);
   await evalJs(`(() => { const sel = document.getElementById('setting-dashboard-layout'); sel.value = 'row'; sel.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; })()`);
   await sleep(800);
   check('切回水平排列生效', (await evalJs('document.getElementById("dashboard-grid").getAttribute("data-layout")')) === 'row');

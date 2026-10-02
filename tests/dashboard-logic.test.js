@@ -8,10 +8,20 @@ const path = require('path');
 const code = fs.readFileSync(path.resolve(__dirname, '../src/js/dashboard.js'), 'utf8');
 
 // ---- 最小 DOM 桩 ----
+/** 桩用的 style 对象：支持 setProperty/getPropertyValue（--dash-n 等自定义属性） */
+function makeStyle() {
+  const props = {};
+  return {
+    setProperty(k, v) { props[k] = String(v); },
+    getPropertyValue(k) { return props[k] || ''; },
+    removeProperty(k) { delete props[k]; },
+  };
+}
+
 function makeItem(widget) {
   return {
     dataset: { widget },
-    style: {},
+    style: makeStyle(),
     _children: [],
     closest: () => null,
     querySelector(sel) { return this._children.find(c => (c.className || '').split(' ').includes(sel.replace('.', ''))) || null; },
@@ -35,7 +45,7 @@ const DEFAULT_ORDER = WIDGET_IDS.join(',');
 function makeEl(tag) {
   return {
     tagName: (tag || 'div').toUpperCase(),
-    className: '', textContent: '', title: '', dataset: {}, style: {},
+    className: '', textContent: '', title: '', dataset: {}, style: makeStyle(),
     _attrs: {},
     setAttribute(k, v) { this._attrs[k] = v; },
     getAttribute(k) { return this._attrs[k]; },

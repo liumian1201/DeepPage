@@ -115,7 +115,9 @@ function applyDashWidgetLayout(layout) {
              grid.querySelector('.dashboard-item[data-widget="' + w.id + '"]');
     if (!el) return;
     var span = _clampSpan((layout[w.id] || {}).span, w);
-    el.style.gridColumn = 'span ' + span;
+    // v1.5.3: 宽度改用 flex 的 --dash-n（原先 grid-column 在跨列合计 <12 时会全部靠左）
+    el.style.setProperty('--dash-n', String(span));
+    if (el.style.gridColumn) el.style.gridColumn = '';   // 清理升级前残留的内联样式
     el.dataset.span = String(span);
     el.style.order = '';
     grid.appendChild(el);          // 按 order 依次落到末尾 → DOM 顺序即视觉顺序
@@ -390,6 +392,9 @@ function isDashEditing() { return _dashEditing; }
 /* v1.3.1: 防抖保存 —— 连点箭头只写一次 storage.sync */
 function _saveLayout(layout) {
   _dashWorkingLayout = layout;
+  // v1.5.3: 保存即应用 —— 原先只更新工作副本并等防抖落盘，
+  // 若调用方没自己调 applyDashWidgetLayout，就会出现「数据已改、界面没变」
+  if (layout) applyDashWidgetLayout(layout);
   if (_dashSaveTimer) clearTimeout(_dashSaveTimer);
   _dashSaveTimer = setTimeout(_flushLayout, 300);
 }
