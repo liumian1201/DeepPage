@@ -494,7 +494,76 @@ function send(method, params, sessionId) {
   await evalJs('closeGroupManager()');
   await sleep(300);
 
-  console.log('\n[13] 页面无 JS 报错');
+  console.log('\n[13] P3-1 卡片多选批量操作');
+  await evalJs('clearCardSelection()');
+  const cardCount = await evalJs('document.querySelectorAll("#speeddial-grid .card-wrapper[data-id]").length');
+  check('当前分组卡片数足够测试', cardCount >= 3, cardCount);
+
+  // Ctrl+点击选中两张（不应打开卡片）
+  await evalJs(`(() => {
+    const cards = [...document.querySelectorAll('#speeddial-grid .card-wrapper[data-id]')];
+    cards[0].querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+    cards[2].querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+    return 'ok';
+  })()`);
+  await sleep(250);
+  check('Ctrl+点击选中 2 张', (await evalJs('getSelectedCardIds().length')) === 2, await evalJs('JSON.stringify(getSelectedCardIds())'));
+  check('选中卡片带 .selected 样式', (await evalJs('document.querySelectorAll("#speeddial-grid .card-wrapper.selected").length')) === 2);
+  check('工具栏出现且计数正确', (await evalJs('document.getElementById("batch-count").textContent')) === '已选 2 张');
+  check('Ctrl+点击不会打开卡片', (await evalJs('location.href')).includes('index.html'));
+
+  // Shift 区间选中
+  await evalJs(`(() => { const c=[...document.querySelectorAll('#speeddial-grid .card-wrapper[data-id]')]; c[1].querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true})); return 'ok'; })()`);
+  await evalJs(`(() => { const c=[...document.querySelectorAll('#speeddial-grid .card-wrapper[data-id]')]; c[0].querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click',{bubbles:true,shiftKey:true})); return 'ok'; })()`);
+  await sleep(250);
+  check('Shift 区间选中生效', (await evalJs('getSelectedCardIds().length')) >= 2, await evalJs('getSelectedCardIds().length'));
+
+  // 批量移动
+  await evalJs('(async () => { await _applyGroupImport({ type: "deeppage-group", version: 1, group: { name: "批量目标组", cards: [] } }); return "ok"; })()');
+  await evalJs(`(() => { const c=[...document.querySelectorAll('#speeddial-grid .card-wrapper[data-id]')]; clearCardSelection(); c[0].querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true})); c[1].querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true})); return 'ok'; })()`);
+  await sleep(250);
+  const moveRes = JSON.parse(await evalJs(`(async () => {
+    const target = groups.find(g => g.name.indexOf('批量目标组') === 0);
+    const sel = getSelectedCardIds().length;
+    await batchMoveSelected(target.id);
+    return JSON.stringify({ sel, moved: target.cards.length, left: getSelectedCardIds().length });
+  })()`));
+  check('批量移动：卡片进入目标分组', moveRes.moved === moveRes.sel && moveRes.sel === 2, moveRes);
+  check('批量移动后清空选中', moveRes.left === 0);
+
+  // 批量删除（确认弹窗）
+  await evalJs(`(() => { const c=[...document.querySelectorAll('#speeddial-grid .card-wrapper[data-id]')]; c[0].querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true})); return 'ok'; })()`);
+  await sleep(200);
+  const beforeDel = await evalJs('speeddials.length');
+  await evalJs('(() => { batchDeleteSelected(); return "started"; })()'); // 不 await：它要等确认弹窗
+  await sleep(500);
+  // 批量删除复用与单张删除相同的确认弹窗（#dialog-import-confirm，标题/按钮文案被覆写）
+  check('批量删除弹出确认对话框', (await evalJs('!document.getElementById("dialog-import-confirm").classList.contains("hidden")')));
+  check('确认弹窗标题为批量删除', (await evalJs('document.querySelector("#dialog-import-confirm h3").textContent')).includes('批量删除'), await evalJs('document.querySelector("#dialog-import-confirm h3").textContent'));
+  await evalJs('document.getElementById("import-confirm-ok").click()');
+  await sleep(700);
+  check('确认后卡片被删除', (await evalJs('speeddials.length')) === beforeDel - 1, { beforeDel, after: await evalJs('speeddials.length') });
+  check('删除后清空选中', (await evalJs('getSelectedCardIds().length')) === 0);
+
+  // 锁定拦截 + ESC 清空 + Ctrl+A 全选
+  await evalJs(`(() => { const c=[...document.querySelectorAll('#speeddial-grid .card-wrapper[data-id]')]; c[0].querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true})); return 'ok'; })()`);
+  await evalJs('setLocked(true)');
+  await sleep(200);
+  const lockedCount = await evalJs('speeddials.length');
+  await evalJs('(() => { batchDeleteSelected(); return "started"; })()');
+  await sleep(500);
+  check('锁定时批量删除被拦截', (await evalJs('speeddials.length')) === lockedCount);
+  await evalJs('setLocked(false)');
+  await evalJs('document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))');
+  await sleep(250);
+  check('ESC 清空选中', (await evalJs('getSelectedCardIds().length')) === 0);
+  check('清空后工具栏隐藏', (await evalJs('document.getElementById("batch-bar").classList.contains("hidden")')) === true);
+  await evalJs('document.dispatchEvent(new KeyboardEvent("keydown", { key: "a", ctrlKey: true, bubbles: true }))');
+  await sleep(250);
+  check('Ctrl+A 全选当前分组', (await evalJs('getSelectedCardIds().length')) === (await evalJs('document.querySelectorAll("#speeddial-grid .card-wrapper[data-id]").length')));
+  await evalJs('clearCardSelection()');
+
+  console.log('\n[14] 页面无 JS 报错');
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);

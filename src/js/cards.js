@@ -42,6 +42,181 @@ function migrateCardFields() {
   }
 }
 
+/* ==================== v1.5.0: 卡片多选批量操作 ====================
+   Ctrl/⌘ + 单击 = 切换选中；Shift + 单击 = 从锚点到该卡片的区间选中。
+   选中态只切 DOM class，不重渲染；批量操作走结构性立即写盘（saveGroups 不带 coalesce）。
+*/
+var _selectedCardIds = [];
+var _selectionAnchorId = null;
+
+function getSelectedCardIds() { return _selectedCardIds.slice(); }
+function hasCardSelection() { return _selectedCardIds.length > 0; }
+function isCardSelected(id) { return _selectedCardIds.indexOf(id) !== -1; }
+
+/** 当前展示顺序（DOM 顺序即视觉顺序） */
+function _displayedCardIds() {
+  var grid = document.getElementById('speeddial-grid');
+  if (!grid) return [];
+  return Array.prototype.map.call(
+    grid.querySelectorAll('.card-wrapper[data-id]'),
+    function (el) { return el.dataset.id; }
+  );
+}
+
+function _syncSelectionDom() {
+  var grid = document.getElementById('speeddial-grid');
+  if (grid) {
+    grid.querySelectorAll('.card-wrapper[data-id]').forEach(function (el) {
+      el.classList.toggle('selected', _selectedCardIds.indexOf(el.dataset.id) !== -1);
+    });
+  }
+  updateBatchBar();
+}
+
+function toggleCardSelection(id) {
+  if (!id) return;
+  var i = _selectedCardIds.indexOf(id);
+  if (i === -1) { _selectedCardIds.push(id); _selectionAnchorId = id; }
+  else { _selectedCardIds.splice(i, 1); if (_selectionAnchorId === id) _selectionAnchorId = null; }
+  _syncSelectionDom();
+}
+
+/** 区间选中：从锚点（或首张）到目标卡片 */
+function selectCardRange(id) {
+  var order = _displayedCardIds();
+  var to = order.indexOf(id);
+  if (to === -1) return;
+  var from = order.indexOf(_selectionAnchorId);
+  if (from === -1) from = 0;
+  var lo = Math.min(from, to), hi = Math.max(from, to);
+  _selectedCardIds = order.slice(lo, hi + 1);
+  if (_selectionAnchorId === null) _selectionAnchorId = order[from];
+  _syncSelectionDom();
+}
+
+function selectAllCards() {
+  _selectedCardIds = _displayedCardIds();
+  _syncSelectionDom();
+}
+
+function clearCardSelection() {
+  if (_selectedCardIds.length === 0) return;
+  _selectedCardIds = [];
+  _selectionAnchorId = null;
+  _syncSelectionDom();
+}
+
+/** 工具栏显隐与计数 */
+function updateBatchBar() {
+  var bar = document.getElementById('batch-bar');
+  var count = document.getElementById('batch-count');
+  if (!bar) return;
+  if (_selectedCardIds.length === 0) { bar.classList.add('hidden'); return; }
+  bar.classList.remove('hidden');
+  if (count) count.textContent = '已选 ' + _selectedCardIds.length + ' 张';
+}
+
+/** 批量删除（走与单张删除一致的确认弹窗） */
+async function batchDeleteSelected() {
+  if (isLockedNow()) { showToast('界面已锁定，请右键 → 解锁', 'warning'); return; }
+  var ids = getSelectedCardIds();
+  if (ids.length === 0) return;
+  try {
+    await showImportConfirmAsync('确定要删除选中的 ' + ids.length + ' 张卡片吗？', { title: '🗑️ 批量删除', okLabel: '删除' });
+  } catch (e) { return; }
+  for (var i = speeddials.length - 1; i >= 0; i--) {
+    if (ids.indexOf(speeddials[i].id) !== -1) speeddials.splice(i, 1);
+  }
+  if (groups[activeGroupIndex]) groups[activeGroupIndex].cards = speeddials;
+  await saveGroups(groups);
+  clearCardSelection();
+  renderSpeeddials();
+  showToast('已删除 ' + ids.length + ' 张卡片', 'success');
+}
+
+/** 批量移动到指定分组 */
+async function batchMoveSelected(targetGroupId) {
+  if (isLockedNow()) { showToast('界面已锁定，请右键 → 解锁', 'warning'); return; }
+  var ids = getSelectedCardIds();
+  if (ids.length === 0) return;
+  var target = (groups || []).find(function (g) { return g.id === targetGroupId; });
+  if (!target) return;
+  var moved = 0;
+  for (var i = speeddials.length - 1; i >= 0; i--) {
+    if (ids.indexOf(speeddials[i].id) !== -1) {
+      target.cards = target.cards || [];
+      target.cards.push(speeddials[i]);
+      speeddials.splice(i, 1);
+      moved++;
+    }
+  }
+  if (groups[activeGroupIndex]) groups[activeGroupIndex].cards = speeddials;
+  await saveGroups(groups);
+  clearCardSelection();
+  renderSpeeddials();
+  showToast('已移动 ' + moved + ' 张卡片到「' + target.name + '」', 'success');
+}
+
+/** 锁定判定（isLocked 由 main.js 用 let 声明，需防 TDZ） */
+function isLockedNow() {
+  try { return typeof isLocked !== 'undefined' && !!isLocked; } catch (e) { return false; }
+}
+
+/** 批量工具栏事件绑定（由 main.js 初始化时调用） */
+function initBatchBar() {
+  var bar = document.getElementById('batch-bar');
+  if (!bar) return;
+  var clearBtn = document.getElementById('batch-clear');
+  if (clearBtn) clearBtn.addEventListener('click', function (e) { e.stopPropagation(); clearCardSelection(); });
+  var delBtn = document.getElementById('batch-delete');
+  if (delBtn) delBtn.addEventListener('click', function (e) { e.stopPropagation(); batchDeleteSelected(); });
+  var moveBtn = document.getElementById('batch-move');
+  if (moveBtn) moveBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (isLockedNow()) { showToast('界面已锁定，请右键 → 解锁', 'warning'); return; }
+    _showBatchMoveMenu(moveBtn);
+  });
+  // 点击工具栏空白处不冒泡到 body（避免触发搜索框聚焦）
+  bar.addEventListener('click', function (e) { e.stopPropagation(); });
+}
+
+/** 批量移动的分组选择菜单 */
+function _showBatchMoveMenu(anchorEl) {
+  var old = document.getElementById('batch-move-menu');
+  if (old) old.remove();
+  var others = (groups || []).filter(function (g, i) { return i !== activeGroupIndex; });
+  if (others.length === 0) { showToast('没有其它分组可移动', 'info'); return; }
+
+  var menu = document.createElement('div');
+  menu.id = 'batch-move-menu';
+  menu.className = 'context-menu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = others.map(function (g) {
+    return '<div role="menuitem" tabindex="-1" class="context-menu-item" data-group-id="' + g.id + '">📂 ' + escapeHtml(g.name) + '</div>';
+  }).join('');
+  document.body.appendChild(menu);
+
+  var r = anchorEl.getBoundingClientRect();
+  menu.style.left = Math.max(8, r.left) + 'px';
+  menu.style.top = (r.bottom + 6) + 'px';
+
+  menu.querySelectorAll('.context-menu-item').forEach(function (item) {
+    item.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      var gid = this.dataset.groupId;
+      menu.remove();
+      batchMoveSelected(gid);
+    });
+  });
+  setTimeout(function () {
+    document.addEventListener('click', function onDoc() {
+      document.removeEventListener('click', onDoc);
+      var m = document.getElementById('batch-move-menu');
+      if (m) m.remove();
+    });
+  }, 0);
+}
+
 /* ==================== 卡片排序（v1.0.9 / v1.2.9 最近访问） ==================== */
 function getSortedCards(cards, sortMode) {
   if (!sortMode || sortMode === 'manual') return cards;

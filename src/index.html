@@ -87,6 +87,14 @@
       </div>
     </section>
 
+    <!-- ===== v1.5.0: 批量操作工具栏（选中卡片时出现） ===== -->
+    <div id="batch-bar" class="batch-bar hidden" role="toolbar" aria-label="批量操作">
+      <span id="batch-count" class="batch-count">已选 0 张</span>
+      <button id="batch-move" class="btn-backup btn-backup-sm">📂 移动到…</button>
+      <button id="batch-delete" class="btn-backup btn-backup-sm batch-danger">🗑️ 删除</button>
+      <button id="batch-clear" class="btn-backup btn-backup-sm">✕ 取消选择</button>
+    </div>
+
     <!-- ===== 信息看板区域 ===== -->
     <div id="dashboard-grid" class="dashboard-section">
       <div id="dash-clock" class="dashboard-item dashboard-clock" data-widget="clock">

@@ -102,6 +102,8 @@ async function init() {
   setTimeout(_checkDashboardCollision, 500);
   window.addEventListener('resize', _debounceCollisionCheck);
   bindMainEvents();
+  // v1.5.0: 批量操作工具栏
+  if (typeof initBatchBar === 'function') initBatchBar();
   // v1.3.3: 无障碍（焦点管理 / 图标按钮标注 / tab 状态 / Toast 播报）
   if (typeof initA11y === 'function') initA11y();
   if (currentSettings && currentSettings.showClock) {
@@ -359,6 +361,21 @@ function bindMainEvents() {
       var wrapper = cardEl.closest('.card-wrapper');
       var cardUrl = (wrapper && wrapper.dataset.url) ? wrapper.dataset.url : cardEl.dataset.url;
       var cardId = (wrapper && wrapper.dataset.id) ? wrapper.dataset.id : cardEl.dataset.id;
+      // v1.5.0: 多选 —— Ctrl/⌘ 切换、Shift 区间；不打开卡片
+      if (cardId && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleCardSelection(cardId);
+        return;
+      }
+      if (cardId && e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        selectCardRange(cardId);
+        return;
+      }
+      // 普通点击：先清空选中，再按原逻辑打开
+      if (typeof clearCardSelection === 'function') clearCardSelection();
       if (!cardUrl) return;
       // 刚完成拖拽，忽略本次点击
       if (window._justDragged && Date.now() - window._justDragged < 300) return;
@@ -375,6 +392,12 @@ function bindMainEvents() {
         window.location.href = cardUrl;
       }
     }
+  });
+
+  // v1.5.0: 点击卡片区空白处清空多选
+  domMain.grid.addEventListener('click', (e) => {
+    if (e.target.closest('.card-wrapper') || e.target.closest('.speeddial-card')) return;
+    if (typeof clearCardSelection === 'function') clearCardSelection();
   });
 
   // 鼠标中键 → 新标签页打开卡片
@@ -635,6 +658,21 @@ function bindKeyboardShortcuts() {
       return;
     }
 
+    // v1.5.0: 多选快捷键 —— Ctrl/⌘+A 全选卡片、Delete 批量删除
+    // 仅在无弹窗/面板打开时生效，避免与面板内操作冲突
+    var _overlayOpen = !!document.querySelector('.dialog-overlay:not(.hidden), #settings-panel:not(.hidden)');
+    if (!isInput && !_overlayOpen && (e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
+      e.preventDefault();
+      if (typeof selectAllCards === 'function') selectAllCards();
+      return;
+    }
+    if (!isInput && !_overlayOpen && e.key === 'Delete' &&
+        typeof hasCardSelection === 'function' && hasCardSelection()) {
+      e.preventDefault();
+      batchDeleteSelected();
+      return;
+    }
+
     // Alt+, 打开设置面板（全局，不受输入框焦点影响）
     if (e.key === ',' && e.altKey) {
       e.preventDefault();
@@ -733,7 +771,12 @@ function bindKeyboardShortcuts() {
         toggleDashEdit();
         return;
       }
-      // 12. 右键菜单
+      // 12. 卡片多选（v1.5.0）
+      if (typeof hasCardSelection === 'function' && hasCardSelection()) {
+        clearCardSelection();
+        return;
+      }
+      // 13. 右键菜单
       hideContextMenu();
     }
   });
