@@ -824,7 +824,10 @@ function setLocked(state, silent) {
   }
   if (currentSettings) {
     currentSettings.isLocked = state;
-    saveSettings(currentSettings);
+    // v1.5.5: silent（来自 storage.onChanged 的同步）不再写回 ——
+    // 否则每次设置变更都会多出一次「回声写盘」（实测 12 次连发改列数会落盘 2 次），
+    // 拖滑块这类高频操作会更快撞上 sync 写入配额
+    if (!silent) saveSettings(currentSettings);
   }
   if (!silent) {
     renderSpeeddials();

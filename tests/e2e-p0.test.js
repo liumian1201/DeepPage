@@ -275,6 +275,8 @@ function send(method, params, sessionId) {
   await evalJs('closeSettingsPanel()');
 
   console.log('\n[6] P1-6 sync 写入合并');
+  // 先冲掉此前挂起的合并写，避免它落在下面的计数窗口里（否则计数会多 1，属测试竞态）
+  await evalJs('(async () => { flushSyncWrites(); await new Promise(r => setTimeout(r, 120)); return "ok"; })()');
   check('注入写入计数器', (await evalJs(`(() => {
     window.__writes = [];
     window.__origSet = chrome.storage.sync.set.bind(chrome.storage.sync);
@@ -1001,7 +1003,60 @@ function send(method, params, sessionId) {
   const vw = await evalJs('window.innerWidth');
   check('看板占满可用宽度（94vw，无固定像素上限）', dashW / vw > 0.9, { dashW, vw });
 
-  console.log('\n[21] 页面无 JS 报错');
+  console.log('\n[21] 改设置不得清空表单管不到的数据（用户复现路径）');
+  // 造数据：自定义看板宽度 + 待办 + 本地壁纸 + 卡片列数
+  await evalJs('openSettingsPanel()');
+  await sleep(500);
+  // 卡片列数走真实滑块路径（保证表单与数据一致）
+  await evalJs(`(() => { const el = document.getElementById('setting-columns-slider'); el.value = '4'; el.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; })()`);
+  await sleep(600);
+  await evalJs(`(async () => {
+    const l = getDashboardLayout();
+    l.clock.span = 5; l.weather.span = 3; l.todo.span = 2; l.lunar.span = 2;
+    _saveLayout(l);
+    addTodoItem('不能被清空的待办');
+    currentSettings.localWallpapers = [{ key: 'wp_fake', name: '假壁纸.png', opacity: 60 }];
+    await saveSettings(currentSettings);
+    await flushSyncWrites();
+    return 'ok';
+  })()`);
+  await sleep(700);
+
+  // 触发一次设置变更（等价于用户点「取消显示待办」开关）
+  await evalJs(`(() => { const t = document.getElementById('toggle-todo'); t.checked = false; t.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; })()`);
+  await sleep(1100);
+  const afterToggle = JSON.parse(await evalJs(`JSON.stringify({
+    layout: currentSettings.dashboardWidgetLayout,
+    todo: (currentSettings.todoItems || []).length,
+    wallpapers: (currentSettings.localWallpapers || []).length,
+    columns: currentSettings.columns,
+    lockedType: typeof currentSettings.isLocked
+  })`));
+  check('设置变更后看板布局仍在', !!afterToggle.layout && afterToggle.layout.clock.span === 5, afterToggle.layout);
+  check('设置变更后待办内容仍在', afterToggle.todo >= 1, afterToggle);
+  check('设置变更后本地壁纸列表仍在', afterToggle.wallpapers >= 1, afterToggle);
+  check('设置变更后卡片列数仍在（columns=4）', afterToggle.columns === 4, afterToggle);
+  check('设置变更后锁定状态字段未丢失', afterToggle.lockedType === 'boolean', afterToggle);
+  await evalJs('closeSettingsPanel()');
+  await sleep(400);
+
+  // 刷新后宽度必须保持（用户复现：刷新后剩余看板回到初始宽度）
+  await send('Page.navigate', { url: `chrome-extension://${EXT_ID}/index.html` }, sid);
+  await sleep(1600);
+  await waitForReady();
+  const afterReload = JSON.parse(await evalJs(`JSON.stringify({
+    spans: Object.fromEntries(DASHBOARD_WIDGETS.map(w => [w.id, getDashboardLayout()[w.id].span])),
+    domN: Object.fromEntries([...document.querySelectorAll('#dashboard-grid .dashboard-item')].map(e => [e.dataset.widget, e.style.getPropertyValue('--dash-n')])),
+    todoVisible: getComputedStyle(document.getElementById('dash-todo')).display !== 'none',
+    todoItems: (currentSettings.todoItems || []).length,
+    columns: currentSettings.columns
+  })`));
+  check('刷新后自定义宽度保持（未回到初始值）', afterReload.spans.clock === 5 && afterReload.spans.weather === 3, afterReload.spans);
+  check('刷新后 DOM 宽度与模型一致', afterReload.domN.clock === '5' && afterReload.domN.weather === '3', afterReload.domN);
+  check('刷新后隐藏的待办仍是隐藏', afterReload.todoVisible === false);
+  check('刷新后待办内容与列数仍在', afterReload.todoItems >= 1 && afterReload.columns === 4, { todoItems: afterReload.todoItems, columns: afterReload.columns });
+
+  console.log('\n[22] 页面无 JS 报错');
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);

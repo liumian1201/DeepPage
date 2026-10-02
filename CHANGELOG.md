@@ -1,5 +1,27 @@
 # DeepPage 更新日志
 
+## v1.5.5 (2026-10-02) — 设置变更不再清空表单管不到的数据
+
+### 🐛 修复（用户复现：调好看板宽度 → 取消显示待办 → 刷新后宽度回到初始值）
+- **根因**：`onSettingChanged()` / `onAppearanceChanged()` 用「表单收集结果」**整体替换**了设置对象
+  （`currentSettings = collectSettingsFromForm()`）。表单只覆盖它自己包含的字段，于是**凡是表单管不到的数据，
+  在任何一次设置变更时都会被静默清空**——不止看板宽度：
+  - `dashboardWidgetLayout`（看板组件宽度/顺序）→ 表现为「改好的宽度一刷新就回默认」
+  - `todoItems`（待办内容）、`localWallpapers`（本地壁纸列表）→ 数据直接丢失
+  - `columns`（卡片列数）、`isLocked`（锁定状态）、`bgColor` / `cardWidth` / `cardFontSize` 等外观自定义
+  - 共 **20 个字段**（对照 `DEFAULT_SETTINGS` 逐一核对）
+- **修复**：两处都改为**合并**（`Object.assign({}, currentSettings, collectSettingsFromForm())`）——
+  表单只覆盖它包含的字段，其余数据原样保留
+- **连带修复**：`setLocked()` 在「来自 storage.onChanged 的同步」时也会回写设置，导致每次设置变更都多一次
+  「回声写盘」（实测 12 次连发改列数会落盘 2 次，拖滑块时更容易撞上 sync 写入配额）→ silent 模式不再回写
+
+### 🧪 回归覆盖（新增 9 项）
+- 按用户复现路径：调宽度 → 取消显示待办 → 断言布局/待办内容/本地壁纸/列数/锁定字段全部保留
+- 再刷新页面，断言自定义宽度、DOM 宽度、隐藏状态、待办内容与列数逐项保持
+- P1-6 写入合并断言改为先 flush 再计数（消除测试自身竞态）
+- E2E 217 项 ｜ 逻辑桩测 29 ｜ SW 链路 6 ｜ ESLint 0 error
+
+
 ## v1.5.4 (2026-10-02) — 分组名显示规则读取修复
 
 ### 🐛 修复（用户反馈：分组名显示规则被限定成「仅当前组」，改了保存不了）

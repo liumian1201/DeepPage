@@ -921,7 +921,12 @@ function _updateBackupModeUI() {
 
 /** 设置变更处理 */
 async function onSettingChanged() {
-  currentSettings = collectSettingsFromForm();
+  // v1.5.5: 必须「合并」而不是「替换」——
+  // 表单只覆盖它自己包含的字段，而 settings 里还存着表单管不到的数据：
+  // 看板组件布局(dashboardWidgetLayout)、待办内容(todoItems)、本地壁纸列表(localWallpapers)、
+  // 卡片列数(columns)、外观自定义(bgColor/cardWidth/...)、锁定状态(isLocked) 等。
+  // 直接赋值会让这些数据在任何一次设置变更时被静默清空（用户表现为：改了宽度、一刷新就回默认）。
+  currentSettings = Object.assign({}, currentSettings, collectSettingsFromForm());
   await saveSettings(currentSettings);
   applyAllSettings(currentSettings);
 
@@ -958,7 +963,7 @@ async function onSettingChanged() {
 
 /** 外观变更回调（由 appearance.js 的 change 事件触发） */
 async function onAppearanceChanged() {
-  currentSettings = collectSettingsFromForm();
+  currentSettings = Object.assign({}, currentSettings, collectSettingsFromForm());
   await saveSettings(currentSettings);
   // v1.2.6: 只保存不重刷 applyAllSettings，避免触发 applyWallpaperOpacity 等非外观设置
 
