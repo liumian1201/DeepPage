@@ -563,7 +563,45 @@ function send(method, params, sessionId) {
   check('Ctrl+A 全选当前分组', (await evalJs('getSelectedCardIds().length')) === (await evalJs('document.querySelectorAll("#speeddial-grid .card-wrapper[data-id]").length')));
   await evalJs('clearCardSelection()');
 
-  console.log('\n[14] 页面无 JS 报错');
+  console.log('\n[14] P3-3 分组颜色 / 图标 / 拖拽排序');
+  await evalJs('openGroupManager()');
+  await sleep(400);
+  check('分组行含颜色/图标/拖拽控件', (await evalJs('!!document.querySelector(".group-mgr-color") && !!document.querySelector(".group-mgr-icon") && !!document.querySelector(".group-mgr-drag")')) === true);
+  check('拖拽手柄可拖（draggable）', (await evalJs('document.querySelector(".group-mgr-drag").getAttribute("draggable")')) === 'true');
+
+  await evalJs(`(() => { const c = document.querySelector('.group-mgr-color[data-index="0"]'); c.value = '#e91e63'; c.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; })()`);
+  await sleep(600);
+  check('颜色写入分组数据', (await evalJs('groups[0].color')) === '#e91e63', await evalJs('groups[0].color'));
+  check('指示器带 --group-color', (await evalJs('(document.querySelector("#group-dots .group-dot, #group-dots .group-tab").getAttribute("style") || "").indexOf("--group-color") !== -1')) === true);
+
+  await evalJs(`(() => { const i = document.querySelector('.group-mgr-icon[data-index="0"]'); i.value = '🏠'; i.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; })()`);
+  await sleep(600);
+  check('图标写入分组数据', (await evalJs('groups[0].icon')) === '🏠', await evalJs('groups[0].icon'));
+  check('指示器渲染图标', (await evalJs('!!document.querySelector("#group-dots .group-icon")')) === true);
+
+  // 拖拽排序：模拟 HTML5 DnD（手柄 dragstart → 末行 dragover/drop）
+  const grpOrderBefore = JSON.parse(await evalJs('JSON.stringify(groups.map(g => g.name))'));
+  await evalJs(`(() => {
+    const list = document.getElementById('group-manager-list');
+    const handle = list.querySelector('.group-mgr-drag[data-index="0"]');
+    const rows = [...list.querySelectorAll('.group-mgr-item')];
+    const dt = new DataTransfer();
+    handle.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+    const last = rows[rows.length - 1];
+    last.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    last.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    return 'ok';
+  })()`);
+  await sleep(900);
+  const grpOrderAfter = JSON.parse(await evalJs('JSON.stringify(groups.map(g => g.name))'));
+  check('拖拽后顺序改变且长度不变', grpOrderAfter.length === grpOrderBefore.length && grpOrderAfter[grpOrderAfter.length - 1] === grpOrderBefore[0], { before: grpOrderBefore, after: grpOrderAfter });
+  check('活动分组按 id 跟随（未错位）', (await evalJs('groups[activeGroupIndex] && groups[activeGroupIndex].id')) === (await evalJs('(async () => (await getActiveGroup(), groups[activeGroupIndex].id))()')), await evalJs('groups[activeGroupIndex].name'));
+  check('拖拽后持久化到 storage', (await evalJs(`new Promise(r => chrome.storage.sync.get('groups', d => r((d.groups || []).map(g => g.name).join(','))))`)) === grpOrderAfter.join(','));
+
+  await evalJs('closeGroupManager()');
+  await sleep(300);
+
+  console.log('\n[15] 页面无 JS 报错');
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);

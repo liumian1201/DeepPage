@@ -17,31 +17,39 @@ function renderGroupDots() {
   var pos = domMain.groupIndicator.getAttribute('data-position') || 'left';
   var isTab = pos === 'top' || pos === 'bottom';
 
+  // v1.5.0: 分组颜色 / 图标
+  var groupFace = function (g) {
+    var icon = g.icon ? '<span class="group-icon">' + escapeHtml(g.icon) + '</span>' : '';
+    var style = g.color ? ' style="--group-color:' + escapeHtml(g.color) + '"' : '';
+    return { icon: icon, style: style, label: escapeHtml(g.icon ? g.icon + ' ' + (g.name || '未命名') : (g.name || '未命名')) };
+  };
+
   groups.forEach(function (g, i) {
     var cls;
+    var face = groupFace(g);
     if (isTab) {
       if (mode === 'off') {
         // 不显示：圆点
         cls = i === activeGroupIndex ? 'group-dot active' : 'group-dot';
-        html += '<div class="' + cls + '" data-group="' + i + '" title="' + escapeHtml(g.name || '未命名') + '"></div>';
+        html += '<div class="' + cls + '" data-group="' + i + '"' + face.style + ' title="' + face.label + '">' + face.icon + '</div>';
       } else if (mode === 'active') {
         // 仅当前：当前组文字，其他圆点
         if (i === activeGroupIndex) {
-          html += '<div class="group-tab active" data-group="' + i + '" title="' + escapeHtml(g.name || '未命名') + '">' + escapeHtml(g.name || '未命名') + '</div>';
+          html += '<div class="group-tab active" data-group="' + i + '"' + face.style + ' title="' + face.label + '">' + face.icon + escapeHtml(g.name || '未命名') + '</div>';
         } else {
-          html += '<div class="group-dot" data-group="' + i + '" title="' + escapeHtml(g.name || '未命名') + '"></div>';
+          html += '<div class="group-dot" data-group="' + i + '"' + face.style + ' title="' + face.label + '">' + face.icon + '</div>';
         }
       } else {
         // 全部：文字标签
         cls = i === activeGroupIndex ? 'group-tab active' : 'group-tab';
-        html += '<div class="' + cls + '" data-group="' + i + '" title="' + escapeHtml(g.name || '未命名') + '">' + escapeHtml(g.name || '未命名') + '</div>';
+        html += '<div class="' + cls + '" data-group="' + i + '"' + face.style + ' title="' + face.label + '">' + face.icon + escapeHtml(g.name || '未命名') + '</div>';
       }
     } else {
       cls = i === activeGroupIndex ? 'group-dot active' : 'group-dot';
       var showName = mode === 'all' || (mode === 'active' && i === activeGroupIndex);
       var nameExtra = (mode === 'all') ? ' style="opacity:1"' : '';
-      var nameLabel = showName ? '<span class="group-dot-name"' + nameExtra + '>' + escapeHtml(g.name || '未命名') + '</span>' : '';
-      html += '<div class="' + cls + '" data-group="' + i + '" title="' + escapeHtml(g.name || '未命名') + '">' + nameLabel + '</div>';
+      var nameLabel = showName ? '<span class="group-dot-name"' + nameExtra + '>' + face.icon + escapeHtml(g.name || '未命名') + '</span>' : face.icon;
+      html += '<div class="' + cls + '" data-group="' + i + '"' + face.style + ' title="' + face.label + '">' + nameLabel + '</div>';
     }
   });
   domMain.groupDots.innerHTML = html;
@@ -260,6 +268,25 @@ function closeGroupManager() {
 }
 
 /** 分组上移/下移公共逻辑 */
+/** v1.5.0: 把分组从 from 移动到 to 位置（拖拽排序，非交换） */
+async function moveGroupTo(from, to) {
+  if (from === to || from < 0 || to < 0 || from >= groups.length || to >= groups.length) return;
+  var activeId = groups[activeGroupIndex] ? groups[activeGroupIndex].id : null;
+  var moved = groups.splice(from, 1)[0];
+  groups.splice(to, 0, moved);
+  // 活动分组跟随（按 id 重新定位，避免索引错乱）
+  if (activeId) {
+    var ni = groups.findIndex(function (g) { return g.id === activeId; });
+    if (ni !== -1) activeGroupIndex = ni;
+  }
+  await saveGroups(groups);
+  await saveActiveGroup(activeGroupIndex);
+  renderGroupManagerList();
+  renderGroupDots();
+  speeddials = groups[activeGroupIndex] ? groups[activeGroupIndex].cards : [];
+  renderSpeeddials();
+}
+
 async function swapGroups(from, to) {
   var tmp = groups[from];
   groups[from] = groups[to];
@@ -283,7 +310,10 @@ function renderGroupManagerList() {
     var cardCount = (g.cards && g.cards.length) ? g.cards.length : 0;
     html += '<div class="group-mgr-item' + activeCls + '" data-index="' + i + '">' +
       '<span class="mgr-card-count">' + cardCount + '</span>' +
+      '<input type="color" class="group-mgr-color" data-index="' + i + '" value="' + escapeHtml(g.color || '#4a90d9') + '" title="分组颜色" aria-label="分组颜色">' +
+      '<input type="text" class="group-mgr-icon" data-index="' + i + '" maxlength="2" placeholder="图标" value="' + escapeHtml(g.icon || '') + '" title="分组图标（emoji，最多 2 字）" aria-label="分组图标">' +
       '<input class="group-mgr-name" value="' + escapeHtml(g.name) + '" data-index="' + i + '">' +
+      '<span class="group-mgr-drag" draggable="true" data-index="' + i + '" title="拖拽调整分组顺序" aria-label="拖拽调整分组顺序">⠿</span>' +
       '<div class="group-mgr-actions">' +
       '<button class="group-mgr-btn" data-action="mgr-export" data-index="' + i + '" title="导出此分组">📤</button>' +
       '<button class="group-mgr-btn" data-action="mgr-up" data-index="' + i + '" title="上移">▲</button>' +
@@ -297,7 +327,61 @@ function renderGroupManagerList() {
     input.addEventListener('change', function () {
       var idx = parseInt(this.dataset.index, 10);
       var name = this.value.trim();
-      if (name && groups[idx]) { groups[idx].name = name; saveGroups(groups); }
+      if (name && groups[idx]) { groups[idx].name = name; saveGroups(groups); renderGroupDots(); }
+    });
+  });
+
+  // v1.5.0: 分组颜色 / 图标
+  list.querySelectorAll('.group-mgr-color').forEach(function (input) {
+    input.addEventListener('change', function () {
+      var idx = parseInt(this.dataset.index, 10);
+      if (!groups[idx]) return;
+      groups[idx].color = this.value;
+      saveGroups(groups);
+      renderGroupDots();
+    });
+  });
+  list.querySelectorAll('.group-mgr-icon').forEach(function (input) {
+    input.addEventListener('change', function () {
+      var idx = parseInt(this.dataset.index, 10);
+      if (!groups[idx]) return;
+      groups[idx].icon = this.value.trim().slice(0, 2);
+      this.value = groups[idx].icon;
+      saveGroups(groups);
+      renderGroupDots();
+    });
+  });
+
+  // v1.5.0: 拖拽排序（拖手柄，落到目标行上）
+  var dragFrom = null;
+  list.querySelectorAll('.group-mgr-drag').forEach(function (handle) {
+    handle.addEventListener('dragstart', function (e) {
+      dragFrom = parseInt(this.dataset.index, 10);
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', String(dragFrom)); } catch (err) {}
+      this.closest('.group-mgr-item').classList.add('dragging');
+    });
+    handle.addEventListener('dragend', function () {
+      dragFrom = null;
+      list.querySelectorAll('.group-mgr-item').forEach(function (el) { el.classList.remove('dragging', 'drag-over'); });
+    });
+  });
+  list.querySelectorAll('.group-mgr-item').forEach(function (row) {
+    row.addEventListener('dragover', function (e) {
+      if (dragFrom === null) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      row.classList.add('drag-over');
+    });
+    row.addEventListener('dragleave', function () { row.classList.remove('drag-over'); });
+    row.addEventListener('drop', function (e) {
+      e.preventDefault();
+      row.classList.remove('drag-over');
+      if (dragFrom === null) return;
+      var to = parseInt(this.dataset.index, 10);
+      if (isNaN(to) || to === dragFrom) return;
+      moveGroupTo(dragFrom, to);
+      dragFrom = null;
     });
   });
   // BUG-021: click 绑定在 .group-mgr-item 整行上，排除 input/button
