@@ -210,8 +210,14 @@ function send(method, params, sessionId) {
   const afterDom = await evalJs('JSON.stringify([...document.querySelectorAll("#dashboard-grid .dashboard-item")].map(e=>e.dataset.widget))');
   check('DOM 顺序已变', afterDom !== before, { before, afterDom });
   check('防抖期间未写盘', (await evalJs('JSON.stringify(currentSettings.dashboardOrder||[])')) === before);
-  await sleep(500);
-  check('防抖后已写盘', (await evalJs('JSON.stringify(currentSettings.dashboardOrder||[])')) === afterDom);
+  // headless 下后台页定时器会被节流（300ms 防抖可能被拉到 1s+）→ 轮询等待，不用固定 sleep
+  let memOrder = '';
+  for (let i = 0; i < 20; i++) {
+    memOrder = await evalJs('JSON.stringify(currentSettings.dashboardOrder||[])');
+    if (memOrder === afterDom) break;
+    await sleep(250);
+  }
+  check('防抖后已写盘（内存）', memOrder === afterDom, { 期望: afterDom, 实际: memOrder });
 
   // headless 下后台页定时器可能被节流（300ms 防抖被拉到 1s+），因此轮询等待而不是固定 sleep
   let stored = '';
@@ -404,7 +410,63 @@ function send(method, params, sessionId) {
   check('WebDAV 按钮已接入权限守卫', (await evalJs('typeof ensurePermissionForUrl === "function" && typeof requestHttpHostPermission === "function"')));
   check('批量截图已接入 http 权限降级', (await evalJs('startBatchCapture.toString().includes("httpTargets")')));
 
-  console.log('\n[11] 页面无 JS 报错');
+  console.log('\n[11] P2 看板 12 列栅格 / 跨列 / 拖拽 / 数据迁移');
+  check('组件注册表存在且默认跨列合计 12', (await evalJs('DASHBOARD_WIDGETS.length')) === 3 && (await evalJs('DASHBOARD_WIDGETS.reduce((n,w)=>n+w.defaultSpan,0)')) === 12);
+  check('栅格为 12 列', (await evalJs('getComputedStyle(document.getElementById("dashboard-grid")).gridTemplateColumns.split(" ").length')) === 12);
+  const spans = JSON.parse(await evalJs('JSON.stringify([...document.querySelectorAll("#dashboard-grid .dashboard-item")].map(e=>[e.dataset.widget, e.style.gridColumn]))'));
+  check('每个组件都写入了 grid-column', spans.every(x => /^span \d+$/.test(x[1])), spans);
+  check('布局模型含 order/span', (await evalJs('(() => { const l = getDashboardLayout(); return Object.keys(l).length === 3 && typeof l.clock.order === "number" && typeof l.clock.span === "number"; })()')) === true);
+
+  // 跨列调节：−/＋ 按钮 + 上下限钳制
+  await evalJs('toggleDashEdit()');
+  const spanBefore = await evalJs('getDashboardLayout().clock.span');
+  await evalJs('document.querySelector(\'[data-widget="clock"] .dash-span-grow\').click()');
+  await sleep(500);
+  check('＋ 增大跨列', (await evalJs('getDashboardLayout().clock.span')) === spanBefore + 1, { spanBefore, after: await evalJs('getDashboardLayout().clock.span') });
+  check('跨列写入 DOM', (await evalJs('document.querySelector(\'[data-widget="clock"]\').style.gridColumn')) === 'span ' + (spanBefore + 1));
+  // 钳制到 12
+  for (let i = 0; i < 15; i++) await evalJs('document.querySelector(\'[data-widget="clock"] .dash-span-grow\').click()');
+  await sleep(600);
+  check('跨列上限钳制为 12', (await evalJs('getDashboardLayout().clock.span')) === 12);
+  for (let i = 0; i < 15; i++) await evalJs('document.querySelector(\'[data-widget="clock"] .dash-span-shrink\').click()');
+  await sleep(600);
+  check('跨列下限钳制为 minSpan', (await evalJs('getDashboardLayout().clock.span')) === (await evalJs('DASHBOARD_WIDGETS.find(w=>w.id==="clock").minSpan')));
+
+  // 拖拽换位
+  const orderBefore = JSON.parse(await evalJs('JSON.stringify(Object.fromEntries(Object.entries(getDashboardLayout()).map(([k,v])=>[k,v.order])))'));
+  await evalJs(`(() => {
+    const grid = document.getElementById('dashboard-grid');
+    const a = grid.querySelector('[data-widget="clock"]');
+    const b = grid.querySelector('[data-widget="weather"]');
+    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+    a.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: ra.left + 10, clientY: ra.top + 10, button: 0 }));
+    document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: ra.left + 60, clientY: ra.top + 20 }));
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: rb.left + rb.width / 2, clientY: rb.top + rb.height / 2 }));
+    return 'ok';
+  })()`);
+  await sleep(600);
+  const orderAfter = JSON.parse(await evalJs('JSON.stringify(Object.fromEntries(Object.entries(getDashboardLayout()).map(([k,v])=>[k,v.order])))'));
+  check('拖拽后 clock/weather 顺序互换', orderAfter.clock === orderBefore.weather && orderAfter.weather === orderBefore.clock, { orderBefore, orderAfter });
+  await evalJs('toggleDashEdit()');
+
+  // 数据迁移：只留旧版 dashboardOrder 数组 → 重新加载后应还原顺序
+  await evalJs(`(async () => {
+    await flushSyncWrites();
+    const s = Object.assign({}, currentSettings);
+    delete s.dashboardLayout;
+    s.dashboardOrder = ['lunar', 'clock', 'weather'];
+    await new Promise(r => chrome.storage.sync.set({ settings: s }, r));
+    return 'ok';
+  })()`);
+  await send('Page.navigate', { url: `chrome-extension://${EXT_ID}/index.html` }, sid);
+  await sleep(1500);
+  const ready = await waitForReady();
+  check('迁移测试：页面重新加载就绪', ready === true);
+  const migrated = JSON.parse(await evalJs('JSON.stringify(Object.fromEntries(Object.entries(getDashboardLayout()).map(([k,v])=>[k,v.order])))'));
+  check('旧 dashboardOrder 迁移为 order（lunar=0, clock=1, weather=2）', migrated.lunar === 0 && migrated.clock === 1 && migrated.weather === 2, migrated);
+  check('迁移后跨列取默认值', (await evalJs('getDashboardLayout().clock.span')) === 4);
+
+  console.log('\n[12] 页面无 JS 报错');
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);

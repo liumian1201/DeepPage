@@ -69,12 +69,6 @@ const domSettings = {
   dashboardLayout:  document.getElementById('setting-dashboard-layout'),
   clockFormat:      document.getElementById('setting-clock-format'),
   toggleClockSeconds: document.getElementById('toggle-clock-seconds'),
-  dashLeft:         document.getElementById('setting-dash-left'),
-  dashLeftVal:      document.getElementById('dash-left-val'),
-  dashBottom:       document.getElementById('setting-dash-bottom'),
-  dashBottomVal:    document.getElementById('dash-bottom-val'),
-  dashItemW:        document.getElementById('setting-dash-item-w'),
-  dashItemWVal:     document.getElementById('dash-item-w-val'),
   dashItemH:        document.getElementById('setting-dash-item-h'),
   dashItemHVal:     document.getElementById('dash-item-h-val'),
   dashGap:          document.getElementById('setting-dash-gap'),
@@ -173,12 +167,6 @@ function populateSettingsForm(settings) {
   if (domSettings.groupTabSize) domSettings.groupTabSize.value = settings.groupTabSize || 13;
   if (domSettings.groupTabSizeVal) domSettings.groupTabSizeVal.textContent = (settings.groupTabSize || 13) + 'px';
   if (domSettings.dashboardLayout) domSettings.dashboardLayout.value = settings.dashboardLayout || 'row';
-  if (domSettings.dashLeft) domSettings.dashLeft.value = settings.dashLeft || 0;
-  if (domSettings.dashLeftVal) domSettings.dashLeftVal.textContent = (settings.dashLeft || 0) === 0 ? '居中' : ((settings.dashLeft || 0) > 0 ? '右' : '左') + Math.abs(settings.dashLeft || 0) + 'px';
-  if (domSettings.dashBottom) domSettings.dashBottom.value = settings.dashBottom || 0;
-  if (domSettings.dashBottomVal) domSettings.dashBottomVal.textContent = (settings.dashBottom || 0) === 0 ? '底部' : (settings.dashBottom || 0) + 'px';
-  if (domSettings.dashItemW) domSettings.dashItemW.value = settings.dashItemW || 140;
-  if (domSettings.dashItemWVal) domSettings.dashItemWVal.textContent = (settings.dashItemW || 140) + 'px';
   if (domSettings.dashItemH) domSettings.dashItemH.value = settings.dashItemH || 0;
   if (domSettings.dashItemHVal) domSettings.dashItemHVal.textContent = (settings.dashItemH || 0) === 0 ? '自适应' : (settings.dashItemH || 0) + 'px';
   if (domSettings.dashGap) domSettings.dashGap.value = settings.dashGap || 16;
@@ -411,10 +399,10 @@ function applyDashboardLayout(settings) {
   document.documentElement.style.setProperty('--dash-h-offset', hOff + 'px');
   document.documentElement.style.setProperty('--dash-bottom', (settings.dashBottom || 0) + 'px');
   document.documentElement.style.setProperty('--dash-gap', (settings.dashGap || 16) + 'px');
-  var w = (settings.dashItemW || 140) + 'px';
+  // v1.4.0: 宽度由 12 列网格的跨列数决定，不再设 inline width（否则会窄于栅格轨道）
   var h = (settings.dashItemH || 0) === 0 ? 'auto' : (settings.dashItemH || 0) + 'px';
   document.querySelectorAll('.dashboard-item').forEach(function (item) {
-    item.style.width = w;
+    item.style.width = '';
     item.style.height = h;
   });
 }
@@ -452,9 +440,11 @@ function collectSettingsFromForm() {
     showGroupName: domSettings.groupNameMode ? domSettings.groupNameMode.value : 'all',
     showGroupIndicator: domSettings.toggleShowGroupIndicator ? domSettings.toggleShowGroupIndicator.checked : true,
     dashboardLayout: domSettings.dashboardLayout ? domSettings.dashboardLayout.value : 'row',
-    dashLeft: domSettings.dashLeft ? parseInt(domSettings.dashLeft.value, 10) : 0,
-    dashBottom: domSettings.dashBottom ? parseInt(domSettings.dashBottom.value, 10) : 0,
-    dashItemW: domSettings.dashItemW ? parseInt(domSettings.dashItemW.value, 10) : 140,
+    // v1.4.0: dashLeft/dashBottom/dashItemW 滑块已下线（位置改由看板网格与碰撞检测决定，
+    // 宽度改由每组件跨列数控制）；保留读取旧值以兼容老数据
+    dashLeft: (currentSettings && currentSettings.dashLeft) || 0,
+    dashBottom: (currentSettings && currentSettings.dashBottom) || 0,
+    dashItemW: (currentSettings && currentSettings.dashItemW) || 140,
     dashItemH: domSettings.dashItemH ? parseInt(domSettings.dashItemH.value, 10) : 0,
     dashGap: domSettings.dashGap ? parseInt(domSettings.dashGap.value, 10) : 16,
     clockFormat: domSettings.clockFormat ? domSettings.clockFormat.value : '24h',
@@ -713,50 +703,16 @@ function bindSettingsEvents() {
     domSettings.groupTabSize.addEventListener('change', onSettingChanged);
   }
 
-  // 看板位置滑块（实时预览）
-  if (domSettings.dashLeft && domSettings.dashLeftVal) {
-    domSettings.dashLeft.addEventListener('input', function () {
-      var v = parseInt(this.value, 10);
-      domSettings.dashLeftVal.textContent = v === 0 ? '居中' : (v > 0 ? '右' : '左') + Math.abs(v) + 'px';
-      document.documentElement.style.setProperty('--dash-h-offset', v + 'px');
-    });
-    domSettings.dashLeft.addEventListener('change', onSettingChanged);
-  }
-  if (domSettings.dashBottom && domSettings.dashBottomVal) {
-    domSettings.dashBottom.addEventListener('input', function () {
-      var v = parseInt(this.value, 10);
-      domSettings.dashBottomVal.textContent = v === 0 ? '底部' : v + 'px';
-      document.documentElement.style.setProperty('--dash-bottom', v + 'px');
-    });
-    domSettings.dashBottom.addEventListener('change', onSettingChanged);
-  }
-
-  // 重置看板位置
-  var btnResetDash = document.getElementById('btn-reset-dash-pos');
-  if (btnResetDash) {
-    btnResetDash.addEventListener('click', function () {
-      if (domSettings.dashLeft) domSettings.dashLeft.value = 0;
-      if (domSettings.dashLeftVal) domSettings.dashLeftVal.textContent = '居中';
-      if (domSettings.dashBottom) domSettings.dashBottom.value = 0;
-      if (domSettings.dashBottomVal) domSettings.dashBottomVal.textContent = '底部';
-      document.documentElement.style.setProperty('--dash-h-offset', '0px');
-      document.documentElement.style.setProperty('--dash-bottom', '0px');
-      onSettingChanged();
-    });
-  }
-
   // 重置看板大小
   var btnResetSize = document.getElementById('btn-reset-dash-size');
   if (btnResetSize) {
     btnResetSize.addEventListener('click', function () {
-      if (domSettings.dashItemW) domSettings.dashItemW.value = 140;
-      if (domSettings.dashItemWVal) domSettings.dashItemWVal.textContent = '140px';
       if (domSettings.dashItemH) domSettings.dashItemH.value = 0;
       if (domSettings.dashItemHVal) domSettings.dashItemHVal.textContent = '自适应';
       if (domSettings.dashGap) domSettings.dashGap.value = 16;
       if (domSettings.dashGapVal) domSettings.dashGapVal.textContent = '16px';
       document.documentElement.style.setProperty('--dash-gap', '16px');
-      document.querySelectorAll('.grid-stack-item-content').forEach(function (item) { item.style.width = '140px'; item.style.height = ''; });
+      document.querySelectorAll('.dashboard-item').forEach(function (item) { item.style.height = ''; });
       onSettingChanged();
     });
   }
@@ -771,15 +727,7 @@ function bindSettingsEvents() {
     domSettings.dashGap.addEventListener('change', onSettingChanged);
   }
 
-  // 组件尺寸滑块（实时预览）
-  if (domSettings.dashItemW && domSettings.dashItemWVal) {
-    domSettings.dashItemW.addEventListener('input', function () {
-      var v = this.value + 'px';
-      domSettings.dashItemWVal.textContent = v;
-      document.querySelectorAll('.dashboard-item').forEach(function (item) { item.style.width = v; });
-    });
-    domSettings.dashItemW.addEventListener('change', onSettingChanged);
-  }
+  // 组件高度滑块（实时预览）—— 宽度由每组件跨列数控制，不再有宽度滑块
   if (domSettings.dashItemH && domSettings.dashItemHVal) {
     domSettings.dashItemH.addEventListener('input', function () {
       var v = parseInt(this.value, 10);

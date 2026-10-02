@@ -811,23 +811,35 @@
 /* --------------------- 信息看板（三张独立卡片） --------------------- */
 /* ==================== v1.3.0: 看板编辑态 ==================== */
 
+/* v1.4.0: 12 列栅格 —— 组件宽度 = 跨列数（grid-column: span N，由 dashboard.js 写入） */
 .dashboard-section {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: var(--dash-gap, 16px);
   justify-content: center;
-  flex-wrap: wrap;
   position: fixed;
   bottom: var(--dash-bottom, 0px);
   left: 50%;
   transform: translateX(calc(-50% + var(--dash-h-offset, 0px)));
   z-index: 10;
-  width: auto;
+  width: min(1100px, 90vw);
   max-width: 90vw;
 }
 
+/* 垂直排列 = 单列（每个组件占满一行） */
 .dashboard-section[data-layout="column"] {
-  flex-direction: column;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
+}
+.dashboard-section[data-layout="column"] .dashboard-item {
+  grid-column: span 1 !important;
+}
+
+/* 窄屏：栅格列数减半，避免组件被压得过窄 */
+@media (max-width: 720px) {
+  .dashboard-section {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    width: 94vw;
+  }
 }
 
 body[data-dash-collision] .dashboard-section {
@@ -843,12 +855,64 @@ body[data-dash-collision] .dashboard-section {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   padding: 16px 24px;
-  background: var(--bg-secondary);
+  /* v1.4.0: 毛玻璃卡片风格（与快捷卡片视觉统一，随主题切换） */
+  background: var(--dash-bg, rgba(255, 255, 255, 0.55));
+  border: 1px solid var(--dash-border, rgba(255, 255, 255, 0.35));
   border-radius: var(--card-radius);
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.10);
+  backdrop-filter: blur(12px) saturate(1.2);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  transition: box-shadow var(--transition-fast), transform var(--transition-fast);
   position: relative;
+  min-width: 0;
 }
+
+.dashboard-item:hover {
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
+}
+
+[data-theme="dark"] .dashboard-item {
+  --dash-bg: rgba(28, 28, 30, 0.55);
+  --dash-border: rgba(255, 255, 255, 0.12);
+}
+
+/* 编辑态：虚线框提示可拖拽 */
+body.dash-editing .dashboard-item {
+  outline: 1px dashed var(--accent-color, #4a90d9);
+  outline-offset: 2px;
+  cursor: grab;
+  /* 给底部 −/＋ 按钮留出空间，避免压住内容文字 */
+  padding-bottom: 30px;
+}
+body.dash-editing .dashboard-item.dash-dragging {
+  cursor: grabbing;
+  opacity: 0.9;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.22);
+}
+body.dash-drag-cursor { cursor: grabbing; }
+
+/* 编辑态：宽度（跨列）调节按钮 */
+.dash-span-btn {
+  display: none;
+  position: absolute;
+  bottom: 4px;
+  width: 22px; height: 20px;
+  border: none; border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 12px; line-height: 1;
+  cursor: pointer; opacity: 0.6; z-index: 2;
+  transition: opacity .15s, background .15s;
+}
+.dash-span-btn:hover { opacity: 1; background: var(--accent-color, #4a90d9); color: #fff; }
+.dash-span-shrink { left: calc(50% - 26px); }
+.dash-span-grow   { left: calc(50% + 4px); }
+body.dash-editing .dash-span-btn { display: block; }
+
+/* 编辑态隐藏壁纸版权条：它固定在底部右侧，会压住看板组件 */
+body.dash-editing #wallpaper-info { display: none; }
 
 /* 编辑态箭头 */
 .dash-arrow {
@@ -871,7 +935,8 @@ body.dash-editing .dash-arrow { display: block; }
 /* 编辑态完成按钮 — 仅编辑态显示 */
 .btn-dash-done {
   display: none;
-  position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+  /* v1.4.0: 看板在底部，完成按钮改到顶部居中，避免压住组件卡片 */
+  position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
   z-index: 110; padding: 6px 20px;
   border: none; border-radius: 8px;
   background: #4caf50; color: #fff;

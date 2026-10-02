@@ -90,24 +90,18 @@
     <!-- ===== 信息看板区域 ===== -->
     <div id="dashboard-grid" class="dashboard-section">
       <div id="dash-clock" class="dashboard-item dashboard-clock" data-widget="clock">
-        <button class="dash-arrow dash-arrow-left" data-dir="left" title="左移">◀</button>
         <div class="clock-row">
           <span class="clock-time">00:00</span><span class="clock-seconds">:00</span>
         </div>
         <span class="clock-date">----年--月--日 星期-</span>
-        <button class="dash-arrow dash-arrow-right" data-dir="right" title="右移">▶</button>
       </div>
       <div id="dash-weather" class="dashboard-item dashboard-weather" data-widget="weather">
-        <button class="dash-arrow dash-arrow-left" data-dir="left" title="左移">◀</button>
         <span class="weather-city">天气加载中...</span>
         <span class="weather-detail"></span>
-        <button class="dash-arrow dash-arrow-right" data-dir="right" title="右移">▶</button>
       </div>
       <div id="dash-lunar" class="dashboard-item dashboard-lunar" data-widget="lunar">
-        <button class="dash-arrow dash-arrow-left" data-dir="left" title="左移">◀</button>
         <span class="lunar-year">农历加载中...</span>
         <span class="lunar-date"></span>
-        <button class="dash-arrow dash-arrow-right" data-dir="right" title="右移">▶</button>
       </div>
     </div>
     <button id="btn-dash-done" class="btn-dash-done" title="完成编辑">✅ 完成</button>
@@ -235,37 +229,15 @@
           <div class="setting-group">
             <label>组件排序</label>
             <button id="btn-dash-edit" class="btn-backup btn-backup-sm">✋ 编辑组件顺序</button>
-            <small style="color:var(--text-muted);font-size:11px;margin-top:4px;">点击后在主页用 ◀▶ 箭头调整看板组件位置</small>
+            <small style="color:var(--text-muted);font-size:11px;margin-top:4px;">进入编辑态后：拖拽组件换位，◀▶ 调顺序，−/＋ 调宽度（12 列栅格）；ESC 退出</small>
           </div>
           <div class="setting-group">
             <label for="setting-dashboard-layout">布局方向</label>
             <select id="setting-dashboard-layout"><option value="row">水平排列</option><option value="column">垂直排列</option></select>
           </div>
-          <div class="settings-section-title">📐 看板位置</div>
-          <div class="setting-group">
-            <div class="setting-inline-row">
-              <label for="setting-dash-left" class="setting-inline-label">水平位置</label>
-              <span id="dash-left-val" class="slider-val">居中</span>
-              <input type="range" id="setting-dash-left" min="-1200" max="1200" value="0" step="1">
-            </div>
-          </div>
-          <div class="setting-group">
-            <div class="setting-inline-row">
-              <label for="setting-dash-bottom" class="setting-inline-label">垂直位置</label>
-              <span id="dash-bottom-val" class="slider-val">底部</span>
-              <input type="range" id="setting-dash-bottom" min="0" max="1200" value="0" step="1">
-            </div>
-          </div>
-          <div class="setting-group">
-            <button id="btn-reset-dash-pos" class="btn-reset-danger">↺ 重置位置</button>
-          </div>
           <div class="settings-section-title">📏 组件尺寸</div>
           <div class="setting-group">
-            <div class="setting-inline-row">
-              <label for="setting-dash-item-w" class="setting-inline-label">组件宽度</label>
-              <span id="dash-item-w-val" class="slider-val">140px</span>
-              <input type="range" id="setting-dash-item-w" min="100" max="500" value="140" step="1">
-            </div>
+            <small style="color:var(--text-muted);font-size:11px;">组件宽度由「跨列数」控制：进入编辑态后用组件上的 −/＋ 调节（12 列栅格）</small>
           </div>
           <div class="setting-group">
             <div class="setting-inline-row">
