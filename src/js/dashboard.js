@@ -11,10 +11,11 @@
    布局、开关、编辑态、尺寸控制都由注册表驱动，不再有「HTML 改了 ID 忘了同步」的问题。
 */
 var DASHBOARD_WIDGETS = [
-  { id: 'clock',   label: '时间',  elementId: 'dash-clock',   defaultSpan: 3, minSpan: 2, settingKey: 'showClock' },
-  { id: 'weather', label: '天气',  elementId: 'dash-weather', defaultSpan: 4, minSpan: 3, settingKey: 'showWeather' },
-  { id: 'todo',    label: '待办',  elementId: 'dash-todo',    defaultSpan: 3, minSpan: 3, settingKey: 'showTodo' },
-  { id: 'lunar',   label: '农历',  elementId: 'dash-lunar',   defaultSpan: 2, minSpan: 2, settingKey: 'showLunar' }
+  // minSpan 统一为 1：12 列栅格下让用户自己决定多窄（默认值合计仍为 12，正好一行）
+  { id: 'clock',   label: '时间',  elementId: 'dash-clock',   defaultSpan: 3, minSpan: 1, settingKey: 'showClock' },
+  { id: 'weather', label: '天气',  elementId: 'dash-weather', defaultSpan: 4, minSpan: 1, settingKey: 'showWeather' },
+  { id: 'todo',    label: '待办',  elementId: 'dash-todo',    defaultSpan: 3, minSpan: 1, settingKey: 'showTodo' },
+  { id: 'lunar',   label: '农历',  elementId: 'dash-lunar',   defaultSpan: 2, minSpan: 1, settingKey: 'showLunar' }
 ];
 
 var DASHBOARD_COLUMNS = 12;
@@ -29,6 +30,13 @@ var _dashWorkingLayout = null;
 var _dashSavedLayout = null;
 
 /* ==================== 布局模型 ==================== */
+
+/* 组件布局的存储键。
+   注意不能再用 dashboardLayout —— 那是「布局方向」（row/column 字符串）的字段，
+   v1.5.0 曾把布局对象写进去，导致设置里下拉框空白、且每次保存设置又会把对象覆盖成 ''，
+   用户的组件布局被静默重置（v1.5.2 修正）。 */
+var DASH_LAYOUT_KEY = 'dashboardWidgetLayout';
+var DASH_LAYOUT_LEGACY_KEY = 'dashboardLayout';
 
 function _dashWidget(id) {
   for (var i = 0; i < DASHBOARD_WIDGETS.length; i++) {
@@ -55,9 +63,13 @@ function getDashboardLayout(settings) {
     layout[w.id] = { order: i, span: w.defaultSpan };
   });
 
-  if (s.dashboardLayout && typeof s.dashboardLayout === 'object') {
+  var stored = s[DASH_LAYOUT_KEY];
+  if (!stored && s[DASH_LAYOUT_LEGACY_KEY] && typeof s[DASH_LAYOUT_LEGACY_KEY] === 'object') {
+    stored = s[DASH_LAYOUT_LEGACY_KEY];   // 旧版本误写的位置
+  }
+  if (stored && typeof stored === 'object') {
     DASHBOARD_WIDGETS.forEach(function (w) {
-      var e = s.dashboardLayout[w.id];
+      var e = stored[w.id];
       if (!e) return;
       if (typeof e.order === 'number') layout[w.id].order = e.order;
       layout[w.id].span = _clampSpan(e.span, w);
@@ -126,9 +138,27 @@ function initDashboardGrid() {
   var grid = document.getElementById('dashboard-grid');
   if (!grid) return;
 
+  // v1.5.2: 启动自愈 —— 旧版本把布局对象写进了「布局方向」字段（与 row/column 冲突），
+  // 这里把它搬到新键并修正方向字段，否则设置面板下拉框空白、且保存设置会覆盖掉布局
+  if (currentSettings && currentSettings[DASH_LAYOUT_LEGACY_KEY] &&
+      typeof currentSettings[DASH_LAYOUT_LEGACY_KEY] === 'object') {
+    currentSettings[DASH_LAYOUT_KEY] = currentSettings[DASH_LAYOUT_LEGACY_KEY];
+    currentSettings[DASH_LAYOUT_LEGACY_KEY] = 'row';
+    if (typeof saveSettings === 'function') saveSettings(currentSettings);
+  }
+
+  // v1.5.2: 迁移结果规范化落盘 —— 读时迁移（旧数组/旧对象）后立刻写回新键，
+  // 这样后续加载不再依赖迁移分支，设置面板也不会读到半旧半新的状态
+  var _needsNormalize = !currentSettings || !currentSettings[DASH_LAYOUT_KEY];
+
   _dashWorkingLayout = getDashboardLayout();
   _dashSavedLayout = JSON.parse(JSON.stringify(_dashWorkingLayout));
   applyDashWidgetLayout(_dashWorkingLayout);
+
+  if (_needsNormalize && typeof saveSettings === 'function') {
+    _dashSavedLayout = null;          // 强制认为是「有变化」，让 _flushLayout 真正写盘
+    _saveLayout(_dashWorkingLayout);
+  }
 
   // 编辑按钮（设置面板内）
   var editBtn = document.getElementById('btn-dash-edit');
@@ -238,7 +268,11 @@ function _onDashGridClick(e) {
   } else if (dir === 'grow' || dir === 'shrink') {
     var cur = layout[widgetId].span;
     var next = _clampSpan(cur + (dir === 'grow' ? 1 : -1), widget);
-    if (next === cur) return;                    // 已到上下限，不写盘
+    if (next === cur) {
+      // v1.5.2: 已到上下限 —— 抖一下给出反馈，避免看起来像按钮失效
+      _dashFlashLimit(item);
+      return;
+    }
     layout[widgetId].span = next;
     changed = true;
   }
@@ -246,6 +280,15 @@ function _onDashGridClick(e) {
   if (!changed) return;
   applyDashWidgetLayout(layout);
   _saveLayout(layout);
+}
+
+/** 到达宽度上下限时的视觉反馈（抖动 300ms） */
+function _dashFlashLimit(el) {
+  if (!el || !el.classList) return;   // 桩测试里的假元素没有 classList
+  el.classList.remove('dash-span-limit');
+  void el.offsetWidth;                 // 强制重排，保证动画能重新触发
+  el.classList.add('dash-span-limit');
+  setTimeout(function () { el.classList.remove('dash-span-limit'); }, 400);
 }
 
 /* ---- 拖拽换位（编辑态） ---- */
@@ -371,7 +414,11 @@ function _flushLayout() {
   }
   _dashSavedLayout = snapshot;
 
-  currentSettings.dashboardLayout = snapshot;
+  currentSettings[DASH_LAYOUT_KEY] = snapshot;
+  // 把此前误写进「布局方向」字段的对象清掉，否则设置面板下拉框会是空白
+  if (currentSettings[DASH_LAYOUT_LEGACY_KEY] && typeof currentSettings[DASH_LAYOUT_LEGACY_KEY] === 'object') {
+    currentSettings[DASH_LAYOUT_LEGACY_KEY] = 'row';
+  }
   // 兼容旧版本读取：同时写一份 dashboardOrder 数组
   currentSettings.dashboardOrder = DASHBOARD_WIDGETS
     .slice()

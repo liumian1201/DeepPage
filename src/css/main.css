@@ -1041,6 +1041,76 @@ body.dash-drag-cursor { cursor: grabbing; }
   --dash-bg-focused: rgba(28, 28, 30, 0.92);
 }
 
+/* v1.5.2: 组件被压到 1~2 列时的排版适配（否则内容溢出/挤压） */
+.dashboard-item[data-span="1"],
+.dashboard-item[data-span="2"] {
+  padding: 10px 12px;
+}
+.dashboard-item[data-span="1"] .clock-time,
+.dashboard-item[data-span="2"] .clock-time {
+  font-size: clamp(16px, 1.6vw, 26px);
+}
+.dashboard-item[data-span="1"] .clock-seconds,
+.dashboard-item[data-span="2"] .clock-seconds {
+  font-size: 0.6em;
+}
+.dashboard-item[data-span="1"] .clock-date,
+.dashboard-item[data-span="2"] .clock-date,
+.dashboard-item[data-span="1"] .weather-detail,
+.dashboard-item[data-span="2"] .weather-detail,
+.dashboard-item[data-span="1"] .lunar-date,
+.dashboard-item[data-span="2"] .lunar-date {
+  font-size: 11px;
+  white-space: normal;
+  text-align: center;
+}
+.dashboard-item[data-span="1"] .weather-city,
+.dashboard-item[data-span="2"] .weather-city,
+.dashboard-item[data-span="1"] .lunar-year,
+.dashboard-item[data-span="2"] .lunar-year {
+  font-size: 12px;
+  white-space: normal;
+  text-align: center;
+}
+
+/* 1 列（极窄）时只保留核心信息，避免文字溢出卡片边界（v1.5.2） */
+.dashboard-item[data-span="1"] {
+  overflow: hidden;
+}
+.dashboard-item[data-span="1"] .clock-date,
+.dashboard-item[data-span="1"] .clock-seconds,
+.dashboard-item[data-span="1"] .weather-detail,
+.dashboard-item[data-span="1"] .weather-city,
+.dashboard-item[data-span="1"] .lunar-year,
+.dashboard-item[data-span="1"] .todo-count,
+.dashboard-item[data-span="1"] .todo-clear {
+  display: none;
+}
+.dashboard-item[data-span="1"] .clock-time {
+  font-size: 20px;
+  white-space: nowrap;
+}
+.dashboard-item[data-span="1"] .lunar-date {
+  font-size: 12px;
+  white-space: normal;
+  line-height: 1.3;
+}
+.dashboard-item[data-span="1"] .todo-input {
+  font-size: 11px;
+  padding: 3px 4px;
+}
+.dashboard-item[data-span="1"] .todo-input::placeholder { font-size: 10px; }
+
+/* 到达宽度上下限时的抖动反馈 */
+@keyframes dashSpanLimit {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+.dashboard-item.dash-span-limit {
+  animation: dashSpanLimit 0.18s ease-in-out 2;
+}
+
 /* 编辑态：宽度（跨列）调节按钮 */
 .dash-span-btn {
   display: none;

@@ -442,6 +442,21 @@ function send(method, params, sessionId) {
   await sleep(600);
   check('跨列下限钳制为 minSpan', (await evalJs('getDashboardLayout().clock.span')) === (await evalJs('DASHBOARD_WIDGETS.find(w=>w.id==="clock").minSpan')));
 
+  // v1.5.2: 每个组件都能缩到最小跨列（1），且到极限时给抖动反馈
+  for (const wid of ['clock', 'weather', 'todo', 'lunar']) {
+    for (let i = 0; i < 13; i++) await evalJs(`document.querySelector('[data-widget="${wid}"] .dash-span-shrink').click()`);
+    await sleep(200);
+  }
+  await sleep(700);
+  const minSpans = JSON.parse(await evalJs('JSON.stringify(Object.fromEntries(DASHBOARD_WIDGETS.map(w => [w.id, getDashboardLayout()[w.id].span])))'));
+  check('四个组件都能缩到 1 列（含天气/农历）', Object.values(minSpans).every(v => v === 1), minSpans);
+  const limitFlash = await evalJs(`(() => { document.querySelector('[data-widget="clock"] .dash-span-shrink').click(); return document.querySelector('[data-widget="clock"]').classList.contains('dash-span-limit'); })()`);
+  check('到最小宽度时给出抖动反馈（不再静默无反应）', limitFlash === true);
+  check('缩到 1 列后组件仍占一行（不换行）', (await evalJs(`new Set([...document.querySelectorAll('#dashboard-grid .dashboard-item')].map(el => Math.round(el.getBoundingClientRect().bottom))).size`)) === 1);
+  // 复原为默认
+  await evalJs(`(async () => { const l = getDashboardLayout(); DASHBOARD_WIDGETS.forEach(w => { l[w.id].span = w.defaultSpan; l[w.id].order = DASHBOARD_WIDGETS.indexOf(w); }); _saveLayout(l); return 'ok'; })()`);
+  await sleep(700);
+
   // 拖拽换位
   const orderBefore = JSON.parse(await evalJs('JSON.stringify(Object.fromEntries(Object.entries(getDashboardLayout()).map(([k,v])=>[k,v.order])))'));
   await evalJs(`(() => {
@@ -459,22 +474,69 @@ function send(method, params, sessionId) {
   check('拖拽后 clock/weather 顺序互换', orderAfter.clock === orderBefore.weather && orderAfter.weather === orderBefore.clock, { orderBefore, orderAfter });
   await evalJs('toggleDashEdit()');
 
-  // 数据迁移：只留旧版 dashboardOrder 数组 → 重新加载后应还原顺序
+  // 迁移场景 A：v1.5.0/1.5.1 曾把布局对象写进 dashboardLayout（与「布局方向」同名字段）
+  // 先导航一次：旧页会在 pagehide flush 自己的待写数据，之后再写目标状态才不会被覆盖
+  await send('Page.navigate', { url: `chrome-extension://${EXT_ID}/index.html` }, sid);
+  await sleep(1400);
+  await waitForReady();
   await evalJs(`(async () => {
     await flushSyncWrites();
     const s = Object.assign({}, currentSettings);
-    delete s.dashboardLayout;
-    s.dashboardOrder = ['lunar', 'clock', 'weather'];
+    delete s.dashboardWidgetLayout;
+    s.dashboardLayout = { clock: { order: 2, span: 4 }, weather: { order: 0, span: 5 }, todo: { order: 3, span: 3 }, lunar: { order: 1, span: 2 } };
+    // 内存状态同步为目标状态：否则本页 pagehide flush 会把旧状态写回去
+    currentSettings = s;
     await new Promise(r => chrome.storage.sync.set({ settings: s }, r));
     return 'ok';
   })()`);
   await send('Page.navigate', { url: `chrome-extension://${EXT_ID}/index.html` }, sid);
   await sleep(1500);
-  const ready = await waitForReady();
-  check('迁移测试：页面重新加载就绪', ready === true);
+  let ready = await waitForReady();
+  check('迁移 A：页面重新加载就绪', ready === true);
+  const migA = JSON.parse(await evalJs('JSON.stringify(Object.fromEntries(Object.entries(getDashboardLayout()).map(([k,v])=>[k,v.order])))'));
+  check('迁移 A：旧位置的对象布局被识别（weather=0, lunar=1, clock=2, todo=3）',
+    migA.weather === 0 && migA.lunar === 1 && migA.clock === 2 && migA.todo === 3, migA);
+  check('迁移 A：布局方向字段被纠正为字符串（下拉框不再空白）',
+    (await evalJs('typeof currentSettings.dashboardLayout')) === 'string' && (await evalJs('document.getElementById("setting-dashboard-layout").value')) === 'row',
+    { type: await evalJs('typeof currentSettings.dashboardLayout'), sel: await evalJs('document.getElementById("setting-dashboard-layout").value') });
+  check('迁移 A：data-layout 不是对象字符串', (await evalJs('document.getElementById("dashboard-grid").getAttribute("data-layout")')) === 'row', await evalJs('document.getElementById("dashboard-grid").getAttribute("data-layout")'));
+
+  // 迁移场景 B：更老的 dashboardOrder 数组
+  await send('Page.navigate', { url: `chrome-extension://${EXT_ID}/index.html` }, sid);
+  await sleep(1400);
+  await waitForReady();
+  await evalJs(`(async () => {
+    await flushSyncWrites();
+    const s = Object.assign({}, currentSettings);
+    delete s.dashboardWidgetLayout;
+    s.dashboardLayout = 'row';
+    s.dashboardOrder = ['lunar', 'clock', 'weather'];
+    currentSettings = s;
+    await new Promise(r => chrome.storage.sync.set({ settings: s }, r));
+    return 'ok';
+  })()`);
+  await send('Page.navigate', { url: `chrome-extension://${EXT_ID}/index.html` }, sid);
+  await sleep(1500);
+  ready = await waitForReady();
+  check('迁移 B：页面重新加载就绪', ready === true);
   const migrated = JSON.parse(await evalJs('JSON.stringify(Object.fromEntries(Object.entries(getDashboardLayout()).map(([k,v])=>[k,v.order])))'));
-  check('旧 dashboardOrder 迁移为 order（lunar=0, clock=1, weather=2）', migrated.lunar === 0 && migrated.clock === 1 && migrated.weather === 2, migrated);
-  check('迁移后跨列取默认值', (await evalJs('getDashboardLayout().clock.span')) === (await evalJs('DASHBOARD_WIDGETS.find(w=>w.id==="clock").defaultSpan')), await evalJs('getDashboardLayout().clock.span'));
+  check('迁移 B：旧 dashboardOrder 迁移为 order（lunar=0, clock=1, weather=2）', migrated.lunar === 0 && migrated.clock === 1 && migrated.weather === 2, migrated);
+  check('迁移 B：跨列取默认值', (await evalJs('getDashboardLayout().clock.span')) === (await evalJs('DASHBOARD_WIDGETS.find(w=>w.id==="clock").defaultSpan')), await evalJs('getDashboardLayout().clock.span'));
+  check('布局写入新键 dashboardWidgetLayout（不再占用布局方向字段）',
+    (await evalJs('typeof currentSettings.dashboardWidgetLayout')) === 'object' && (await evalJs('typeof currentSettings.dashboardLayout')) === 'string');
+
+  // v1.5.2: 布局方向下拉可用（默认 row、切 column 生效）
+  await evalJs('openSettingsPanel()');
+  await sleep(400);
+  check('布局方向默认有选中值', ['row', 'column'].includes(await evalJs('document.getElementById("setting-dashboard-layout").value')), await evalJs('document.getElementById("setting-dashboard-layout").value'));
+  await evalJs(`(() => { const sel = document.getElementById('setting-dashboard-layout'); sel.value = 'column'; sel.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; })()`);
+  await sleep(800);
+  check('切到垂直排列后 data-layout=column', (await evalJs('document.getElementById("dashboard-grid").getAttribute("data-layout")')) === 'column');
+  await evalJs(`(() => { const sel = document.getElementById('setting-dashboard-layout'); sel.value = 'row'; sel.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; })()`);
+  await sleep(800);
+  check('切回水平排列生效', (await evalJs('document.getElementById("dashboard-grid").getAttribute("data-layout")')) === 'row');
+  await evalJs('closeSettingsPanel()');
+  await sleep(300);
 
   console.log('\n[12] UI 回归：分组管理器按钮不换行 / 不被挤压');
   await evalJs('openGroupManager()');
@@ -837,9 +899,12 @@ function send(method, params, sessionId) {
     const bar = document.getElementById('wallpaper-info');
     const search = document.querySelector('.search-section') || document.getElementById('search-input');
     const r = (el) => { const b = el.getBoundingClientRect(); return { top: Math.round(b.top), bottom: Math.round(b.bottom), left: Math.round(b.left), right: Math.round(b.right) }; };
-    return { tops, bottoms, lefts, bar: r(bar), search: r(search), cardsTop: Math.min(...[...document.querySelectorAll('#speeddial-grid .card-wrapper')].map(el => Math.round(el.getBoundingClientRect().top))) };
+    return { tops, bottoms, lefts, bar: r(bar), search: r(search),
+      cardsTop: Math.min(...[...document.querySelectorAll('#speeddial-grid .card-wrapper')].map(el => Math.round(el.getBoundingClientRect().top))),
+      dir: document.getElementById('dashboard-grid').getAttribute('data-layout'),
+      spans: Object.fromEntries(DASHBOARD_WIDGETS.map(w => [w.id, getDashboardLayout()[w.id].span])) };
   })())`));
-  check('看板组件在同一行（横向不被强制换行）', new Set(layout.bottoms).size === 1 && new Set(layout.lefts).size === layout.lefts.length, { tops: layout.tops, bottoms: layout.bottoms, lefts: layout.lefts });
+  check('看板组件在同一行（横向不被强制换行）', new Set(layout.bottoms).size === 1 && new Set(layout.lefts).size === layout.lefts.length, { bottoms: layout.bottoms, lefts: layout.lefts, dir: layout.dir, spans: layout.spans });
   check('壁纸信息条不与搜索栏重叠', layout.bar.top >= layout.search.bottom || layout.bar.bottom <= layout.search.top, { bar: layout.bar, search: layout.search });
   check('壁纸信息条不与卡片重叠', layout.bar.bottom <= layout.cardsTop, { barBottom: layout.bar.bottom, cardsTop: layout.cardsTop });
   const dashW = await evalJs('Math.round(document.getElementById("dashboard-grid").getBoundingClientRect().width)');

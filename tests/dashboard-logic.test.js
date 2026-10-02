@@ -98,11 +98,19 @@ const ctx = {
       return byId[id] || null;
     }
   },
-  currentSettings: { dashboardOrder: ['clock', 'weather', 'todo', 'lunar'] },
+  currentSettings: {
+    // dashboardOrder 保留（兼容旧版本的数组写法），布局以 dashboardWidgetLayout 为准；
+    // 这里显式给出初始布局，避免触发启动时的「迁移结果规范化」写盘（那是 E2E 覆盖的场景）
+    dashboardOrder: ['clock', 'weather', 'todo', 'lunar'],
+    dashboardWidgetLayout: {
+      clock: { order: 0, span: 3 }, weather: { order: 1, span: 4 },
+      todo: { order: 2, span: 3 }, lunar: { order: 3, span: 2 },
+    },
+  },
   saveSettings(s) {
     saveCalls.push({
       order: JSON.parse(JSON.stringify(s.dashboardOrder || [])),
-      layout: JSON.parse(JSON.stringify(s.dashboardLayout || {})),
+      layout: JSON.parse(JSON.stringify(s.dashboardWidgetLayout || {})),
     });
   },
   isLocked: false,
@@ -215,7 +223,11 @@ function clickArrow(widget, dir) {
   for (let i = 0; i < 20; i++) clickSpan('clock', 'shrink');
   await sleep(400);
   check('跨列下限钳制为注册表 minSpan', ctx.getDashboardLayout().clock.span === ctx.DASHBOARD_WIDGETS.find(w => w.id === 'clock').minSpan, ctx.getDashboardLayout().clock.span);
-  check('连续点击可累积（不受防抖影响）', ctx.getDashboardLayout().clock.span === 2);
+  // 连续点击应逐次累积（不被防抖吞掉）：从下限连点 3 次 + ，应正好 +3
+  const clockMin = ctx.DASHBOARD_WIDGETS.find(w => w.id === 'clock').minSpan;
+  for (let i = 0; i < 3; i++) clickSpan('clock', 'grow');
+  await sleep(400);
+  check('连续点击可累积（不受防抖影响）', ctx.getDashboardLayout().clock.span === clockMin + 3, { got: ctx.getDashboardLayout().clock.span, expect: clockMin + 3 });
   ctx.toggleDashEdit();
 
   console.log('\n[6] 锁定状态');

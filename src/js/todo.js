@@ -127,8 +127,12 @@ function initTodo() {
       if (i && addTodoItem(i.value)) i.value = '';
     });
   }
-  // 点击组件内部不冒泡到卡片区（避免触发搜索框聚焦/沉浸模式双击）
-  root.addEventListener('click', function (e) { e.stopPropagation(); });
+  // 点击组件内部不冒泡到卡片区（避免触发搜索框聚焦/沉浸模式双击），
+  // 但编辑态的看板控件（◀▶ 换位、−＋ 调宽）必须继续冒泡给 dashboard.js 的委托处理器
+  root.addEventListener('click', function (e) {
+    if (e.target.closest && e.target.closest('.dash-arrow, .dash-span-btn')) return;
+    e.stopPropagation();
+  });
 
   // 清理已完成按钮（看板组件上的小按钮，hover 显示）
   var clearBtn = document.getElementById('todo-clear');

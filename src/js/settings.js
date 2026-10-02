@@ -177,7 +177,7 @@ function populateSettingsForm(settings) {
   if (domSettings.groupDotSizeVal) domSettings.groupDotSizeVal.textContent = (settings.groupDotSize || 10) + 'px';
   if (domSettings.groupTabSize) domSettings.groupTabSize.value = settings.groupTabSize || 13;
   if (domSettings.groupTabSizeVal) domSettings.groupTabSizeVal.textContent = (settings.groupTabSize || 13) + 'px';
-  if (domSettings.dashboardLayout) domSettings.dashboardLayout.value = settings.dashboardLayout || 'row';
+  if (domSettings.dashboardLayout) domSettings.dashboardLayout.value = (typeof settings.dashboardLayout === 'string' ? settings.dashboardLayout : 'row');
   if (domSettings.dashItemH) domSettings.dashItemH.value = settings.dashItemH || 0;
   if (domSettings.dashItemHVal) domSettings.dashItemHVal.textContent = (settings.dashItemH || 0) === 0 ? '自适应' : (settings.dashItemH || 0) + 'px';
   if (domSettings.dashGap) domSettings.dashGap.value = settings.dashGap || 16;
@@ -408,7 +408,8 @@ function applyGroupPosition(settings) {
 function applyDashboardLayout(settings) {
   var el = document.querySelector('.dashboard-section');
   if (!el) return;
-  el.setAttribute('data-layout', settings.dashboardLayout || 'row');
+  // v1.5.2: 只接受字符串（'row'/'column'）——曾与组件布局对象同名字段冲突
+  el.setAttribute('data-layout', typeof settings.dashboardLayout === 'string' ? settings.dashboardLayout : 'row');
   var hOff = (settings.dashLeft || 0);
   document.documentElement.style.setProperty('--dash-h-offset', hOff + 'px');
   document.documentElement.style.setProperty('--dash-bottom', (settings.dashBottom || 0) + 'px');
