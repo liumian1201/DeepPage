@@ -90,7 +90,12 @@ function send(method, params, sessionId) {
       return;
     }
     if (msg.method === 'Runtime.consoleAPICalled' && msg.params.type === 'error') {
-      consoleErrors.push(msg.params.args.map(a => a.value || a.description).join(' '));
+      const text = msg.params.args.map(a => a.value || a.description).join(' ');
+      // CI runner 可能访问不到外部服务（天气/壁纸），这类网络失败不是代码回归；
+      // 真正的 JS 异常仍由下面的 exceptionThrown 捕获并一律判失败
+      if (!/Open-Meteo|OpenWeatherMap|和风|Bing 壁纸|天气|net::ERR|Failed to fetch|NetworkError/i.test(text)) {
+        consoleErrors.push(text);
+      }
     }
     if (msg.method === 'Runtime.exceptionThrown') {
       consoleErrors.push('EXCEPTION: ' + (msg.params.exceptionDetails.exception?.description || msg.params.exceptionDetails.text));
