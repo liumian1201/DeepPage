@@ -158,7 +158,7 @@ function send(method, params, sessionId) {
       try {
         const r = await send('Runtime.evaluate', {
           expression: 'typeof currentSettings === "object" && !!currentSettings &&' +
-            ' document.querySelectorAll("#dashboard-grid .dashboard-item").length === 3 &&' +
+            ' document.querySelectorAll("#dashboard-grid .dashboard-item").length === DASHBOARD_WIDGETS.length &&' +
             ' !!document.getElementById("btn-dash-edit")',
           returnByValue: true,
         }, sid);
@@ -192,7 +192,7 @@ function send(method, params, sessionId) {
   check('页面 URL 正确', (await evalJs('location.href')).includes(EXT_ID));
   check('dashboard.js 已加载', await evalJs('typeof isDashEditing === "function"'));
   check('看板网格存在', await evalJs('!!document.getElementById("dashboard-grid")'));
-  check('看板有 3 个组件', (await evalJs('document.querySelectorAll("#dashboard-grid .dashboard-item").length')) === 3);
+  check('看板组件数与注册表一致', (await evalJs('document.querySelectorAll("#dashboard-grid .dashboard-item").length')) === (await evalJs('DASHBOARD_WIDGETS.length')), await evalJs('document.querySelectorAll("#dashboard-grid .dashboard-item").length'));
 
   console.log('\n[1] P0-1 编辑态 ESC 退出');
   await evalJs('toggleDashEdit()');
@@ -411,11 +411,12 @@ function send(method, params, sessionId) {
   check('批量截图已接入 http 权限降级', (await evalJs('startBatchCapture.toString().includes("httpTargets")')));
 
   console.log('\n[11] P2 看板 12 列栅格 / 跨列 / 拖拽 / 数据迁移');
-  check('组件注册表存在且默认跨列合计 12', (await evalJs('DASHBOARD_WIDGETS.length')) === 3 && (await evalJs('DASHBOARD_WIDGETS.reduce((n,w)=>n+w.defaultSpan,0)')) === 12);
+  check('组件注册表含 4 个组件（P3-4 新增待办）', (await evalJs('DASHBOARD_WIDGETS.length')) === 4, await evalJs('DASHBOARD_WIDGETS.map(w=>w.id).join(",")'));
+  check('组件默认跨列合计仍为 12', (await evalJs('DASHBOARD_WIDGETS.reduce((n,w)=>n+w.defaultSpan,0)')) === 12, await evalJs('DASHBOARD_WIDGETS.reduce((n,w)=>n+w.defaultSpan,0)'));
   check('栅格为 12 列', (await evalJs('getComputedStyle(document.getElementById("dashboard-grid")).gridTemplateColumns.split(" ").length')) === 12);
   const spans = JSON.parse(await evalJs('JSON.stringify([...document.querySelectorAll("#dashboard-grid .dashboard-item")].map(e=>[e.dataset.widget, e.style.gridColumn]))'));
   check('每个组件都写入了 grid-column', spans.every(x => /^span \d+$/.test(x[1])), spans);
-  check('布局模型含 order/span', (await evalJs('(() => { const l = getDashboardLayout(); return Object.keys(l).length === 3 && typeof l.clock.order === "number" && typeof l.clock.span === "number"; })()')) === true);
+  check('布局模型覆盖全部注册组件', (await evalJs('(() => { const l = getDashboardLayout(); return Object.keys(l).length === DASHBOARD_WIDGETS.length && DASHBOARD_WIDGETS.every(w => typeof l[w.id].order === "number" && typeof l[w.id].span === "number"); })()')) === true);
 
   // 跨列调节：−/＋ 按钮 + 上下限钳制
   await evalJs('toggleDashEdit()');
@@ -464,7 +465,7 @@ function send(method, params, sessionId) {
   check('迁移测试：页面重新加载就绪', ready === true);
   const migrated = JSON.parse(await evalJs('JSON.stringify(Object.fromEntries(Object.entries(getDashboardLayout()).map(([k,v])=>[k,v.order])))'));
   check('旧 dashboardOrder 迁移为 order（lunar=0, clock=1, weather=2）', migrated.lunar === 0 && migrated.clock === 1 && migrated.weather === 2, migrated);
-  check('迁移后跨列取默认值', (await evalJs('getDashboardLayout().clock.span')) === 4);
+  check('迁移后跨列取默认值', (await evalJs('getDashboardLayout().clock.span')) === (await evalJs('DASHBOARD_WIDGETS.find(w=>w.id==="clock").defaultSpan')), await evalJs('getDashboardLayout().clock.span'));
 
   console.log('\n[12] UI 回归：分组管理器按钮不换行 / 不被挤压');
   await evalJs('openGroupManager()');
@@ -601,7 +602,53 @@ function send(method, params, sessionId) {
   await evalJs('closeGroupManager()');
   await sleep(300);
 
-  console.log('\n[15] 页面无 JS 报错');
+  console.log('\n[15] P3-4 待办看板组件（验证注册表抽象）');
+  check('注册表含 todo 组件', (await evalJs('DASHBOARD_WIDGETS.some(w => w.id === "todo")')) === true);
+  check('待办组件已渲染', (await evalJs('!!document.getElementById("dash-todo")')) === true);
+  check('可见性由注册表 settingKey 驱动', (await evalJs('(DASHBOARD_WIDGETS.find(w => w.id === "todo") || {}).settingKey')) === 'showTodo');
+
+  await evalJs(`(() => { const i = document.getElementById('todo-input'); i.value = '写周报'; i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return 'ok'; })()`);
+  await sleep(400);
+  check('回车添加待办', (await evalJs('getTodoItems().length')) === 1, await evalJs('JSON.stringify(getTodoItems())'));
+  check('列表渲染出该条', (await evalJs('document.querySelectorAll("#todo-list .todo-item").length')) === 1);
+  check('添加后输入框清空', (await evalJs('document.getElementById("todo-input").value')) === '');
+
+  await evalJs(`(() => { const i = document.getElementById('todo-input'); i.value = '买牛奶'; i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return 'ok'; })()`);
+  await sleep(300);
+  const todoId0 = await evalJs('getTodoItems()[0].id');
+  await evalJs(`document.querySelector('.todo-check[data-id="${todoId0}"]').click()`);
+  await sleep(400);
+  check('勾选标记完成', (await evalJs('getTodoItems()[0].done')) === true);
+  check('完成项带 done 样式', (await evalJs('!!document.querySelector("#todo-list .todo-item.done")')) === true);
+  check('计数显示 1/2', (await evalJs('document.getElementById("todo-count").textContent')) === '1/2', await evalJs('document.getElementById("todo-count").textContent'));
+
+  await evalJs('document.getElementById("todo-clear").click()');
+  await sleep(400);
+  check('清理已完成生效', (await evalJs('getTodoItems().length')) === 1 && (await evalJs('getTodoItems()[0].done')) === false);
+
+  const todoId1 = await evalJs('getTodoItems()[0].id');
+  await evalJs(`document.querySelector('.todo-del[data-id="${todoId1}"]').click()`);
+  await sleep(400);
+  check('删除待办生效', (await evalJs('getTodoItems().length')) === 0);
+  check('空状态提示出现', (await evalJs('!!document.querySelector("#todo-list .todo-empty")')) === true);
+
+  await evalJs(`(() => { const i = document.getElementById('todo-input'); i.value = '持久化验证'; i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return 'ok'; })()`);
+  await sleep(1200);
+  check('待办写入 storage（走合并写）', (await evalJs(`new Promise(r => chrome.storage.sync.get('settings', d => r(((d.settings || {}).todoItems || []).length)))`)) >= 1);
+
+  // 组件开关（注册表驱动的可见性）
+  await evalJs('openSettingsPanel()');
+  await sleep(400);
+  await evalJs(`(() => { const t = document.getElementById('toggle-todo'); t.checked = false; t.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; })()`);
+  await sleep(900);
+  check('关闭开关后待办组件隐藏', (await evalJs('getComputedStyle(document.getElementById("dash-todo")).display')) === 'none');
+  await evalJs(`(() => { const t = document.getElementById('toggle-todo'); t.checked = true; t.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; })()`);
+  await sleep(900);
+  check('重新开启后组件显示', (await evalJs('getComputedStyle(document.getElementById("dash-todo")).display')) !== 'none');
+  await evalJs('closeSettingsPanel()');
+  await sleep(300);
+
+  console.log('\n[16] 页面无 JS 报错');
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);

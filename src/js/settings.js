@@ -16,6 +16,7 @@ const domSettings = {
   toggleClock:  document.getElementById('toggle-clock'),
   toggleLunar:  document.getElementById('toggle-lunar'),
   toggleWeather: document.getElementById('toggle-weather'),
+  toggleTodo:    document.getElementById('toggle-todo'),
   toggleAddBtn:  document.getElementById('toggle-add-button'),
   toggleCardTitle: document.getElementById('toggle-card-title'),
   toggleShowVisitCount: document.getElementById('toggle-show-visit-count'),
@@ -140,6 +141,7 @@ function populateSettingsForm(settings) {
   domSettings.toggleClock.checked  = settings.showClock;
   domSettings.toggleLunar.checked  = settings.showLunar;
   domSettings.toggleWeather.checked = settings.showWeather;
+  if (domSettings.toggleTodo) domSettings.toggleTodo.checked = settings.showTodo !== false;
   domSettings.toggleAddBtn.checked  = settings.showAddButton !== false;
   domSettings.toggleCardTitle.checked = settings.showCardTitle !== false;
   if (domSettings.toggleShowVisitCount) domSettings.toggleShowVisitCount.checked = settings.showVisitCount !== false;
@@ -408,14 +410,17 @@ function applyDashboardLayout(settings) {
 }
 
 /** 应用组件可见性 */
+/** 组件开关：v1.5.0 起由 DASHBOARD_WIDGETS 注册表驱动（新增组件无需改这里） */
 function applyComponentVisibility(settings) {
-  const clockEl   = document.getElementById('dash-clock');
-  const lunarEl   = document.getElementById('dash-lunar');
-  const weatherEl = document.getElementById('dash-weather');
-
-  if (clockEl)   clockEl.style.display   = settings.showClock   ? '' : 'none';
-  if (lunarEl)   lunarEl.style.display   = settings.showLunar   ? '' : 'none';
-  if (weatherEl) weatherEl.style.display = settings.showWeather ? '' : 'none';
+  if (typeof DASHBOARD_WIDGETS === 'undefined') return;
+  DASHBOARD_WIDGETS.forEach(function (w) {
+    var el = document.getElementById(w.elementId) ||
+             document.querySelector('.dashboard-item[data-widget="' + w.id + '"]');
+    if (!el) return;
+    var key = w.settingKey;
+    var visible = !key || settings[key] !== false;   // 未配置时默认显示
+    el.style.display = visible ? '' : 'none';
+  });
 }
 
 /** 收集表单中当前的设置值 */
@@ -427,6 +432,7 @@ function collectSettingsFromForm() {
     showClock:    domSettings.toggleClock.checked,
     showLunar:    domSettings.toggleLunar.checked,
     showWeather:  domSettings.toggleWeather.checked,
+    showTodo:     domSettings.toggleTodo ? domSettings.toggleTodo.checked : true,
     showAddButton: domSettings.toggleAddBtn.checked,
     showCardTitle: domSettings.toggleCardTitle.checked,
     showVisitCount: domSettings.toggleShowVisitCount ? domSettings.toggleShowVisitCount.checked : true,
@@ -757,7 +763,7 @@ function bindSettingsEvents() {
     el.addEventListener('change', onSettingChanged);
   });
 
-  [domSettings.toggleClock, domSettings.toggleLunar, domSettings.toggleWeather, domSettings.toggleAddBtn, domSettings.toggleCardTitle, domSettings.toggleShowVisitCount, domSettings.togglePureTextCards, domSettings.toggleCardThemeColor, domSettings.toggleConfirmDelete, domSettings.toggleDisableWheelSwitch, domSettings.toggleShowGroupIndicator, domSettings.bingUHD, domSettings.bingAutoRefresh, domSettings.toggleShowSearch, domSettings.toggleClockSeconds].forEach((el) => {
+  [domSettings.toggleClock, domSettings.toggleLunar, domSettings.toggleWeather, domSettings.toggleTodo, domSettings.toggleAddBtn, domSettings.toggleCardTitle, domSettings.toggleShowVisitCount, domSettings.togglePureTextCards, domSettings.toggleCardThemeColor, domSettings.toggleConfirmDelete, domSettings.toggleDisableWheelSwitch, domSettings.toggleShowGroupIndicator, domSettings.bingUHD, domSettings.bingAutoRefresh, domSettings.toggleShowSearch, domSettings.toggleClockSeconds].forEach((el) => {
     if (!el) return;
     el.addEventListener('change', onSettingChanged);
   });

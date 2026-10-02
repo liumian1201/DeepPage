@@ -158,7 +158,7 @@ function send(method, params, sessionId) {
       try {
         const r = await send('Runtime.evaluate', {
           expression: 'typeof currentSettings === "object" && !!currentSettings &&' +
-            ' document.querySelectorAll("#dashboard-grid .dashboard-item").length === 3 &&' +
+            ' document.querySelectorAll("#dashboard-grid .dashboard-item").length === DASHBOARD_WIDGETS.length &&' +
             ' !!document.getElementById("btn-dash-edit")',
           returnByValue: true,
         }, sid);

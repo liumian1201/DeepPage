@@ -107,6 +107,18 @@
         <span class="weather-city">天气加载中...</span>
         <span class="weather-detail"></span>
       </div>
+      <div id="dash-todo" class="dashboard-item dashboard-todo" data-widget="todo">
+        <div class="todo-head">
+          <span class="todo-title">待办</span>
+          <span id="todo-count" class="todo-count"></span>
+          <button id="todo-clear" class="todo-clear" title="清理已完成" aria-label="清理已完成">🧹</button>
+        </div>
+        <div id="todo-list" class="todo-list"></div>
+        <div class="todo-add-row">
+          <input type="text" id="todo-input" class="todo-input" placeholder="添加待办，回车确认" maxlength="80" aria-label="添加待办">
+          <button id="todo-add" class="todo-add" title="添加" aria-label="添加待办">＋</button>
+        </div>
+      </div>
       <div id="dash-lunar" class="dashboard-item dashboard-lunar" data-widget="lunar">
         <span class="lunar-year">农历加载中...</span>
         <span class="lunar-date"></span>
@@ -232,7 +244,8 @@
             <div class="toggle-list">
               <label class="toggle-item"><input type="checkbox" id="toggle-clock" checked> 时间显示</label>
               <label class="toggle-item"><input type="checkbox" id="toggle-lunar" checked> 农历信息</label>
-              <label class="toggle-item"><input type="checkbox" id="toggle-weather" checked> 天气预报</label>            </div>
+              <label class="toggle-item"><input type="checkbox" id="toggle-weather" checked> 天气预报</label>
+              <label class="toggle-item"><input type="checkbox" id="toggle-todo" checked> 待办清单</label>            </div>
           </div>
           <div class="setting-group">
             <label>组件排序</label>
@@ -762,6 +775,7 @@
   <script src="js/search-engines.js" defer></script>
   <script src="js/contextmenu.js" defer></script>
   <script src="js/a11y.js" defer></script>
+  <script src="js/todo.js" defer></script>
   <script src="js/settings-webdav.js" defer></script>
   <script src="js/main.js" defer></script>
 </body>

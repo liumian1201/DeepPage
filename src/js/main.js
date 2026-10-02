@@ -115,6 +115,10 @@ async function init() {
   if (currentSettings && currentSettings.showWeather) {
     initWeather();
   }
+  // v1.5.0: 待办看板组件（注册表新增组件的第三个扩展点：模块 + 初始化调用）
+  if (currentSettings && currentSettings.showTodo !== false && typeof initTodo === 'function') {
+    initTodo();
+  }
   initContextMenu();
   renderGroupDots();
 

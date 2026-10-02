@@ -932,6 +932,8 @@
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: var(--dash-gap, 16px);
   justify-content: center;
+  /* 底部对齐：各组件保持自然高度（待办列表变长时不会把时钟/天气拉高） */
+  align-items: end;
   position: fixed;
   bottom: var(--dash-bottom, 0px);
   left: 50%;
@@ -1059,6 +1061,69 @@ body.dash-editing .dash-arrow { display: block; }
   box-shadow: 0 4px 16px rgba(0,0,0,.3);
 }
 body.dash-editing .btn-dash-done { display: block; }
+
+/* --------------------- v1.5.0: 待办看板组件 --------------------- */
+.dashboard-todo {
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+.todo-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.todo-title { font-weight: 600; }
+.todo-count { margin-left: auto; color: var(--text-tertiary); font-size: 11px; }
+.todo-clear {
+  border: none; background: none; cursor: pointer;
+  opacity: 0; font-size: 12px; padding: 0 2px;
+  transition: opacity var(--transition-fast);
+}
+.dashboard-todo:hover .todo-clear { opacity: .7; }
+.todo-clear:hover { opacity: 1; }
+.todo-list {
+  display: flex; flex-direction: column; gap: 3px;
+  max-height: 140px; overflow-y: auto;
+  font-size: 13px;
+}
+.todo-empty { color: var(--text-tertiary); font-size: 11px; }
+.todo-item { display: flex; align-items: center; gap: 6px; }
+.todo-item .todo-check { flex-shrink: 0; cursor: pointer; }
+.todo-item .todo-text {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.todo-item.done .todo-text { text-decoration: line-through; color: var(--text-tertiary); }
+.todo-del {
+  flex-shrink: 0;
+  border: none; background: none; cursor: pointer;
+  color: var(--text-tertiary); opacity: 0; font-size: 11px;
+  transition: opacity var(--transition-fast);
+}
+.todo-item:hover .todo-del { opacity: .8; }
+.todo-del:hover { color: #d93025; opacity: 1; }
+.todo-add-row { display: flex; gap: 4px; align-items: center; margin-top: auto; }
+.todo-input {
+  flex: 1; min-width: 0;
+  padding: 4px 6px;
+  font-size: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+}
+.todo-input:focus { outline: none; border-color: var(--accent); }
+.todo-add {
+  flex-shrink: 0;
+  border: none; background: none; cursor: pointer;
+  font-size: 14px; color: var(--text-secondary);
+}
+.todo-add:hover { color: var(--accent); }
 
 .dashboard-clock {
   gap: 2px;

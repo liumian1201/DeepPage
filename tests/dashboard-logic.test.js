@@ -20,8 +20,17 @@ function makeItem(widget) {
     removeAttribute() {},
   };
 }
-const items = ['clock', 'weather', 'lunar'].map(makeItem);
-const byId = { 'dash-clock': items[0], 'dash-weather': items[1], 'dash-lunar': items[2] };
+// 与 src/js/dashboard.js 的 DASHBOARD_WIDGETS 保持一致；下方会做一次一致性自检，
+// 注册表新增组件时这里若忘了同步，测试会直接报错而不是悄悄漏测
+const WIDGET_IDS = ['clock', 'weather', 'todo', 'lunar'];
+const items = WIDGET_IDS.map(makeItem);
+const byId = {
+  'dash-clock': items[0],
+  'dash-weather': items[1],
+  'dash-todo': items[2],
+  'dash-lunar': items[3],
+};
+const DEFAULT_ORDER = WIDGET_IDS.join(',');
 
 function makeEl(tag) {
   return {
@@ -89,7 +98,7 @@ const ctx = {
       return byId[id] || null;
     }
   },
-  currentSettings: { dashboardOrder: ['clock', 'weather', 'lunar'] },
+  currentSettings: { dashboardOrder: ['clock', 'weather', 'todo', 'lunar'] },
   saveSettings(s) {
     saveCalls.push({
       order: JSON.parse(JSON.stringify(s.dashboardOrder || [])),
@@ -131,13 +140,14 @@ function clickArrow(widget, dir) {
 
 (async () => {
   ctx.initDashboardGrid();
-  check('init 后顺序恢复', order() === 'clock,weather,lunar', order());
+  check('桩的组件列表与注册表一致', JSON.stringify(ctx.DASHBOARD_WIDGETS.map(w => w.id)) === JSON.stringify(WIDGET_IDS), ctx.DASHBOARD_WIDGETS.map(w => w.id));
+  check('init 后顺序恢复', order() === DEFAULT_ORDER, order());
   check('init 后生成编辑态控件（箭头 + 跨列按钮）', items.every(i => i._children.filter(c => /dash-arrow|dash-span-btn/.test(c.className)).length === 4), items.map(i => i._children.length));
 
   console.log('\n[1] 非编辑态点击箭头不应有任何反应');
   clickArrow('clock', 'right');
   await sleep(400);
-  check('未进入编辑态 → 顺序不变', order() === 'clock,weather,lunar', order());
+  check('未进入编辑态 → 顺序不变', order() === DEFAULT_ORDER, order());
   check('未进入编辑态 → 未写盘', saveCalls.length === 0, JSON.stringify(saveCalls));
 
   console.log('\n[2] 进入编辑态');
@@ -155,18 +165,18 @@ function clickArrow(widget, dir) {
     return out;
   }
   const clicks = [['clock', 'right'], ['clock', 'right'], ['clock', 'left'], ['weather', 'right'], ['weather', 'right']];
-  let expected = ['clock', 'weather', 'lunar'];
+  let expected = WIDGET_IDS.slice();   // 初始顺序 = 注册表顺序
   clicks.forEach(([w, d]) => { expected = refMove(expected, w, d); clickArrow(w, d); });
   check('DOM 顺序与参考模型一致', order() === expected.join(','), order() + ' vs ' + expected.join(','));
   check('防抖期间未写盘', saveCalls.length === 0, JSON.stringify(saveCalls));
   await sleep(400);
   check('连点 5 次只写 1 次', saveCalls.length === 1, 'calls=' + saveCalls.length);
   check('写入顺序正确（兼容数组）', JSON.stringify(saveCalls[0].order) === JSON.stringify(expected), JSON.stringify(saveCalls[0].order));
-  check('同时写入 layout（order + span）', (() => {
+  check('同时写入 layout（order + span，span 取注册表默认值）', (() => {
     const l = saveCalls[0].layout;
-    return l && Object.keys(l).length === 3 &&
-      expected.every((id, i) => l[id] && l[id].order === i) &&
-      l.clock.span === 4 && l.weather.span === 5 && l.lunar.span === 3;
+    if (!l || Object.keys(l).length !== WIDGET_IDS.length) return false;
+    if (!expected.every((id, i) => l[id] && l[id].order === i)) return false;
+    return ctx.DASHBOARD_WIDGETS.every(w => l[w.id].span === w.defaultSpan);
   })(), JSON.stringify(saveCalls[0].layout));
 
   console.log('\n[4] 边界点击不写盘');
@@ -204,7 +214,7 @@ function clickArrow(widget, dir) {
   check('跨列上限钳制为 12', ctx.getDashboardLayout().clock.span === 12, ctx.getDashboardLayout().clock.span);
   for (let i = 0; i < 20; i++) clickSpan('clock', 'shrink');
   await sleep(400);
-  check('跨列下限钳制为 minSpan(2)', ctx.getDashboardLayout().clock.span === 2, ctx.getDashboardLayout().clock.span);
+  check('跨列下限钳制为注册表 minSpan', ctx.getDashboardLayout().clock.span === ctx.DASHBOARD_WIDGETS.find(w => w.id === 'clock').minSpan, ctx.getDashboardLayout().clock.span);
   check('连续点击可累积（不受防抖影响）', ctx.getDashboardLayout().clock.span === 2);
   ctx.toggleDashEdit();
 

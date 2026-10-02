@@ -11,9 +11,10 @@
    布局、开关、编辑态、尺寸控制都由注册表驱动，不再有「HTML 改了 ID 忘了同步」的问题。
 */
 var DASHBOARD_WIDGETS = [
-  { id: 'clock',   label: '时间',  elementId: 'dash-clock',   defaultSpan: 4, minSpan: 2 },
-  { id: 'weather', label: '天气',  elementId: 'dash-weather', defaultSpan: 5, minSpan: 3 },
-  { id: 'lunar',   label: '农历',  elementId: 'dash-lunar',   defaultSpan: 3, minSpan: 2 }
+  { id: 'clock',   label: '时间',  elementId: 'dash-clock',   defaultSpan: 3, minSpan: 2, settingKey: 'showClock' },
+  { id: 'weather', label: '天气',  elementId: 'dash-weather', defaultSpan: 4, minSpan: 3, settingKey: 'showWeather' },
+  { id: 'todo',    label: '待办',  elementId: 'dash-todo',    defaultSpan: 3, minSpan: 3, settingKey: 'showTodo' },
+  { id: 'lunar',   label: '农历',  elementId: 'dash-lunar',   defaultSpan: 2, minSpan: 2, settingKey: 'showLunar' }
 ];
 
 var DASHBOARD_COLUMNS = 12;
@@ -254,6 +255,7 @@ function _onDashMouseDown(e) {
   if (!_dashEditing) return;
   if (e.button !== 0) return;
   if (e.target.closest('button')) return;        // 控件不触发拖拽
+  if (e.target.closest('input, textarea, select, label')) return;  // 组件内表单控件（如待办输入框）不触发拖拽
   var item = e.target.closest('.dashboard-item');
   if (!item) return;
   _dashDrag = { item: item, startX: e.clientX, startY: e.clientY, active: false };

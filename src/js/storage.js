@@ -36,6 +36,8 @@ var DEFAULT_SETTINGS = {
   showClock: true,
   showLunar: true,
   showWeather: true,
+  showTodo: true,          // v1.5.0: 看板待办组件
+  todoItems: [],
   theme: 'light',
   showAddButton: true,
   showCardTitle: true,
