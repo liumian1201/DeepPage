@@ -42,6 +42,84 @@ function migrateCardFields() {
   }
 }
 
+/* ==================== v1.5.0: 可选 favicon（离线缓存 + 首字符兜底） ====================
+   仅对「没有自定义图」的卡片生效；直接取站点自身的 /favicon.ico（不经过第三方图标服务），
+   经 SW 代理下载后存 IndexedDB（离线可用）。失败则标记 faviconFailed，不再反复重试，
+   渲染仍走首字符色块兜底。
+*/
+
+var FAVICON_CONCURRENCY = 3;
+
+/** 从卡片 URL 推导 favicon 地址（站点根目录，忽略子路径） */
+function _faviconUrlFor(cardUrl) {
+  try {
+    var u = new URL(cardUrl);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    return u.origin + '/favicon.ico';
+  } catch (e) { return null; }
+}
+
+/** 为缺图卡片补 favicon；返回 { fetched, failed } */
+async function enrichCardFavicons(options) {
+  options = options || {};
+  if (!(currentSettings && currentSettings.useFavicon)) return { fetched: 0, failed: 0 };
+  if (typeof cacheCardIcon !== 'function') return { fetched: 0, failed: 0 };
+
+  var candidates = [];
+  (groups || []).forEach(function (g) {
+    (g.cards || []).forEach(function (c) {
+      if (!c || c.image) return;                 // 已有图（自定义或 favicon）不动
+      if (c.faviconFailed) return;               // 失败过的不再重试
+      if (!_faviconUrlFor(c.url)) return;
+      candidates.push(c);
+    });
+  });
+  if (options.limit) candidates = candidates.slice(0, options.limit);
+
+  var fetched = 0, failed = 0, idx = 0;
+  async function worker() {
+    while (idx < candidates.length) {
+      var card = candidates[idx++];
+      var iconUrl = _faviconUrlFor(card.url);
+      var ref = await cacheCardIcon(iconUrl, card.id);
+      if (ref) { card.image = ref; fetched++; }
+      else { card.faviconFailed = true; failed++; }   // 首字符兜底继续生效
+    }
+  }
+  var workers = [];
+  for (var i = 0; i < Math.min(FAVICON_CONCURRENCY, candidates.length); i++) workers.push(worker());
+  await Promise.all(workers);
+
+  if (fetched > 0 || failed > 0) {
+    // 合并写：favicon 是装饰性数据，不必立即落盘
+    if (typeof saveGroups === 'function') await saveGroups(groups, { coalesce: true });
+  }
+  return { fetched: fetched, failed: failed };
+}
+
+/** 单张卡片手动刷新图标（右键/编辑弹窗可用） */
+async function refreshCardFavicon(cardId) {
+  var card = null;
+  (groups || []).forEach(function (g) {
+    (g.cards || []).forEach(function (c) { if (c.id === cardId) card = c; });
+  });
+  if (!card) return false;
+  var iconUrl = _faviconUrlFor(card.url);
+  if (!iconUrl) { if (typeof showToast === 'function') showToast('该卡片不是 http/https 地址', 'warning'); return false; }
+  var ref = await cacheCardIcon(iconUrl, card.id);
+  if (!ref) {
+    card.faviconFailed = true;
+    if (typeof showToast === 'function') showToast('未取到网站图标，继续使用首字符', 'warning');
+  } else {
+    card.image = ref;
+    delete card.faviconFailed;
+    if (typeof showToast === 'function') showToast('已更新网站图标', 'success');
+  }
+  await saveGroups(groups);
+  if (typeof renderSpeeddials === 'function') renderSpeeddials();
+  return !!ref;
+}
+
 /* ==================== v1.5.0: 卡片多选批量操作 ====================
    Ctrl/⌘ + 单击 = 切换选中；Shift + 单击 = 从锚点到该卡片的区间选中。
    选中态只切 DOM class，不重渲染；批量操作走结构性立即写盘（saveGroups 不带 coalesce）。

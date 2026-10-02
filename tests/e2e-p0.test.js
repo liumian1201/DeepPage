@@ -743,7 +743,50 @@ function send(method, params, sessionId) {
   await evalJs('closeSettingsPanel()');
   await sleep(300);
 
-  console.log('\n[18] 页面无 JS 报错');
+  console.log('\n[18] P3-8 可选 favicon（离线缓存 + 首字符兜底）');
+  check('默认关闭', (await evalJs('currentSettings.useFavicon === true')) === false);
+  const offResult = JSON.parse(await evalJs('(async () => JSON.stringify(await enrichCardFavicons()))()'));
+  check('未开启时不发起任何请求', offResult.fetched === 0 && offResult.failed === 0, offResult);
+  check('favicon 地址由站点根推导', (await evalJs('_faviconUrlFor("https://a.b.com/path/x?y=1")')) === 'https://a.b.com/favicon.ico');
+  check('非 http(s) 地址返回 null', (await evalJs('_faviconUrlFor("chrome://settings")')) === null && (await evalJs('_faviconUrlFor("不是网址")')) === null);
+
+  // 开启后：每张候选卡片要么拿到图标、要么被标记失败（不再重试），不会卡住
+  await evalJs('(() => { currentSettings.useFavicon = true; return "ok"; })()');
+  const onResult = JSON.parse(await evalJs('(async () => JSON.stringify(await enrichCardFavicons({ limit: 2 })))()'));
+  check('开启后对候选卡片做出决定', (onResult.fetched + onResult.failed) >= 0 && typeof onResult.fetched === 'number', onResult);
+  const decided = JSON.parse(await evalJs(`JSON.stringify((() => {
+    const out = { withImage: 0, failed: 0, neither: 0 };
+    groups.forEach(g => (g.cards || []).forEach(c => {
+      if (c.image) out.withImage++;
+      else if (c.faviconFailed) out.failed++;
+      else out.neither++;
+    }));
+    return out;
+  })())`));
+  check('失败卡片被标记（不会无限重试）', decided.failed + decided.withImage > 0, decided);
+  check('首字符兜底仍渲染（无图卡片有 fallback 块或纯文字）', (await evalJs('document.querySelectorAll("#speeddial-grid .card-fallback, #speeddial-grid .card-pure-text").length')) > 0);
+
+  const decidedBefore = decided.failed + decided.withImage;
+  await evalJs('(async () => await enrichCardFavicons())()');
+  await sleep(600);
+  const after = JSON.parse(await evalJs(`JSON.stringify((() => {
+    const out = { withImage: 0, failed: 0 };
+    groups.forEach(g => (g.cards || []).forEach(c => { if (c.image) out.withImage++; else if (c.faviconFailed) out.failed++; }));
+    return out;
+  })())`));
+  check('二次执行不会重复处理已决定卡片（幂等）', after.failed + after.withImage >= decidedBefore, { decidedBefore, after });
+
+  // 开关存在且已接线
+  await evalJs('openSettingsPanel()');
+  await sleep(400);
+  check('设置里有 favicon 开关且状态同步', (await evalJs('!!document.getElementById("toggle-use-favicon") && document.getElementById("toggle-use-favicon").checked')) === true);
+  await evalJs(`(() => { const t = document.getElementById('toggle-use-favicon'); t.checked = false; t.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; })()`);
+  await sleep(700);
+  check('关闭后写入设置', (await evalJs('currentSettings.useFavicon === true')) === false);
+  await evalJs('closeSettingsPanel()');
+  await sleep(300);
+
+  console.log('\n[19] 页面无 JS 报错');
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);

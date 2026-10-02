@@ -21,6 +21,7 @@ const domSettings = {
   toggleCardTitle: document.getElementById('toggle-card-title'),
   toggleShowVisitCount: document.getElementById('toggle-show-visit-count'),
   togglePureTextCards: document.getElementById('toggle-pure-text-cards'),
+  toggleUseFavicon: document.getElementById('toggle-use-favicon'),
   toggleCardThemeColor: document.getElementById('toggle-card-theme-color'),
   toggleConfirmDelete: document.getElementById('toggle-confirm-delete'),
   toggleSuggest: document.getElementById('toggle-suggest'),
@@ -152,6 +153,7 @@ function populateSettingsForm(settings) {
   domSettings.toggleCardTitle.checked = settings.showCardTitle !== false;
   if (domSettings.toggleShowVisitCount) domSettings.toggleShowVisitCount.checked = settings.showVisitCount !== false;
   if (domSettings.togglePureTextCards) domSettings.togglePureTextCards.checked = settings.pureTextCards === true;
+  if (domSettings.toggleUseFavicon) domSettings.toggleUseFavicon.checked = settings.useFavicon === true;
   if (domSettings.toggleCardThemeColor) domSettings.toggleCardThemeColor.checked = settings.cardThemeColor === true;
   if (domSettings.toggleConfirmDelete) domSettings.toggleConfirmDelete.checked = settings.confirmDelete !== false;
   if (domSettings.toggleSuggest) domSettings.toggleSuggest.checked = settings.searchSuggestions === true;
@@ -447,6 +449,7 @@ function collectSettingsFromForm() {
     showCardTitle: domSettings.toggleCardTitle.checked,
     showVisitCount: domSettings.toggleShowVisitCount ? domSettings.toggleShowVisitCount.checked : true,
     pureTextCards: domSettings.togglePureTextCards ? domSettings.togglePureTextCards.checked : false,
+    useFavicon: domSettings.toggleUseFavicon ? domSettings.toggleUseFavicon.checked : false,
     cardThemeColor: domSettings.toggleCardThemeColor ? domSettings.toggleCardThemeColor.checked : false,
     confirmDelete: domSettings.toggleConfirmDelete ? domSettings.toggleConfirmDelete.checked : true,
     searchSuggestions: domSettings.toggleSuggest ? domSettings.toggleSuggest.checked : false,
@@ -500,6 +503,9 @@ function collectSettingsFromForm() {
 /* ---------- 面板开关 ---------- */
 function openSettingsPanel() {
   ensureSettingsPanelReady(); // v1.3.3: 首次打开时才构建表单/绑定事件
+  // v1.5.0: 每次打开都以数据为准回填一次表单 —— 设置可能被其它入口改过
+  // （导入、快捷键、分组管理器等），只回填不重新绑定事件
+  populateSettingsForm(currentSettings || {});
   domSettings.panel.classList.remove('hidden');
   domSettings.overlay.classList.remove('hidden');
   // 重置面板位置
@@ -615,6 +621,20 @@ function bindSettingsEvents() {
   }
   if (domSettings.backupIncludeImages) {
     domSettings.backupIncludeImages.addEventListener('change', onSettingChanged);
+  }
+
+  // v1.5.0: favicon 开关 — 打开后立即尝试为缺图卡片补图标
+  if (domSettings.toggleUseFavicon) {
+    domSettings.toggleUseFavicon.addEventListener('change', function () {
+      if (!this.checked) return;
+      if (typeof enrichCardFavicons !== 'function') return;
+      enrichCardFavicons().then(function (r) {
+        if (r && r.fetched > 0 && typeof renderSpeeddials === 'function') renderSpeeddials();
+        if (typeof showToast === 'function') {
+          showToast(r && r.fetched > 0 ? ('已为 ' + r.fetched + ' 张卡片补上网站图标') : '未取到网站图标，继续用首字符', r && r.fetched > 0 ? 'success' : 'info');
+        }
+      }).catch(function () {});
+    });
   }
 
   // v1.5.0: 壁纸轮播间隔
@@ -784,7 +804,7 @@ function bindSettingsEvents() {
     el.addEventListener('change', onSettingChanged);
   });
 
-  [domSettings.toggleClock, domSettings.toggleLunar, domSettings.toggleWeather, domSettings.toggleTodo, domSettings.toggleAddBtn, domSettings.toggleCardTitle, domSettings.toggleShowVisitCount, domSettings.togglePureTextCards, domSettings.toggleCardThemeColor, domSettings.toggleConfirmDelete, domSettings.toggleDisableWheelSwitch, domSettings.toggleShowGroupIndicator, domSettings.bingUHD, domSettings.bingAutoRefresh, domSettings.toggleShowSearch, domSettings.toggleClockSeconds, domSettings.toggleSuggest].forEach((el) => {
+  [domSettings.toggleClock, domSettings.toggleLunar, domSettings.toggleWeather, domSettings.toggleTodo, domSettings.toggleAddBtn, domSettings.toggleCardTitle, domSettings.toggleShowVisitCount, domSettings.togglePureTextCards, domSettings.toggleUseFavicon, domSettings.toggleCardThemeColor, domSettings.toggleConfirmDelete, domSettings.toggleDisableWheelSwitch, domSettings.toggleShowGroupIndicator, domSettings.bingUHD, domSettings.bingAutoRefresh, domSettings.toggleShowSearch, domSettings.toggleClockSeconds, domSettings.toggleSuggest].forEach((el) => {
     if (!el) return;
     el.addEventListener('change', onSettingChanged);
   });

@@ -95,6 +95,12 @@ async function init() {
   //   GC 要扫 IndexedDB、壁纸要拉图，都不该挡第一帧
   _scheduleAfterFirstPaint(function () {
     if (typeof migrateCardIcons === 'function') migrateCardIcons();
+    // v1.5.0: 可选 favicon（设置开启时才跑；失败落回首字符色块）
+    if (currentSettings && currentSettings.useFavicon && typeof enrichCardFavicons === 'function') {
+      enrichCardFavicons().then(function (r) {
+        if (r && r.fetched > 0 && typeof renderSpeeddials === 'function') renderSpeeddials();
+      }).catch(function () {});
+    }
     if (typeof collectCardImageGarbage === 'function') collectCardImageGarbage();
     initWallpaper();
   });
