@@ -131,21 +131,41 @@ function getSelectedCardIds() { return _selectedCardIds.slice(); }
 function hasCardSelection() { return _selectedCardIds.length > 0; }
 function isCardSelected(id) { return _selectedCardIds.indexOf(id) !== -1; }
 
-/** 当前展示顺序（DOM 顺序即视觉顺序） */
+/** 当前分组的展示顺序（DOM 顺序即视觉顺序）
+ *  v1.5.1: 必须限定当前分组的容器 —— DOM 池会同时保留其它分组的容器，
+ *  否则 Ctrl+A / Shift 区间会把隐藏分组里的卡片也算进来 */
 function _displayedCardIds() {
   var grid = document.getElementById('speeddial-grid');
   if (!grid) return [];
-  return Array.prototype.map.call(
-    grid.querySelectorAll('.card-wrapper[data-id]'),
-    function (el) { return el.dataset.id; }
-  );
+  var containers = grid.querySelectorAll('.speeddial-group');
+  var scope = [];
+  if (containers.length) {
+    for (var i = 0; i < containers.length; i++) {
+      if (containers[i].style.display !== 'none') scope.push(containers[i]);
+    }
+  } else {
+    scope = [grid];
+  }
+  var out = [];
+  Array.prototype.forEach.call(scope, function (c) {
+    c.querySelectorAll('.card-wrapper[data-id]').forEach(function (el) { out.push(el.dataset.id); });
+  });
+  return out;
 }
 
 function _syncSelectionDom() {
+  // v1.5.1: 只标记当前分组的容器 —— DOM 池会同时保留其它分组的容器，
+  // 全局查询会把同名卡片的隐藏容器也标上（切组后看起来像被选中）
   var grid = document.getElementById('speeddial-grid');
   if (grid) {
-    grid.querySelectorAll('.card-wrapper[data-id]').forEach(function (el) {
-      el.classList.toggle('selected', _selectedCardIds.indexOf(el.dataset.id) !== -1);
+    var containers = grid.querySelectorAll('.speeddial-group');
+    var scope = containers.length ? containers : [grid];
+    Array.prototype.forEach.call(scope, function (container) {
+      var isActive = !container.classList || container === grid ||
+        container.style.display !== 'none';
+      container.querySelectorAll('.card-wrapper[data-id]').forEach(function (el) {
+        el.classList.toggle('selected', isActive && _selectedCardIds.indexOf(el.dataset.id) !== -1);
+      });
     });
   }
   updateBatchBar();
@@ -513,6 +533,13 @@ function renderSpeeddials() {
   var thisRenderId = ++_renderId;
   loadLocalCardImages(container, thisRenderId);
   bindDragEvents();
+
+  // v1.5.1: 重渲染后恢复多选样式 ——
+  // 后台刷新（storage.onChanged / 外部变更）会重建卡片 DOM 并丢掉 .selected，
+  // 造成「数据里还选中着、界面上却看不到」，批量操作看起来失灵
+  if (typeof _syncSelectionDom === 'function' && typeof hasCardSelection === 'function' && hasCardSelection()) {
+    _syncSelectionDom();
+  }
 }
 
 /** 加载卡片中的本地 IndexedDB 图片（仅操作指定容器内的新 img，带 renderId） */

@@ -87,6 +87,8 @@ async function switchGroup(index) {
   }
   renderGroupDots();
   if (typeof updateSortModeSelect === 'function') updateSortModeSelect();
+  // v1.5.1: 切换分组后清空多选（选中是针对某个分组的，跨组保留会造成误导）
+  if (typeof clearCardSelection === 'function') clearCardSelection();
   // v1.2.6: 分组切换后检测看板碰撞
   if (typeof _debounceCollisionCheck === 'function') _debounceCollisionCheck();
   // 异步保存，不阻塞 UI；延迟释放 _savingGroups 确保 onChanged 被拦截
@@ -287,19 +289,6 @@ async function moveGroupTo(from, to) {
   renderSpeeddials();
 }
 
-async function swapGroups(from, to) {
-  var tmp = groups[from];
-  groups[from] = groups[to];
-  groups[to] = tmp;
-  if (activeGroupIndex === from) activeGroupIndex = to;
-  else if (activeGroupIndex === to) activeGroupIndex = from;
-  await saveGroups(groups);
-  await saveActiveGroup(activeGroupIndex);
-  renderGroupManagerList();
-  renderGroupDots();
-  speeddials = groups[activeGroupIndex] ? groups[activeGroupIndex].cards : [];
-  renderSpeeddials();
-}
 
 function renderGroupManagerList() {
   var list = document.getElementById('group-manager-list');
@@ -313,11 +302,9 @@ function renderGroupManagerList() {
       '<input type="color" class="group-mgr-color" data-index="' + i + '" value="' + escapeHtml(g.color || '#4a90d9') + '" title="分组颜色" aria-label="分组颜色">' +
       '<input type="text" class="group-mgr-icon" data-index="' + i + '" maxlength="2" placeholder="图标" value="' + escapeHtml(g.icon || '') + '" title="分组图标（emoji，最多 2 字）" aria-label="分组图标">' +
       '<input class="group-mgr-name" value="' + escapeHtml(g.name) + '" data-index="' + i + '">' +
-      '<span class="group-mgr-drag" draggable="true" data-index="' + i + '" title="拖拽调整分组顺序" aria-label="拖拽调整分组顺序">⠿</span>' +
+      '<span class="group-mgr-drag" draggable="true" tabindex="0" role="button" data-index="' + i + '" title="拖拽调整顺序（聚焦后按 ↑↓ 也可移动）" aria-label="拖拽调整分组顺序，聚焦后按上下方向键移动">⠿</span>' +
       '<div class="group-mgr-actions">' +
       '<button class="group-mgr-btn" data-action="mgr-export" data-index="' + i + '" title="导出此分组">📤</button>' +
-      '<button class="group-mgr-btn" data-action="mgr-up" data-index="' + i + '" title="上移">▲</button>' +
-      '<button class="group-mgr-btn" data-action="mgr-down" data-index="' + i + '" title="下移">▼</button>' +
       '<button class="group-mgr-btn danger" data-action="mgr-delete" data-index="' + i + '" title="删除">✕</button>' +
       '</div></div>';
   });
@@ -366,6 +353,15 @@ function renderGroupManagerList() {
       list.querySelectorAll('.group-mgr-item').forEach(function (el) { el.classList.remove('dragging', 'drag-over'); });
     });
   });
+  // v1.5.1: 手柄支持键盘排序（去掉 ▲▼ 后保留无障碍路径）
+  list.querySelectorAll('.group-mgr-drag').forEach(function (handle) {
+    handle.addEventListener('keydown', function (e) {
+      var idx = parseInt(this.dataset.index, 10);
+      if (e.key === 'ArrowUp' && idx > 0) { e.preventDefault(); moveGroupTo(idx, idx - 1); }
+      else if (e.key === 'ArrowDown' && idx < groups.length - 1) { e.preventDefault(); moveGroupTo(idx, idx + 1); }
+    });
+  });
+
   list.querySelectorAll('.group-mgr-item').forEach(function (row) {
     row.addEventListener('dragover', function (e) {
       if (dragFrom === null) return;
@@ -396,11 +392,7 @@ function renderGroupManagerList() {
     btn.addEventListener('click', function () {
       var idx = parseInt(this.dataset.index, 10);
       var action = this.dataset.action;
-      if (action === 'mgr-up' && idx > 0) {
-        swapGroups(idx, idx - 1);
-      } else if (action === 'mgr-down' && idx < groups.length - 1) {
-        swapGroups(idx, idx + 1);
-      } else if (action === 'mgr-export') {
+      if (action === 'mgr-export') {
         // v1.3.3: 单分组导出
         if (typeof exportGroup === 'function' && groups[idx]) exportGroup(groups[idx].id);
       } else if (action === 'mgr-delete') {

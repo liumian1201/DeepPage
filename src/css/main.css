@@ -273,18 +273,20 @@
 
 .group-mgr-icon {
   flex-shrink: 0;
-  width: 34px;
-  padding: 4px 2px;
+  width: 56px;                 /* v1.5.1: 34px 太小（emoji 被裁切、不像输入框） */
+  padding: 4px 6px;
   text-align: center;
-  font-size: 14px;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: transparent;
+  font-size: 15px;
+  line-height: 1.2;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-input);
   color: var(--text-primary);
   font-family: var(--font-family);
 }
-.group-mgr-icon:hover { border-color: var(--border-color); }
-.group-mgr-icon:focus { outline: none; border-color: var(--accent); background: var(--bg-input); }
+.group-mgr-icon::placeholder { font-size: 11px; color: var(--text-tertiary); }
+.group-mgr-icon:hover { border-color: var(--accent); }
+.group-mgr-icon:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-light); }
 
 .group-mgr-drag {
   flex-shrink: 0;
@@ -949,8 +951,9 @@
   left: 50%;
   transform: translateX(calc(-50% + var(--dash-h-offset, 0px)));
   z-index: 10;
-  width: min(1100px, 90vw);
-  max-width: 90vw;
+  /* v1.5.1: 去掉 1100px 上限 —— 横向排列时按可用宽度铺开，不再因为容器偏窄被迫折行 */
+  width: 94vw;
+  max-width: 94vw;
 }
 
 /* 垂直排列 = 单列（每个组件占满一行） */
@@ -961,11 +964,15 @@
   grid-column: span 1 !important;
 }
 
-/* 窄屏：栅格列数减半，避免组件被压得过窄 */
-@media (max-width: 720px) {
+/* 窄屏：直接单列堆叠。
+   注意不能改成「列数减半」——组件的跨列数合计 12，容器只有 6 列时会被迫折行成 2+2，
+   既不是横向也不是规整的纵向（v1.5.1 修正）。 */
+@media (max-width: 560px) {
   .dashboard-section {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    width: 94vw;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .dashboard-section .dashboard-item {
+    grid-column: span 1 !important;
   }
 }
 
@@ -983,6 +990,8 @@ body[data-dash-collision] .dashboard-section {
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  /* v1.5.1: 独立合成层，避免内部重绘（如光标闪烁）外溢影响相邻卡片 */
+  transform: translateZ(0);
   padding: 16px 24px;
   /* v1.4.0: 毛玻璃卡片风格（与快捷卡片视觉统一，随主题切换） */
   background: var(--dash-bg, rgba(255, 255, 255, 0.55));
@@ -1019,6 +1028,18 @@ body.dash-editing .dashboard-item.dash-dragging {
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.22);
 }
 body.dash-drag-cursor { cursor: grabbing; }
+
+/* v1.5.1: 组件内有输入焦点时关掉毛玻璃 ——
+   backdrop-filter 会随光标闪烁反复重绘，视觉上像给相邻卡片蒙了一层遮罩；
+   同时改用更实的底色，输入内容更清晰。 */
+.dashboard-item:focus-within {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: var(--dash-bg-focused, rgba(255, 255, 255, 0.92));
+}
+[data-theme="dark"] .dashboard-item:focus-within {
+  --dash-bg-focused: rgba(28, 28, 30, 0.92);
+}
 
 /* 编辑态：宽度（跨列）调节按钮 */
 .dash-span-btn {
@@ -1692,8 +1713,12 @@ body.immersive .container {
 /* --------------------- 壁纸信息栏（右下角） --------------------- */
 .wallpaper-info {
   position: fixed;
+  /* v1.5.1: 看板横向铺满后底部的左右两角都会被组件占住
+     → 移到右上角（主题/设置按钮下方，搜索栏右侧的空档） */
+  top: 118px;   /* 搜索栏之下、卡片之上，避免与两者重叠 */
   right: 20px;
-  bottom: 20px;
+  bottom: auto;
+  max-width: 300px;
   z-index: 90;
   display: flex;
   align-items: center;
@@ -1710,10 +1735,10 @@ body.immersive .container {
 }
 
 .wallpaper-copyright {
-  white-space: nowrap;
+  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 320px;
+  white-space: nowrap;
 }
 
 .wallpaper-nav-btn {

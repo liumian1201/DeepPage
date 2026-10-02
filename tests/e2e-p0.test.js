@@ -131,6 +131,10 @@ function send(method, params, sessionId) {
     const session = a.sessionId;
     await send('Runtime.enable', {}, session);
     await send('Page.enable', {}, session);
+    // 固定视口：版式断言（看板一行 / 信息条位置）与运行环境无关
+    try {
+      await send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false }, session);
+    } catch (e) { /* 老版本浏览器忽略 */ }
     await sleep(2000);
     const r = await send('Runtime.evaluate', {
       expression: '!!document.getElementById("dashboard-grid")',
@@ -497,36 +501,63 @@ function send(method, params, sessionId) {
   check('分组名输入框已收窄（≤ 220px）', align.inputW <= 220, align.inputW);
   const rowBtns = JSON.parse(await evalJs(`JSON.stringify([...document.querySelectorAll('#group-manager-list .group-mgr-btn')].map(b => b.offsetWidth))`));
   check('行内操作按钮未被压缩', rowBtns.length > 0 && rowBtns.every(w => w >= 26), rowBtns);
+  check('已移除上移/下移按钮（每行仅剩导出与删除）', (await evalJs('document.querySelectorAll("#group-manager-list .group-mgr-btn").length')) === (await evalJs('document.querySelectorAll("#group-manager-list .group-mgr-item").length')) * 2);
+  check('分组图标输入框已放大（≥48px）', (await evalJs('document.querySelector("#group-manager-list .group-mgr-icon").offsetWidth')) >= 48, await evalJs('document.querySelector("#group-manager-list .group-mgr-icon").offsetWidth'));
+  check('拖拽手柄可聚焦（键盘可排序）', (await evalJs('document.querySelector("#group-manager-list .group-mgr-drag").getAttribute("tabindex")')) === '0');
+  // 键盘排序：聚焦第一个手柄按 ↓，顺序应变化
+  const kbBefore = JSON.parse(await evalJs('JSON.stringify(groups.map(g => g.name))'));
+  await evalJs(`(() => { const h = document.querySelector('#group-manager-list .group-mgr-drag[data-index="0"]'); h.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); return 'ok'; })()`);
+  await sleep(700);
+  const kbAfter = JSON.parse(await evalJs('JSON.stringify(groups.map(g => g.name))'));
+  check('手柄 ↑↓ 键盘排序生效', kbAfter[0] === kbBefore[1] && kbAfter[1] === kbBefore[0], { kbBefore, kbAfter });
   await evalJs('closeGroupManager()');
   await sleep(300);
 
   console.log('\n[13] P3-1 卡片多选批量操作');
+  // 注意：DOM 池会同时保留其它分组的容器，凡是要点卡片都必须按可见性过滤（用户只可能点到当前分组）
+  await evalJs('window.__visCards = () => [...document.querySelectorAll("#speeddial-grid .card-wrapper[data-id]")].filter(el => el.offsetParent !== null);');
   await evalJs('clearCardSelection()');
-  const cardCount = await evalJs('document.querySelectorAll("#speeddial-grid .card-wrapper[data-id]").length');
+  const cardCount = await evalJs('window.__visCards().length');
   check('当前分组卡片数足够测试', cardCount >= 3, cardCount);
 
   // Ctrl+点击选中两张（不应打开卡片）
   await evalJs(`(() => {
-    const cards = [...document.querySelectorAll('#speeddial-grid .card-wrapper[data-id]')];
+    const cards = window.__visCards();
     cards[0].querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
     cards[2].querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
     return 'ok';
   })()`);
   await sleep(250);
   check('Ctrl+点击选中 2 张', (await evalJs('getSelectedCardIds().length')) === 2, await evalJs('JSON.stringify(getSelectedCardIds())'));
-  check('选中卡片带 .selected 样式', (await evalJs('document.querySelectorAll("#speeddial-grid .card-wrapper.selected").length')) === 2);
+  console.log('  [诊断]', await evalJs(`JSON.stringify({
+    selectedIds: getSelectedCardIds(),
+    wrappersInGrid: document.querySelectorAll('#speeddial-grid .card-wrapper[data-id]').length,
+    wrappersAnywhere: document.querySelectorAll('.card-wrapper[data-id]').length,
+    selectedInGrid: document.querySelectorAll('#speeddial-grid .card-wrapper.selected').length,
+    selectedAnywhere: document.querySelectorAll('.card-wrapper.selected').length,
+    gridChildren: [...document.getElementById('speeddial-grid').children].map(e => e.className).slice(0, 4),
+    firstWrapperClass: (document.querySelector('.card-wrapper[data-id]') || {}).className,
+    activeGroupIdx: activeGroupIndex
+  })`));
+  const selDom = JSON.parse(await evalJs(`JSON.stringify((() => {
+    const grid = document.getElementById('speeddial-grid');
+    const all = [...grid.querySelectorAll('.card-wrapper.selected')];
+    const visible = all.filter(el => el.offsetParent !== null);
+    return { all: all.length, visible: visible.length, activeId: groups[activeGroupIndex].id };
+  })())`));
+  check('选中样式只落在当前分组（2 张且可见）', selDom.visible === 2, selDom);
   check('工具栏出现且计数正确', (await evalJs('document.getElementById("batch-count").textContent')) === '已选 2 张');
   check('Ctrl+点击不会打开卡片', (await evalJs('location.href')).includes('index.html'));
 
   // Shift 区间选中
-  await evalJs(`(() => { const c=[...document.querySelectorAll('#speeddial-grid .card-wrapper[data-id]')]; c[1].querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true})); return 'ok'; })()`);
-  await evalJs(`(() => { const c=[...document.querySelectorAll('#speeddial-grid .card-wrapper[data-id]')]; c[0].querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click',{bubbles:true,shiftKey:true})); return 'ok'; })()`);
+  await evalJs(`(() => { const c = window.__visCards(); c[1].querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true})); return 'ok'; })()`);
+  await evalJs(`(() => { const c = window.__visCards(); c[0].querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click',{bubbles:true,shiftKey:true})); return 'ok'; })()`);
   await sleep(250);
   check('Shift 区间选中生效', (await evalJs('getSelectedCardIds().length')) >= 2, await evalJs('getSelectedCardIds().length'));
 
   // 批量移动
   await evalJs('(async () => { await _applyGroupImport({ type: "deeppage-group", version: 1, group: { name: "批量目标组", cards: [] } }); return "ok"; })()');
-  await evalJs(`(() => { const c=[...document.querySelectorAll('#speeddial-grid .card-wrapper[data-id]')]; clearCardSelection(); c[0].querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true})); c[1].querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true})); return 'ok'; })()`);
+  await evalJs(`(() => { const c = window.__visCards(); clearCardSelection(); c[0].querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true})); c[1].querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true})); return 'ok'; })()`);
   await sleep(250);
   const moveRes = JSON.parse(await evalJs(`(async () => {
     const target = groups.find(g => g.name.indexOf('批量目标组') === 0);
@@ -538,7 +569,7 @@ function send(method, params, sessionId) {
   check('批量移动后清空选中', moveRes.left === 0);
 
   // 批量删除（确认弹窗）
-  await evalJs(`(() => { const c=[...document.querySelectorAll('#speeddial-grid .card-wrapper[data-id]')]; c[0].querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true})); return 'ok'; })()`);
+  await evalJs(`(() => { const c = window.__visCards(); c[0].querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true})); return 'ok'; })()`);
   await sleep(200);
   const beforeDel = await evalJs('speeddials.length');
   await evalJs('(() => { batchDeleteSelected(); return "started"; })()'); // 不 await：它要等确认弹窗
@@ -552,7 +583,7 @@ function send(method, params, sessionId) {
   check('删除后清空选中', (await evalJs('getSelectedCardIds().length')) === 0);
 
   // 锁定拦截 + ESC 清空 + Ctrl+A 全选
-  await evalJs(`(() => { const c=[...document.querySelectorAll('#speeddial-grid .card-wrapper[data-id]')]; c[0].querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true})); return 'ok'; })()`);
+  await evalJs(`(() => { const c = window.__visCards(); c[0].querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true})); return 'ok'; })()`);
   await evalJs('setLocked(true)');
   await sleep(200);
   const lockedCount = await evalJs('speeddials.length');
@@ -566,7 +597,7 @@ function send(method, params, sessionId) {
   check('清空后工具栏隐藏', (await evalJs('document.getElementById("batch-bar").classList.contains("hidden")')) === true);
   await evalJs('document.dispatchEvent(new KeyboardEvent("keydown", { key: "a", ctrlKey: true, bubbles: true }))');
   await sleep(250);
-  check('Ctrl+A 全选当前分组', (await evalJs('getSelectedCardIds().length')) === (await evalJs('document.querySelectorAll("#speeddial-grid .card-wrapper[data-id]").length')));
+  check('Ctrl+A 全选当前分组', (await evalJs('getSelectedCardIds().length')) === (await evalJs('window.__visCards().length')), { sel: await evalJs('getSelectedCardIds().length'), vis: await evalJs('window.__visCards().length') });
   await evalJs('clearCardSelection()');
 
   console.log('\n[14] P3-3 分组颜色 / 图标 / 拖拽排序');
@@ -795,7 +826,27 @@ function send(method, params, sessionId) {
   await evalJs('console.error("Open-Meteo error: fetch failed（测试注入，应被忽略）")');
   await sleep(200);
 
-  console.log('\n[19] 页面无 JS 报错');
+  console.log('\n[19] 版式回归（看板不强制换行 / 信息条不压搜索栏与卡片）');
+  await evalJs('closeSettingsPanel()');
+  await sleep(300);
+  const layout = JSON.parse(await evalJs(`JSON.stringify((() => {
+    const items = [...document.querySelectorAll('#dashboard-grid .dashboard-item')];
+    const tops = items.map(el => Math.round(el.getBoundingClientRect().top));
+    const bottoms = items.map(el => Math.round(el.getBoundingClientRect().bottom));
+    const lefts = items.map(el => Math.round(el.getBoundingClientRect().left));
+    const bar = document.getElementById('wallpaper-info');
+    const search = document.querySelector('.search-section') || document.getElementById('search-input');
+    const r = (el) => { const b = el.getBoundingClientRect(); return { top: Math.round(b.top), bottom: Math.round(b.bottom), left: Math.round(b.left), right: Math.round(b.right) }; };
+    return { tops, bottoms, lefts, bar: r(bar), search: r(search), cardsTop: Math.min(...[...document.querySelectorAll('#speeddial-grid .card-wrapper')].map(el => Math.round(el.getBoundingClientRect().top))) };
+  })())`));
+  check('看板组件在同一行（横向不被强制换行）', new Set(layout.bottoms).size === 1 && new Set(layout.lefts).size === layout.lefts.length, { tops: layout.tops, bottoms: layout.bottoms, lefts: layout.lefts });
+  check('壁纸信息条不与搜索栏重叠', layout.bar.top >= layout.search.bottom || layout.bar.bottom <= layout.search.top, { bar: layout.bar, search: layout.search });
+  check('壁纸信息条不与卡片重叠', layout.bar.bottom <= layout.cardsTop, { barBottom: layout.bar.bottom, cardsTop: layout.cardsTop });
+  const dashW = await evalJs('Math.round(document.getElementById("dashboard-grid").getBoundingClientRect().width)');
+  const vw = await evalJs('window.innerWidth');
+  check('看板占满可用宽度（94vw，无固定像素上限）', dashW / vw > 0.9, { dashW, vw });
+
+  console.log('\n[20] 页面无 JS 报错');
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);
