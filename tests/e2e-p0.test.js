@@ -648,7 +648,47 @@ function send(method, params, sessionId) {
   await evalJs('closeSettingsPanel()');
   await sleep(300);
 
-  console.log('\n[16] 页面无 JS 报错');
+  console.log('\n[16] P3-5 搜索建议（历史 / 书签）');
+  const mf2 = JSON.parse(await evalJs('JSON.stringify(chrome.runtime.getManifest())'));
+  check('manifest 声明可选权限 history/bookmarks', JSON.stringify(mf2.optional_permissions) === JSON.stringify(['history', 'bookmarks']), mf2.optional_permissions);
+  check('必需权限未包含 history/bookmarks', !(mf2.permissions || []).some(pm => pm === 'history' || pm === 'bookmarks'), mf2.permissions);
+  check('建议默认关闭', (await evalJs('currentSettings.searchSuggestions === true')) === false);
+  check('未开启时输入不弹建议', (await evalJs(`(() => { onSearchInputForSuggestions('git'); return document.getElementById('suggest-dropdown').classList.contains('hidden'); })()`)) === true);
+  check('未授权时 querySuggestions 安全返回空数组', (await evalJs('(async () => Array.isArray(await querySuggestions("git")))()')) === true);
+
+  // 渲染与键盘导航（直接注入假数据，绕开权限）
+  await evalJs(`(() => {
+    _suggestResults = [
+      { type: 'bookmark', title: 'GitHub', url: 'https://github.com', score: 30 },
+      { type: 'history', title: 'GitHub 文档', url: 'https://docs.github.com', score: 10 },
+    ];
+    _suggestIndex = -1;
+    renderSuggestDropdown();
+    return 'ok';
+  })()`);
+  await sleep(300);
+  check('建议下拉渲染 2 条', (await evalJs('document.querySelectorAll("#suggest-list .local-search-item").length')) === 2);
+  check('书签项带 🔖 图标', (await evalJs('document.querySelector("#suggest-list .sg-icon").textContent')) === '🔖');
+  check('输入框 aria-expanded 同步', (await evalJs('document.getElementById("search-input").getAttribute("aria-expanded")')) === 'true');
+  await evalJs('handleSuggestKeydown({ key: "ArrowDown", preventDefault(){}, })');
+  await sleep(150);
+  check('方向键高亮第一项', (await evalJs('_suggestIndex')) === 0);
+  check('高亮项带 active 类且 aria-selected 同步', (await evalJs("!!document.querySelector('#suggest-list .local-search-item.active')")) === true && (await evalJs('_suggestIndex')) === 0);
+  await evalJs('handleSuggestKeydown({ key: "Escape", preventDefault(){} })');
+  await sleep(150);
+  check('ESC 收起建议并复位', (await evalJs('document.getElementById("suggest-dropdown").classList.contains("hidden")')) === true && (await evalJs('_suggestResults.length')) === 0);
+
+  // 开关：未授权时应回滚并提示（headless 无法真的授权）
+  await evalJs('openSettingsPanel()');
+  await sleep(400);
+  await evalJs(`(() => { const t = document.getElementById('toggle-suggest'); t.checked = true; t.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; })()`);
+  await sleep(1500);
+  check('未授权时开关回滚为关闭', (await evalJs('document.getElementById("toggle-suggest").checked')) === false);
+  check('回滚后设置保持关闭', (await evalJs('currentSettings.searchSuggestions === true')) === false);
+  await evalJs('closeSettingsPanel()');
+  await sleep(300);
+
+  console.log('\n[17] 页面无 JS 报错');
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);

@@ -13,6 +13,10 @@
     "contextMenus",
     "scripting"
   ],
+  "optional_permissions": [
+    "history",
+    "bookmarks"
+  ],
   "background": {
     "service_worker": "background.js"
   },

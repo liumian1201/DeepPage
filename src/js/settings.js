@@ -23,6 +23,7 @@ const domSettings = {
   togglePureTextCards: document.getElementById('toggle-pure-text-cards'),
   toggleCardThemeColor: document.getElementById('toggle-card-theme-color'),
   toggleConfirmDelete: document.getElementById('toggle-confirm-delete'),
+  toggleSuggest: document.getElementById('toggle-suggest'),
   toggleDisableWheelSwitch: document.getElementById('toggle-disable-wheel-switch'),
   toggleShowGroupIndicator: document.getElementById('toggle-show-group-indicator'),
   groupNameMode:   document.getElementById('setting-group-name-mode'),
@@ -148,6 +149,7 @@ function populateSettingsForm(settings) {
   if (domSettings.togglePureTextCards) domSettings.togglePureTextCards.checked = settings.pureTextCards === true;
   if (domSettings.toggleCardThemeColor) domSettings.toggleCardThemeColor.checked = settings.cardThemeColor === true;
   if (domSettings.toggleConfirmDelete) domSettings.toggleConfirmDelete.checked = settings.confirmDelete !== false;
+  if (domSettings.toggleSuggest) domSettings.toggleSuggest.checked = settings.searchSuggestions === true;
   if (domSettings.toggleDisableWheelSwitch) domSettings.toggleDisableWheelSwitch.checked = settings.disableWheelSwitch === true;
   if (domSettings.backupMode) domSettings.backupMode.value = settings.backupMode || 'off';
   if (domSettings.backupRemindDays) domSettings.backupRemindDays.value = settings.backupRemindDays || 7;
@@ -439,6 +441,7 @@ function collectSettingsFromForm() {
     pureTextCards: domSettings.togglePureTextCards ? domSettings.togglePureTextCards.checked : false,
     cardThemeColor: domSettings.toggleCardThemeColor ? domSettings.toggleCardThemeColor.checked : false,
     confirmDelete: domSettings.toggleConfirmDelete ? domSettings.toggleConfirmDelete.checked : true,
+    searchSuggestions: domSettings.toggleSuggest ? domSettings.toggleSuggest.checked : false,
     disableWheelSwitch: domSettings.toggleDisableWheelSwitch ? domSettings.toggleDisableWheelSwitch.checked : false,
     backupMode: domSettings.backupMode ? domSettings.backupMode.value : 'off',
     backupRemindDays: domSettings.backupRemindDays ? parseInt(domSettings.backupRemindDays.value, 10) : 7,
@@ -763,10 +766,24 @@ function bindSettingsEvents() {
     el.addEventListener('change', onSettingChanged);
   });
 
-  [domSettings.toggleClock, domSettings.toggleLunar, domSettings.toggleWeather, domSettings.toggleTodo, domSettings.toggleAddBtn, domSettings.toggleCardTitle, domSettings.toggleShowVisitCount, domSettings.togglePureTextCards, domSettings.toggleCardThemeColor, domSettings.toggleConfirmDelete, domSettings.toggleDisableWheelSwitch, domSettings.toggleShowGroupIndicator, domSettings.bingUHD, domSettings.bingAutoRefresh, domSettings.toggleShowSearch, domSettings.toggleClockSeconds].forEach((el) => {
+  [domSettings.toggleClock, domSettings.toggleLunar, domSettings.toggleWeather, domSettings.toggleTodo, domSettings.toggleAddBtn, domSettings.toggleCardTitle, domSettings.toggleShowVisitCount, domSettings.togglePureTextCards, domSettings.toggleCardThemeColor, domSettings.toggleConfirmDelete, domSettings.toggleDisableWheelSwitch, domSettings.toggleShowGroupIndicator, domSettings.bingUHD, domSettings.bingAutoRefresh, domSettings.toggleShowSearch, domSettings.toggleClockSeconds, domSettings.toggleSuggest].forEach((el) => {
     if (!el) return;
     el.addEventListener('change', onSettingChanged);
   });
+
+  // v1.5.0: 搜索建议开关 —— 开启时申请 history/bookmarks 可选权限，拒绝则回滚
+  if (domSettings.toggleSuggest) {
+    domSettings.toggleSuggest.addEventListener('change', async function () {
+      if (!this.checked) return;                      // 关闭无需权限
+      if (typeof requestSuggestPermission !== 'function') return;
+      var granted = await requestSuggestPermission();
+      if (!granted) {
+        this.checked = false;
+        showToast('未授权「浏览历史 / 书签」，搜索建议已关闭', 'warning');
+        onSettingChanged();
+      }
+    });
+  }
 
   // v1.0.9: 排序下拉 — 保存到当前分组
   var sortSel = document.getElementById('setting-sort-mode');

@@ -56,6 +56,9 @@
         <span id="search-engine-icon" class="search-engine-icon" title="当前搜索引擎">🔍</span>        <div id="search-engine-dropdown" class="search-engine-dropdown hidden">
           <!-- 由 main.js 动态渲染 -->
         </div>
+        <div id="suggest-dropdown" class="local-search-dropdown hidden" role="listbox" aria-label="搜索建议（历史与书签）">
+          <div id="suggest-list" class="local-search-list"></div>
+        </div>
         <div id="local-search-dropdown" class="local-search-dropdown hidden" role="listbox" aria-label="本地卡片搜索结果">
           <div id="local-search-list" class="local-search-list"></div>
           <div id="local-search-footer" class="local-search-footer"></div>
@@ -151,6 +154,7 @@
               <label class="toggle-item"><input type="checkbox" id="toggle-pure-text-cards"> 极简卡片（纯色文字，不加载图片）</label>
               <label class="toggle-item"><input type="checkbox" id="toggle-card-theme-color"> 卡片主题色（截图提取，hover 氛围灯）</label>
               <label class="toggle-item"><input type="checkbox" id="toggle-confirm-delete" checked> 删除卡片时弹出确认</label>
+              <label class="toggle-item"><input type="checkbox" id="toggle-suggest"> 搜索建议（浏览历史 / 书签，需授权）</label>
               <label class="toggle-item"><input type="checkbox" id="toggle-disable-wheel-switch"> 关闭滚轮切换分组</label>
             </div>
           </div>
@@ -776,6 +780,7 @@
   <script src="js/contextmenu.js" defer></script>
   <script src="js/a11y.js" defer></script>
   <script src="js/todo.js" defer></script>
+  <script src="js/suggest.js" defer></script>
   <script src="js/settings-webdav.js" defer></script>
   <script src="js/main.js" defer></script>
 </body>

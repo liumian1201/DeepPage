@@ -442,6 +442,10 @@ function bindMainEvents() {
     if (typeof handleLocalSearchKeydown === 'function' && handleLocalSearchKeydown(e)) {
       return;
     }
+    // v1.5.0: 历史/书签建议（同样拦截方向键/回车/ESC）
+    if (typeof handleSuggestKeydown === 'function' && handleSuggestKeydown(e)) {
+      return;
+    }
     if (e.key === 'Enter') {
       // 本地搜索面板打开时优先选结果，否则走搜索引擎
       var dd = document.getElementById('local-search-dropdown');
@@ -457,6 +461,8 @@ function bindMainEvents() {
       if (typeof performLocalSearch === 'function') performLocalSearch(query);
     } else {
       if (typeof hideLocalSearchDropdown === 'function') hideLocalSearchDropdown();
+      // v1.5.0: 历史/书签搜索建议
+      if (typeof onSearchInputForSuggestions === 'function') onSearchInputForSuggestions(val);
     }
   });
 

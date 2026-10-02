@@ -872,6 +872,16 @@
   transform: scale(1.05);
 }
 
+/* --------------------- v1.5.0: 搜索建议项 --------------------- */
+#suggest-dropdown .local-search-item { align-items: center; }
+.sg-icon { flex-shrink: 0; margin-right: 6px; font-size: 12px; opacity: .8; }
+.sg-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.sg-url {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 /* --------------------- v1.5.0: 批量操作 --------------------- */
 .batch-bar {
   position: fixed;

@@ -38,6 +38,7 @@ var DEFAULT_SETTINGS = {
   showWeather: true,
   showTodo: true,          // v1.5.0: 看板待办组件
   todoItems: [],
+  searchSuggestions: false,   // v1.5.0: 历史/书签搜索建议（需可选权限）
   theme: 'light',
   showAddButton: true,
   showCardTitle: true,
