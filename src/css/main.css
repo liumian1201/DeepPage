@@ -209,6 +209,7 @@
 
 .group-mgr-name {
   flex: 1;
+  min-width: 0;        /* 允许输入框收缩而不是把右侧按钮挤出容器 */
   font-size: 14px;
   color: var(--text-primary);
   cursor: pointer;
@@ -231,7 +232,8 @@
 
 .group-mgr-actions {
   display: flex;
-  gap: 4px;
+  gap: 6px;
+  flex-shrink: 0;      /* 操作按钮不参与压缩，避免贴住输入框 */
 }
 
 .group-mgr-btn {
@@ -1062,7 +1064,16 @@ body.dash-editing .btn-dash-done { display: block; }
   display: flex;
   gap: 12px;
   justify-content: flex-end;
+  align-items: center;
+  /* v1.4.1: 按钮多时整行换行，而不是把按钮文字挤成两行 */
+  flex-wrap: wrap;
   margin-top: 4px;
+}
+
+/* 按钮文字不换行、不被压缩（分组管理器加了「导入分组」后出现过「新/建」两行的问题） */
+.dialog-actions button {
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .upload-row {

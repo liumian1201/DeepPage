@@ -466,7 +466,19 @@ function send(method, params, sessionId) {
   check('旧 dashboardOrder 迁移为 order（lunar=0, clock=1, weather=2）', migrated.lunar === 0 && migrated.clock === 1 && migrated.weather === 2, migrated);
   check('迁移后跨列取默认值', (await evalJs('getDashboardLayout().clock.span')) === 4);
 
-  console.log('\n[12] 页面无 JS 报错');
+  console.log('\n[12] UI 回归：分组管理器按钮不换行 / 不被挤压');
+  await evalJs('openGroupManager()');
+  await sleep(400);
+  const mgrBtns = JSON.parse(await evalJs(`JSON.stringify([...document.querySelectorAll('#dialog-group-manager .dialog-actions button')].map(b => ({ text: b.textContent.trim(), h: b.offsetHeight, w: b.offsetWidth, ws: getComputedStyle(b).whiteSpace })))`));
+  check('弹窗已加宽（≥460px）', (await evalJs('document.querySelector("#dialog-group-manager .dialog-card").offsetWidth')) >= 460);
+  check('底部按钮均为单行（nowrap 且高度正常）', mgrBtns.length === 4 && mgrBtns.every(b => b.ws === 'nowrap' && b.h <= 44), mgrBtns);
+  check('按钮未被压缩（宽度 ≥ 48px）', mgrBtns.every(b => b.w >= 48), mgrBtns);
+  const rowBtns = JSON.parse(await evalJs(`JSON.stringify([...document.querySelectorAll('#group-manager-list .group-mgr-btn')].map(b => b.offsetWidth))`));
+  check('行内操作按钮未被压缩', rowBtns.length > 0 && rowBtns.every(w => w >= 26), rowBtns);
+  await evalJs('closeGroupManager()');
+  await sleep(300);
+
+  console.log('\n[13] 页面无 JS 报错');
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);
