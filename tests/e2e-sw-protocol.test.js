@@ -10,6 +10,7 @@
            本文件最典型的假绿路径是 SW 无响应 → evalJs 返回 undefined → r1.includes 抛 TypeError
            → 全局 catch → 2 → 判绿。现在崩溃一律 1，且 eval 结果先做类型断言。
    自检: DP_E2E_SELFTEST=crash 会在建连前抛错，供 tests/e2e-exit-code.test.js 验证「崩溃 → 1」
+   探针: DP_EXT_DIR=<目录> 可指向另一份扩展源码 —— 「修复前 / 后对比」就是拿它跑同一套断言
 */
 const { spawn } = require('child_process');
 const crypto = require('crypto');
@@ -20,7 +21,7 @@ const { createConsoleErrorCollector } = require('./lib/console-error-filter');
 /** 环境不满足的专用退出码：CI 只对这一个码放行（并打 warning），其余非 0 一律红 */
 const EXIT_ENV_SKIP = 3;
 
-const SRC = path.resolve(__dirname, '../src');
+const SRC = process.env.DP_EXT_DIR ? path.resolve(process.env.DP_EXT_DIR) : path.resolve(__dirname, '../src');
 const CHROME = process.env.CHROME_BIN || '/usr/bin/chromium';
 // 随机端口 + 每次独立 profile：避免与残留浏览器实例、并行测试撞车
 const PORT = 9300 + Math.floor(Math.random() * 500);
@@ -225,6 +226,37 @@ function send(method, params, sessionId) {
   // 合法 https 不应命中协议白名单（允许进入真实 fetch，结果可能是网络失败）
   const r6 = await evalJsStr(msg({ type: 'image-fetch', url: 'https://example.com/' }));
   check('image-fetch https 未被协议拦截', !r6.startsWith(NOT_A_STRING) && !r6.includes('unsupported protocol'), r6.slice(0, 120));
+
+  // BUG-046：http 截图链路必须在 SW 侧也有权限闸门 —— 未授权时立即拒绝，
+  // 不开窗、不依赖 120 秒超时（修复前会开一个 1280×720 窗口，注入静默失败，用户干等 2 分钟）
+  const httpGranted = await evalJs(`new Promise(r => chrome.permissions.contains({ origins: ['http://*/*'] }, x => r(!!x)))`);
+  if (httpGranted) {
+    console.log('  ⏭ http://*/* 已授权，跳过「未授权立即拒绝」断言（本环境不适用）');
+  } else {
+    const rawGate = await evalJs(`(async () => {
+      var t0 = Date.now();
+      var resp = await Promise.race([
+        new Promise(function (r) {
+          chrome.runtime.sendMessage({ type: 'capture-screenshot', url: 'http://127.0.0.1:9/' }, function (x) { r(x || { ok: false, error: 'no response' }); });
+        }),
+        new Promise(function (r) { setTimeout(function () { r({ __timeout: true }); }, 8000); })
+      ]);
+      return JSON.stringify({
+        ms: Date.now() - t0,
+        ok: !!(resp && resp.ok),
+        error: (resp && resp.error) || '',
+        timeout: !!(resp && resp.__timeout)
+      });
+    })()`);
+    const captureGate = typeof rawGate === 'string' ? JSON.parse(rawGate) : { parseFailed: rawGate };
+    check('capture-screenshot 未授权 http 时立即拒绝（不等 120s 超时）',
+      captureGate.timeout === false && captureGate.ms < 8000, captureGate);
+    check('capture-screenshot 拒绝原因是权限（不再是误导性的「用户超时未截图」）',
+      captureGate.ok === false && /权限/.test(captureGate.error || ''), captureGate);
+    const leakedTargets = (await send('Target.getTargets')).targetInfos.filter((t) => /127\.0\.0\.1:9/.test(t.url || ''));
+    check('capture-screenshot 未授权时不开窗（没有留下指向该 http 地址的 target）',
+      leakedTargets.length === 0, leakedTargets.map((t) => t.url));
+  }
 
   // BUG-073：本文件原先收集了 console error 却从不检查（死门），现在与 e2e-p0 用同一套来源精确过滤
   consoleLog.report();

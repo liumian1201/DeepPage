@@ -574,12 +574,17 @@ function bindMainEvents() {
   // v1.1.5: 编辑弹窗「截取网页」按钮
   var captureBtn = document.getElementById('dialog-image-capture');
   if (captureBtn) {
-    captureBtn.addEventListener('click', function () {
+    captureBtn.addEventListener('click', async function () {
       var url = domMain.dialogUrl.value.trim();
       if (!url || !/^https?:\/\//i.test(url)) {
         showToast('请先填写有效的网站地址', 'warning');
         return;
       }
+      // BUG-046: http 地址需要可选的「访问 http 网站」权限（Chrome 137+ 起不再默认授权），
+      // 否则 SW 里的 executeScript 必被拒。原先这是全项目唯一漏掉权限闸门的截图入口 ——
+      // 用户要等 120 秒才收到「用户超时未截图」，提示与真实原因无关、窗口被白占 2 分钟。
+      // 与 cards.js 的 refreshCardCapture 用同一套闸门（授权失败时由 ensurePermissionForUrl 给出提示）。
+      if (typeof ensurePermissionForUrl === 'function' && !(await ensurePermissionForUrl(url))) return;
       var cardId = editingId || ('new_' + Date.now());
       showToast('正在截取网页...', 'info');
       chrome.runtime.sendMessage({ type: 'capture-screenshot', url: url }, async function (resp) {

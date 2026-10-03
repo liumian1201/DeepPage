@@ -103,6 +103,9 @@ function _wdSend(type, payload, creds) {
       payload._url = c.url;
       payload._user = c.user;
       payload._pass = c.pass;
+      // BUG-064：显式标记「凭据已由页面提供」——SW 侧据此不再回退 storage，
+      // 于是「空密码」（NAS 匿名共享）与「未提供密码」不再被混为一谈。
+      payload._hasCreds = true;
       chrome.runtime.sendMessage({ type: type, payload: payload }, function (resp) {
         if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
         if (!resp || !resp.ok) { reject(new Error((resp && resp.error) || 'unknown')); return; }
@@ -122,6 +125,7 @@ function _wdSendFull(type, payload, creds) {
       payload._url = c.url;
       payload._user = c.user;
       payload._pass = c.pass;
+      payload._hasCreds = true;   // BUG-064：同 _wdSend
       chrome.runtime.sendMessage({ type: type, payload: payload }, function (resp) {
         if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
         if (!resp || !resp.ok) { reject(new Error((resp && resp.error) || 'unknown')); return; }

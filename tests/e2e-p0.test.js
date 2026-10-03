@@ -430,8 +430,89 @@ function send(method, params, sessionId) {
   check('无协议地址直接放行', (await evalJs('(async () => await ensurePermissionForUrl(""))()')) === true);
   const httpResult = await evalJs('(async () => typeof (await ensurePermissionForUrl("http://192.168.1.1/dav")))()');
   check('http 地址返回布尔（未授权时不抛错、走降级）', httpResult === 'boolean', httpResult);
-  check('WebDAV 按钮已接入权限守卫', (await evalJs('typeof ensurePermissionForUrl === "function" && typeof requestHttpHostPermission === "function"')));
-  check('批量截图已接入 http 权限降级', (await evalJs('startBatchCapture.toString().includes("httpTargets")')));
+  // BUG-058 ①②：原先是两条「空断言」（typeof 函数存在 / toString().includes 源码字符串），
+  // 把按钮 handler 整段删掉或改个变量名都照样通过。这里换成真实交互的行为断言。
+  // ① 点 WebDAV「测试连接」（http 地址）→ 断言权限申请真的发生、且未授权时不给 SW 发任何请求
+  const webdavGate = JSON.parse(await evalJs(`(async () => {
+    var origContains = chrome.permissions.contains;
+    var origRequest = chrome.permissions.request;
+    var origSend = chrome.runtime.sendMessage;
+    var reqCount = 0, sent = [];
+    chrome.permissions.contains = function (p, cb) { cb(false); };
+    chrome.permissions.request = function (p, cb) { reqCount++; cb(false); };
+    chrome.runtime.sendMessage = function (msg, cb) {
+      if (msg && String(msg.type).indexOf('webdav:') === 0) { sent.push(msg.type); if (cb) cb({ ok: false, error: 'stub' }); return; }
+      return origSend.apply(this, arguments);
+    };
+    try {
+      openSettingsPanel();
+      document.getElementById('tab-btn-data').click();
+      await new Promise(function (r) { setTimeout(r, 300); });
+      // 清掉先前断言留下的 Toast，避免「上一句提示」把本句断言蒙混过关
+      [].forEach.call(document.querySelectorAll('.toast'), function (t) { t.remove(); });
+      document.getElementById('webdav-url').value = 'http://192.168.1.50/dav';
+      document.getElementById('btn-webdav-test').click();
+      await new Promise(function (r) { setTimeout(r, 400); });
+      return JSON.stringify({
+        reqCount: reqCount,
+        sent: sent,
+        toasts: [].map.call(document.querySelectorAll('.toast'), function (t) { return t.textContent; }).join('|')
+      });
+    } finally {
+      chrome.permissions.contains = origContains;
+      chrome.permissions.request = origRequest;
+      chrome.runtime.sendMessage = origSend;
+      closeSettingsPanel();
+    }
+  })()`));
+  check('BUG-058 点「测试连接」真的发起 http 权限申请（不再是 typeof 断言）', webdavGate.reqCount === 1, webdavGate);
+  check('BUG-058 未授权时不给 WebDAV 发任何请求（守卫真的接在点击路径上）', webdavGate.sent.length === 0, webdavGate);
+  check('BUG-058 未授权时给出权限提示（而不是静默无反应）', /需要「访问 http 网站」权限/.test(webdavGate.toasts), webdavGate);
+
+  // ② 批量截图 http 降级路径：真实调用 startBatchCapture，断言 http 目标被跳过（不再匹配源码字符串）
+  const batchDegrade = JSON.parse(await evalJs(`(async () => {
+    var snapshot = JSON.stringify(groups);
+    var savedIdx = activeGroupIndex;
+    var origContains = chrome.permissions.contains;
+    var origRequest = chrome.permissions.request;
+    var origSend = chrome.runtime.sendMessage;
+    var sent = [];
+    chrome.permissions.contains = function (p, cb) { cb(false); };
+    chrome.permissions.request = function (p, cb) { cb(false); };
+    chrome.runtime.sendMessage = function (msg, cb) {
+      if (msg && msg.type === 'batch-capture-one') { sent.push(msg.url); if (cb) cb({ ok: false, error: 'stub' }); return; }
+      return origSend.apply(this, arguments);
+    };
+    try {
+      // 清掉先前断言留下的 Toast，避免「上一句提示」把本句断言蒙混过关
+      [].forEach.call(document.querySelectorAll('.toast'), function (t) { t.remove(); });
+      groups = [{ id: 'gbug58', name: '降级组', sortMode: 'manual', cards: [
+        { id: 'h1', name: 'http 卡', url: 'http://192.168.1.60/', image: '', visitCount: 0 },
+        { id: 'h2', name: 'http 卡2', url: 'http://192.168.1.61/', image: '', visitCount: 0 }
+      ] }];
+      activeGroupIndex = 0; speeddials = groups[0].cards;
+      renderSpeeddials(); renderGroupDots();
+      await startBatchCapture();
+      await new Promise(function (r) { setTimeout(r, 200); });
+      return JSON.stringify({
+        sent: sent,
+        toasts: [].map.call(document.querySelectorAll('.toast'), function (t) { return t.textContent; }).join('|'),
+        progHidden: document.getElementById('dialog-backup-progress').classList.contains('hidden')
+      });
+    } finally {
+      chrome.permissions.contains = origContains;
+      chrome.permissions.request = origRequest;
+      chrome.runtime.sendMessage = origSend;
+      groups = JSON.parse(snapshot);
+      activeGroupIndex = savedIdx;
+      speeddials = (groups[activeGroupIndex] && groups[activeGroupIndex].cards) || [];
+      await saveGroups(groups);
+      renderSpeeddials(); renderGroupDots();
+    }
+  })()`));
+  check('BUG-058 未授权时 http 目标一张都不截（批量截图降级是真的，不是源码字符串）',
+    batchDegrade.sent.length === 0 && batchDegrade.progHidden === true, batchDegrade);
+  check('BUG-058 降级时明确告知跳过了几张（用户可见，不静默丢弃）', /跳过 2 张/.test(batchDegrade.toasts), batchDegrade);
 
   console.log('\n[11] P2 看板 12 列栅格 / 跨列 / 拖拽 / 数据迁移');
   check('组件注册表含 4 个组件（P3-4 新增待办）', (await evalJs('DASHBOARD_WIDGETS.length')) === 4, await evalJs('DASHBOARD_WIDGETS.map(w=>w.id).join(",")'));
@@ -2057,6 +2138,361 @@ function send(method, params, sessionId) {
     xssProbe.names.indexOf('<img src=x onerror="window.__xssP0=1"> hi') !== -1 &&
     xssProbe.names.indexOf('普通卡片 hi') !== -1 &&
     xssProbe.marks === 2 && xssProbe.markTexts.every(function (t) { return t === 'hi'; }), xssProbe);
+
+  console.log('\n[32] v1.5.13 审计清零：BUG-046 / 051 / 059 / 064 / 067 / 068 / 072');
+
+  // ---- BUG-046：编辑弹窗「📸 截取网页」是全项目唯一漏掉 http 权限闸门的截图入口 ----
+  const dialogGate = JSON.parse(await evalJs(`(async () => {
+    var origContains = chrome.permissions.contains;
+    var origRequest = chrome.permissions.request;
+    var origSend = chrome.runtime.sendMessage;
+    var reqCount = 0, sent = [];
+    chrome.permissions.contains = function (p, cb) { cb(false); };
+    chrome.permissions.request = function (p, cb) { reqCount++; cb(false); };
+    chrome.runtime.sendMessage = function (msg, cb) {
+      if (msg && msg.type === 'capture-screenshot') { sent.push(msg.url); if (cb) cb({ ok: false, error: 'stub' }); return; }
+      return origSend.apply(this, arguments);
+    };
+    try {
+      openAddDialog();
+      // 清掉先前断言留下的 Toast，避免「上一句提示」把本句断言蒙混过关
+      [].forEach.call(document.querySelectorAll('.toast'), function (t) { t.remove(); });
+      domMain.dialogUrl.value = 'http://192.168.1.70/';
+      document.getElementById('dialog-image-capture').click();
+      await new Promise(function (r) { setTimeout(r, 400); });
+      return JSON.stringify({
+        reqCount: reqCount,
+        sent: sent,
+        toasts: [].map.call(document.querySelectorAll('.toast'), function (t) { return t.textContent; }).join('|')
+      });
+    } finally {
+      chrome.permissions.contains = origContains;
+      chrome.permissions.request = origRequest;
+      chrome.runtime.sendMessage = origSend;
+      closeDialog();
+    }
+  })()`));
+  check('BUG-046 弹窗截图对 http 地址先申请可选权限（修复前直接发消息给 SW）', dialogGate.reqCount === 1, dialogGate);
+  check('BUG-046 未授权时不发起截图（不再开窗干等 120 秒超时）', dialogGate.sent.length === 0, dialogGate);
+  check('BUG-046 未授权时给出权限提示（不再是「用户超时未截图」这种误导文案）', /需要「访问 http 网站」权限/.test(dialogGate.toasts), dialogGate);
+
+  // ---- BUG-051：_extractThemeColorFromBlob 每次调用泄漏一个 blob: URL ----
+  const themeLeak = JSON.parse(await evalJs(`(async () => {
+    var oc = URL.createObjectURL, orv = URL.revokeObjectURL;
+    var created = 0, revoked = 0;
+    URL.createObjectURL = function (b) { created++; return oc.call(URL, b); };
+    URL.revokeObjectURL = function (u) { revoked++; return orv.call(URL, u); };
+    try {
+      var cv = document.createElement('canvas'); cv.width = 24; cv.height = 24;
+      var ctx = cv.getContext('2d'); ctx.fillStyle = 'rgb(200,100,50)'; ctx.fillRect(0, 0, 24, 24);
+      var blob = await new Promise(function (r) { cv.toBlob(r, 'image/png'); });
+      var color = await _extractThemeColorFromBlob(blob);
+      return JSON.stringify({ created: created, revoked: revoked, color: color });
+    } finally { URL.createObjectURL = oc; URL.revokeObjectURL = orv; }
+  })()`));
+  check('BUG-051 采样主题色真的释放了 blob: URL（创建 1 次 / 释放 1 次）',
+    themeLeak.created === 1 && themeLeak.revoked === 1, themeLeak);
+  check('BUG-051 正对照：颜色仍然采得到（不是把功能一起关掉）', /^#[0-9a-f]{6}$/.test(themeLeak.color || ''), themeLeak);
+
+  // ---- BUG-059：上传图（card_ 前缀）老数据仍能显示，删卡 / GC 都能回收 ----
+  const uploadCard = JSON.parse(await evalJs(`(async () => {
+    var cv = document.createElement('canvas'); cv.width = 32; cv.height = 32;
+    var ctx = cv.getContext('2d'); ctx.fillStyle = 'rgb(30,120,200)'; ctx.fillRect(0, 0, 32, 32);
+    var blob = await new Promise(function (r) { cv.toBlob(r, 'image/png'); });
+    var file = new File([blob], 'old-upload.png', { type: 'image/png' });
+    var key = await uploadImage(file, 'card');
+    var card = { id: 'bug059card', name: '老上传图', url: 'https://example.com/old-upload', image: 'idx:' + key, visitCount: 0, createdAt: Date.now() };
+    groups.push({ id: 'gbug059', name: 'BUG059 组', sortMode: 'manual', cards: [card] });
+    activeGroupIndex = groups.length - 1;
+    speeddials = groups[activeGroupIndex].cards;
+    await saveGroups(groups);
+    renderSpeeddials(); renderGroupDots();
+    await new Promise(function (r) { setTimeout(r, 700); });
+    var img = document.querySelector('.card-wrapper[data-id="bug059card"] img.card-thumb-img');
+    return JSON.stringify({
+      key: key,
+      inDb: !!(await loadImage(key)),
+      src: img ? String(img.src).slice(0, 5) : '',
+      naturalWidth: img ? img.naturalWidth : 0
+    });
+  })()`));
+  check('BUG-059 复现前提：上传得到的键是 card_ 前缀（不是 cardimg_<卡片id>）', /^card_/.test(uploadCard.key), uploadCard);
+  check('BUG-059 老的 card_ 图片仍能正常显示（兼容旧数据，不是只改前缀）',
+    uploadCard.src === 'blob:' && uploadCard.naturalWidth > 0, uploadCard);
+
+  const uploadDeleted = JSON.parse(await evalJs(`(async () => {
+    var key = ${JSON.stringify(uploadCard.key)};
+    var cachedBefore = !!_cardBlobCache[key];
+    await deleteSpeeddialById('bug059card');
+    return JSON.stringify({
+      cachedBefore: cachedBefore,
+      cachedAfter: !!_cardBlobCache[key],
+      inDb: !!(await loadImage(key))
+    });
+  })()`));
+  check('BUG-059 复现前提：渲染后 blob URL 已进内存缓存', uploadDeleted.cachedBefore === true, uploadDeleted);
+  check('BUG-059 删卡后 card_ 图片真的从 IndexedDB 回收（修复前永远留着）', uploadDeleted.inDb === false, uploadDeleted);
+  check('BUG-068 删卡同时释放 blob URL 缓存', uploadDeleted.cachedAfter === false, uploadDeleted);
+
+  // GC：无主 card_ 要回收、被引用的 card_ 要保留、壁纸绝不能碰
+  const gcResult = JSON.parse(await evalJs(`(async () => {
+    async function mkBlob() {
+      var cv = document.createElement('canvas'); cv.width = 8; cv.height = 8;
+      var ctx = cv.getContext('2d'); ctx.fillStyle = 'rgb(10,10,10)'; ctx.fillRect(0, 0, 8, 8);
+      return await new Promise(function (r) { cv.toBlob(r, 'image/png'); });
+    }
+    var blob = await mkBlob();
+    await saveImage('card_orphan_test', blob);
+    await saveImage('cardimg_orphan_test', blob);
+    await saveImage('card_keep_test', blob);
+    await saveImage('wallpaper', blob);
+    await saveImage('wp__keep_test', blob);
+    var keepCard = { id: 'bug059keep', name: '保留图', url: 'https://example.com/keep', image: 'idx:card_keep_test', visitCount: 0 };
+    groups.push({ id: 'gbug059gc', name: 'BUG059 GC 组', sortMode: 'manual', cards: [keepCard] });
+    await saveGroups(groups);
+    var savedWallpapers = JSON.stringify(currentSettings.localWallpapers || []);
+    currentSettings.localWallpapers = [{ key: 'wp__keep_test', name: '测试壁纸', opacity: null }];
+    saveSettings(currentSettings);
+    await flushSyncWrites();
+    await new Promise(function (r) { setTimeout(r, 300); });
+    try {
+      await collectCardImageGarbage();
+    } finally {
+      currentSettings.localWallpapers = JSON.parse(savedWallpapers);
+      saveSettings(currentSettings);
+      await flushSyncWrites();
+    }
+    var keys = await new Promise(function (resolve) {
+      openImgDB().then(function (db) {
+        var out = [];
+        var tx = db.transaction('images', 'readonly');
+        tx.objectStore('images').openCursor().onsuccess = function (e) {
+          var c = e.target.result;
+          if (c) { out.push(String(c.key)); c.continue(); } else resolve(out);
+        };
+      });
+    });
+    groups = groups.filter(function (g) { return g.id !== 'gbug059gc'; });
+    activeGroupIndex = Math.min(activeGroupIndex, groups.length - 1);
+    speeddials = (groups[activeGroupIndex] && groups[activeGroupIndex].cards) || [];
+    await saveGroups(groups);
+    renderSpeeddials(); renderGroupDots();
+    return JSON.stringify({ keys: keys });
+  })()`));
+  check('BUG-059 GC 回收无主的 card_ 前缀图片（修复前永远回收不掉）', gcResult.keys.indexOf('card_orphan_test') === -1, gcResult.keys);
+  check('BUG-059 GC 仍回收 cardimg_ 孤儿（既有行为不回归）', gcResult.keys.indexOf('cardimg_orphan_test') === -1, gcResult.keys);
+  check('BUG-059 GC 不误删仍被卡片引用的 card_ 图片（老数据兼容）', gcResult.keys.indexOf('card_keep_test') !== -1, gcResult.keys);
+  check('BUG-059 GC 绝不回收壁纸（单张 wallpaper + 本地多图 wp__ 双负对照）',
+    gcResult.keys.indexOf('wallpaper') !== -1 && gcResult.keys.indexOf('wp__keep_test') !== -1, gcResult.keys);
+
+  // ---- BUG-068：批量删除 / 去重删除不回收图标缓存（内存 + IndexedDB 双泄漏）----
+  const batchRelease = JSON.parse(await evalJs(`(async () => {
+    async function mkBlob() {
+      var cv = document.createElement('canvas'); cv.width = 8; cv.height = 8;
+      var ctx = cv.getContext('2d'); ctx.fillStyle = 'rgb(20,20,20)'; ctx.fillRect(0, 0, 8, 8);
+      return await new Promise(function (r) { cv.toBlob(r, 'image/png'); });
+    }
+    var blob = await mkBlob();
+    await saveImage('cardimg_batch1', blob);
+    await saveImage('card_batch2', blob);
+    await saveImage('cardimg_batch3', blob);
+    var snapshot = JSON.stringify(groups), savedIdx = activeGroupIndex;
+    groups = [{ id: 'gbug068', name: '批量组', sortMode: 'manual', cards: [
+      { id: 'b1', name: '批量1', url: 'https://b1.example.com/', image: 'idx:cardimg_batch1', visitCount: 0 },
+      { id: 'b2', name: '批量2', url: 'https://b2.example.com/', image: 'idx:card_batch2', visitCount: 0 },
+      { id: 'b3', name: '批量3', url: 'https://b3.example.com/', image: 'idx:cardimg_batch3', visitCount: 0 }
+    ] }];
+    activeGroupIndex = 0; speeddials = groups[0].cards;
+    renderSpeeddials();
+    await _getCardImgUrl('cardimg_batch1');
+    await _getCardImgUrl('card_batch2');
+    await _getCardImgUrl('cardimg_batch3');
+    var origConfirm = showImportConfirmAsync;
+    showImportConfirmAsync = function () { return Promise.resolve(); };
+    var result = {};
+    try {
+      _selectedCardIds = ['b1', 'b2'];
+      await batchDeleteSelected();
+      result = {
+        remaining: groups[0].cards.map(function (c) { return c.id; }),
+        cache1: !!_cardBlobCache['cardimg_batch1'],
+        cache2: !!_cardBlobCache['card_batch2'],
+        cache3: !!_cardBlobCache['cardimg_batch3'],
+        db1: !!(await loadImage('cardimg_batch1')),
+        db2: !!(await loadImage('card_batch2')),
+        db3: !!(await loadImage('cardimg_batch3'))
+      };
+    } finally {
+      showImportConfirmAsync = origConfirm;
+      _selectedCardIds = [];
+      groups = JSON.parse(snapshot); activeGroupIndex = savedIdx;
+      speeddials = (groups[activeGroupIndex] && groups[activeGroupIndex].cards) || [];
+      await saveGroups(groups);
+      renderSpeeddials(); renderGroupDots();
+    }
+    return JSON.stringify(result);
+  })()`));
+  check('BUG-068 批量删除后只剩未选中的卡片（正对照：功能本身仍生效）',
+    batchRelease.remaining.length === 1 && batchRelease.remaining[0] === 'b3', batchRelease);
+  check('BUG-068 批量删除回收被删卡片的 blob URL 缓存（含上传图 card_ 前缀）',
+    batchRelease.cache1 === false && batchRelease.cache2 === false && batchRelease.cache3 === true, batchRelease);
+  check('BUG-068 批量删除回收 IndexedDB 实体，未删卡片的图片不受影响',
+    batchRelease.db1 === false && batchRelease.db2 === false && batchRelease.db3 === true, batchRelease);
+
+  const dedupRelease = JSON.parse(await evalJs(`(async () => {
+    async function mkBlob() {
+      var cv = document.createElement('canvas'); cv.width = 8; cv.height = 8;
+      var ctx = cv.getContext('2d'); ctx.fillStyle = 'rgb(30,30,30)'; ctx.fillRect(0, 0, 8, 8);
+      return await new Promise(function (r) { cv.toBlob(r, 'image/png'); });
+    }
+    var blob = await mkBlob();
+    await saveImage('cardimg_dup1', blob);
+    await saveImage('cardimg_dup2', blob);
+    await saveImage('cardimg_dup3', blob);
+    var snapshot = JSON.stringify(groups), savedIdx = activeGroupIndex;
+    groups = [{ id: 'gbug068b', name: '重复组', sortMode: 'manual', cards: [
+      { id: 'd1', name: '重复1', url: 'https://dup.example.com/', image: 'idx:cardimg_dup1', visitCount: 0 },
+      { id: 'd2', name: '重复2', url: 'https://dup.example.com/', image: 'idx:cardimg_dup2', visitCount: 0 },
+      { id: 'd3', name: '重复3', url: 'https://dup.example.com/', image: 'idx:cardimg_dup3', visitCount: 0 }
+    ] }];
+    activeGroupIndex = 0; speeddials = groups[0].cards;
+    renderSpeeddials();
+    await _getCardImgUrl('cardimg_dup1');
+    await _getCardImgUrl('cardimg_dup2');
+    await _getCardImgUrl('cardimg_dup3');
+    var origConfirm = showImportConfirmAsync;
+    showImportConfirmAsync = function () { return Promise.resolve(); };
+    var result = {};
+    try {
+      showDuplicateCheckDialog();
+      document.getElementById('dup-check-clean-all').click();
+      await new Promise(function (r) { setTimeout(r, 700); });
+      result = {
+        remaining: groups[0].cards.map(function (c) { return c.id; }),
+        cache2: !!_cardBlobCache['cardimg_dup2'],
+        db1: !!(await loadImage('cardimg_dup1')),
+        db2: !!(await loadImage('cardimg_dup2')),
+        db3: !!(await loadImage('cardimg_dup3'))
+      };
+    } finally {
+      showImportConfirmAsync = origConfirm;
+      var dlg = document.getElementById('dialog-duplicate-check');
+      if (dlg) dlg.classList.add('hidden');
+      groups = JSON.parse(snapshot); activeGroupIndex = savedIdx;
+      speeddials = (groups[activeGroupIndex] && groups[activeGroupIndex].cards) || [];
+      await saveGroups(groups);
+      renderSpeeddials(); renderGroupDots();
+    }
+    return JSON.stringify(result);
+  })()`));
+  check('BUG-068 一键清理重复：保留第一张、其余删除（正对照）',
+    dedupRelease.remaining.length === 1 && dedupRelease.remaining[0] === 'd1', dedupRelease);
+  check('BUG-068 一键清理重复回收被删项的 blob URL 缓存与 IndexedDB 实体（保留项不受影响）',
+    dedupRelease.cache2 === false && dedupRelease.db2 === false && dedupRelease.db3 === false && dedupRelease.db1 === true, dedupRelease);
+
+  // 兜底的 _clearAllBlobCaches 原先零调用方（死代码）→ 现在接在「重置全部数据」路径上
+  const resetFallback = JSON.parse(await evalJs(`(async () => {
+    var origClear = _clearAllBlobCaches;
+    var calls = 0;
+    _clearAllBlobCaches = function () { calls++; };
+    var origSyncClear = chrome.storage.sync.clear, origLocalClear = chrome.storage.local.clear;
+    var origDeleteDb = indexedDB.deleteDatabase;
+    var origSetTimeout = window.setTimeout;
+    chrome.storage.sync.clear = function (cb) { if (cb) cb(); };
+    chrome.storage.local.clear = function (cb) { if (cb) cb(); };
+    indexedDB.deleteDatabase = function () { return {}; };
+    window.setTimeout = function (fn, ms) { if (ms === 600 || ms === 5000) return 0; return origSetTimeout.apply(window, arguments); };
+    try {
+      await doResetAll();
+      return JSON.stringify({ calls: calls });
+    } finally {
+      _clearAllBlobCaches = origClear;
+      chrome.storage.sync.clear = origSyncClear;
+      chrome.storage.local.clear = origLocalClear;
+      indexedDB.deleteDatabase = origDeleteDb;
+      window.setTimeout = origSetTimeout;
+    }
+  })()`));
+  check('BUG-068 兜底清空缓存函数真的接进了「重置全部数据」路径（原先零调用方）',
+    resetFallback.calls === 1, resetFallback);
+
+  // ---- BUG-064：页面侧必须显式标记「凭据已提供」，SW 才敢不回退 storage ----
+  const credsMarker = JSON.parse(await evalJs(`(async () => {
+    var origSend = chrome.runtime.sendMessage;
+    var captured = null;
+    chrome.runtime.sendMessage = function (msg, cb) {
+      if (msg && msg.type === 'webdav:test') { captured = msg.payload; if (cb) cb({ ok: true, data: 'connected' }); return; }
+      return origSend.apply(this, arguments);
+    };
+    try {
+      await webdavTestConnection({ url: 'http://nas2.local/dav', user: 'bob', pass: '' });
+      return JSON.stringify({
+        url: captured && captured._url, user: captured && captured._user,
+        pass: captured && captured._pass, marker: captured && captured._hasCreds
+      });
+    } finally { chrome.runtime.sendMessage = origSend; }
+  })()`));
+  check('BUG-064 页面侧显式提供空密码并打上 _hasCreds 标记（SW 据此不回退旧配置）',
+    credsMarker.marker === true && credsMarker.pass === '' &&
+    credsMarker.url === 'http://nas2.local/dav' && credsMarker.user === 'bob', credsMarker);
+
+  // ---- BUG-067：Bing 区域下拉框的可访问名称 ----
+  const bingLabel = JSON.parse(await evalJs(`(() => {
+    var sel = document.getElementById('setting-bing-region');
+    var lbl = document.querySelector('label[for="setting-bing-region"]');
+    return JSON.stringify({
+      hasSelect: !!sel, hasLabel: !!lbl,
+      control: !!(lbl && lbl.control === sel),
+      text: lbl ? lbl.textContent : ''
+    });
+  })()`));
+  check('BUG-067 Bing 区域下拉框有真正的 label 关联（label.control === select）',
+    bingLabel.hasSelect && bingLabel.hasLabel && bingLabel.control && /区域/.test(bingLabel.text), bingLabel);
+
+  // ---- BUG-072：城市留空（自动检测）时天气缓存永远失效 ----
+  const weatherCache = JSON.parse(await evalJs(`(() => {
+    var auto = { weatherType: 'openmeteo', weatherCity: '' };
+    var now = Date.now();
+    return JSON.stringify({
+      autoValid: isCacheValid({ type: 'openmeteo', city: '北京', timestamp: now }, auto),
+      explicitMismatch: isCacheValid({ type: 'openmeteo', city: '北京', timestamp: now }, { weatherType: 'openmeteo', weatherCity: '上海' }),
+      explicitMatch: isCacheValid({ type: 'openmeteo', city: '上海', timestamp: now }, { weatherType: 'openmeteo', weatherCity: '上海' }),
+      stale: isCacheValid({ type: 'openmeteo', city: '北京', timestamp: now - 999 * 60000 }, auto),
+      wrongType: isCacheValid({ type: 'hefeng', city: '北京', timestamp: now }, auto)
+    });
+  })()`));
+  check('BUG-072 城市留空（自动检测）时缓存判定通过', weatherCache.autoValid === true, weatherCache);
+  check('BUG-072 显式指定城市时仍严格比对（负对照：城市不匹配不吃缓存）',
+    weatherCache.explicitMismatch === false && weatherCache.explicitMatch === true, weatherCache);
+  check('BUG-072 数据源与 TTL 校验未被放宽（负对照）',
+    weatherCache.stale === false && weatherCache.wrongType === false, weatherCache);
+
+  const weatherFetch = JSON.parse(await evalJs(`(async () => {
+    var origFetch = fetchOpenMeteoWeather;
+    var calls = 0;
+    fetchOpenMeteoWeather = async function () {
+      calls++;
+      return { source: 'openmeteo', city: '北京', temp: 20, text: '晴', icon: 0, feelsLike: 20, humidity: 50 };
+    };
+    try {
+      await setWeatherCache({ source: 'openmeteo', city: '北京', temp: 20, text: '晴', icon: 0, feelsLike: 20, humidity: 50 }, 'openmeteo', '北京');
+      await fetchAndDisplayWeather({ weatherType: 'openmeteo', weatherCity: '', weatherRefreshMin: 30 });
+      var cityEl = document.querySelector('.weather-city');
+      return JSON.stringify({ calls: calls, city: cityEl ? cityEl.textContent : '' });
+    } finally { fetchOpenMeteoWeather = origFetch; }
+  })()`));
+  check('BUG-072 缓存有效时不再重复请求 API（原先每个新标签页都请求一次）', weatherFetch.calls === 0, weatherFetch);
+  check('BUG-072 正对照：仍然把缓存内容渲染出来', weatherFetch.city === '北京', weatherFetch);
+
+  // 清理本段造的测试分组，避免影响后续断言
+  await evalJs(`(async () => {
+    groups = groups.filter(function (g) { return g.id !== 'gbug059' && g.id !== 'gbug068' && g.id !== 'gbug068b'; });
+    activeGroupIndex = Math.min(activeGroupIndex, groups.length - 1);
+    speeddials = (groups[activeGroupIndex] && groups[activeGroupIndex].cards) || [];
+    await saveGroups(groups);
+    renderSpeeddials(); renderGroupDots();
+    return 'ok';
+  })()`);
 
   console.log('\n[31] 页面无 JS 报错');
   consoleLog.report();

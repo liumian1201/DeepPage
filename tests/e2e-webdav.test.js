@@ -470,7 +470,39 @@ function send(method, params, sessionId) {
     check('本轮新图片仍被保留', !!man4.images['cardimg_keep61']);
 
   });
-  await section('[8] 页面无 JS 报错', async () => {
+  await section('[8] BUG-064 凭据回退区分「未提供」与「空值」（空密码 NAS / 部分凭据不再误用旧配置）', async () => {
+    // storage.local 里存的是 DAV_URL + u/密码123；下面显式传另一台服务器 + 空密码
+    const ALT_URL = `http://127.0.0.1:${davPort}/dav/OtherNas`;
+    const basicUser = (l) => (l && l.auth && l.auth.startsWith('Basic ')) ? Buffer.from(l.auth.slice(6), 'base64').toString('utf8') : '';
+
+    dav.resetLog();
+    const explicitEmptyPass = await evalJson(`webdavTestConnection(${JSON.stringify({ url: ALT_URL, user: 'bob', pass: '' })}).then(function(){return JSON.stringify({ok:true})}).catch(function(e){return JSON.stringify({ok:false,error:e.message})})`);
+    const optLog = dav.state.log.filter((l) => l.method === 'OPTIONS');
+    const lastOpt = optLog[optLog.length - 1] || {};
+    check('显式提供的凭据（含空密码）真的打向新服务器，而不是 storage 里的旧服务器',
+      explicitEmptyPass.ok === true && lastOpt.path === '/dav/OtherNas',
+      { res: explicitEmptyPass, paths: optLog.map((l) => l.path) });
+    check('空密码按「空」发送（Basic bob:），不再被误判为「未配置」',
+      basicUser(lastOpt) === 'bob:', { decoded: basicUser(lastOpt), raw: String(lastOpt.auth || '').slice(0, 30) });
+
+    // 正对照：完全不带凭据时才回退 storage.local（旧行为必须保留）
+    dav.resetLog();
+    const fallback = await evalJson(`webdavTestConnection().then(function(){return JSON.stringify({ok:true})}).catch(function(e){return JSON.stringify({ok:false,error:e.message})})`);
+    const opt2 = dav.state.log.filter((l) => l.method === 'OPTIONS');
+    const last2 = opt2[opt2.length - 1] || {};
+    check('未提供凭据时仍回退 storage.local（正对照：行为不变）',
+      fallback.ok === true && last2.path === '/dav/DeepPage' && basicUser(last2) === 'u:密码123',
+      { res: fallback, path: last2.path, decoded: basicUser(last2) });
+
+    // 显式空值不得回退 storage：直接报「缺少服务器地址」（区分「未提供」与「空值」）
+    dav.resetLog();
+    const explicitEmptyUrl = await evalJson(`webdavTestConnection(${JSON.stringify({ url: '', user: 'bob', pass: '' })}).then(function(){return JSON.stringify({ok:true})}).catch(function(e){return JSON.stringify({ok:false,error:e.message})})`);
+    check('显式空值不回退 storage（修复前会静默打到旧服务器并报「连接成功」）',
+      explicitEmptyUrl.ok === false && /缺少服务器地址/.test(explicitEmptyUrl.error) &&
+      dav.state.log.filter((l) => l.method === 'OPTIONS').length === 0,
+      { res: explicitEmptyUrl, sent: dav.state.log.length });
+  });
+  await section('[9] 页面无 JS 报错', async () => {
     consoleLog.report();
     check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 

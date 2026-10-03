@@ -75,7 +75,10 @@ function getCacheMin(settings) {
 function isCacheValid(meta, settings) {
   if (!meta || !meta.timestamp) return false;
   if (meta.type !== (settings.weatherType || 'openmeteo')) return false;
-  if ((meta.city || '') !== (settings.weatherCity || '')) return false;
+  // BUG-072：城市留空 = 「自动检测」模式 —— 写入时 meta.city 记的是探测到的城市名（如「北京」），
+  // 校验时若再拿空串去比，缓存就永远失效（每开一个新标签页都重新请求 API + 写一次 storage.local）。
+  // 只在用户显式指定城市时才比对城市，写入与校验用同一语义。
+  if (settings.weatherCity && (meta.city || '') !== settings.weatherCity) return false;
   return (Date.now() - meta.timestamp) / 60000 < getCacheMin(settings);
 }
 

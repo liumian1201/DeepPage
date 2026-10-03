@@ -226,11 +226,14 @@ async function batchDeleteSelected() {
   try {
     await showImportConfirmAsync('确定要删除选中的 ' + ids.length + ' 张卡片吗？', { title: '🗑️ 批量删除', okLabel: '删除' });
   } catch (e) { return; }
+  // BUG-068：先收集待删卡片（要拿它们的 image 引用回收缓存），再 splice 数据
+  var doomed = speeddials.filter(function (c) { return ids.indexOf(c.id) !== -1; });
   for (var i = speeddials.length - 1; i >= 0; i--) {
     if (ids.indexOf(speeddials[i].id) !== -1) speeddials.splice(i, 1);
   }
   if (groups[activeGroupIndex]) groups[activeGroupIndex].cards = speeddials;
   await saveGroups(groups);
+  for (var di = 0; di < doomed.length; di++) await _releaseCardImage(doomed[di]);
   clearCardSelection();
   renderSpeeddials();
   showToast('已删除 ' + ids.length + ' 张卡片', 'success');
@@ -354,6 +357,17 @@ function _clearAllBlobCaches() {
   _cardBlobCache = {};
 }
 
+/** BUG-059 / BUG-068：回收一张卡片占用的本地图片资源（blob URL 缓存 + IndexedDB 实体）
+ *  ⚠️ 必须按卡片真实的 image 引用删除：上传图的键是 card_<时间戳>_<随机>，不是 cardimg_<卡片id>，
+ *  按 id 拼前缀的写法（原 deleteCardIcon，已随本批删除）永远删不掉上传图 —— 这正是 BUG-059。
+ *  批量删除 / 去重删除原先只 splice 数据，连 blob URL 缓存都不清（BUG-068），一律走这里。 */
+function _releaseCardImage(card) {
+  if (!card || !card.image || !card.image.startsWith('idx:')) return Promise.resolve();
+  _clearCardBlobCache(card.image.replace('idx:', ''));
+  if (typeof deleteCardImageRef === 'function') return deleteCardImageRef(card.image);
+  return Promise.resolve();
+}
+
 /** 获取卡片图片 URL（优先缓存，否则从 IndexedDB 加载并缓存） */
 async function _getCardImgUrl(imgKey) {
   if (_cardBlobCache[imgKey]) return _cardBlobCache[imgKey];
@@ -370,6 +384,13 @@ async function _getCardImgUrl(imgKey) {
 function _extractThemeColorFromBlob(blob) {
   return new Promise(function (resolve) {
     var img = new Image();
+    // BUG-051：objectURL 必须显式释放 —— 原先每次调用都泄漏一个 blob: URL（截图 PNG 可达数 MB），
+    // 且 blob URL store 会一直持有该 Blob 直到文档卸载。同仓 wallpaper.js 就是「用完即 revoke」的写法。
+    var objUrl = URL.createObjectURL(blob);
+    var finish = function (color) {
+      URL.revokeObjectURL(objUrl);
+      resolve(color);
+    };
     img.onload = function () {
       var canvas = document.createElement('canvas');
       var w = Math.min(img.width, 200);
@@ -387,14 +408,14 @@ function _extractThemeColorFromBlob(blob) {
           r += pr; g += pg; b += pb; count++;
         }
       }
-      if (!count) { resolve(null); return; }
+      if (!count) { finish(null); return; }
       r = Math.round(r / count * 0.8);
       g = Math.round(g / count * 0.8);
       b = Math.round(b / count * 0.8);
-      resolve('#' + [r, g, b].map(function (v) { var s = v.toString(16); return s.length === 1 ? '0' + s : s; }).join(''));
+      finish('#' + [r, g, b].map(function (v) { var s = v.toString(16); return s.length === 1 ? '0' + s : s; }).join(''));
     };
-    img.onerror = function () { resolve(null); };
-    img.src = URL.createObjectURL(blob);
+    img.onerror = function () { finish(null); };
+    img.src = objUrl;
   });
 }
 
@@ -755,8 +776,11 @@ function showDuplicateCheckDialog() {
       } catch (e) { return; }
       // 删除
       if (groups[groupIdx]) {
+        // BUG-068：先取出卡片对象，删除数据后按它真实的 image 引用回收缓存
+        var doomedOne = (groups[groupIdx].cards || []).filter(function (c) { return c.id === cardId; });
         groups[groupIdx].cards = (groups[groupIdx].cards || []).filter(function (c) { return c.id !== cardId; });
         await saveGroups(groups);
+        for (var doi = 0; doi < doomedOne.length; doi++) await _releaseCardImage(doomedOne[doi]);
         // 从弹窗中移除该行
         var groupEl = row.closest('.dup-check-group');
         row.remove();
@@ -788,17 +812,21 @@ function showDuplicateCheckDialog() {
       try {
         await showImportConfirmAsync(msg2, { title: '🗑️ 一键清理重复', okLabel: '确认清理', cancelLabel: '取消' });
       } catch (e) { return; }
+      // BUG-068：一边剔除数据一边收集待回收的卡片对象（原先只 filter，缓存全留着）
+      var doomedAll = [];
       urls.forEach(function (url) {
         var entries = dupMap[url];
         // 保留第一张，删除其余
         for (var i = 1; i < entries.length; i++) {
           var e = entries[i];
           if (groups[e.groupIndex]) {
+            doomedAll = doomedAll.concat((groups[e.groupIndex].cards || []).filter(function (c) { return c.id === e.cardId; }));
             groups[e.groupIndex].cards = (groups[e.groupIndex].cards || []).filter(function (c) { return c.id !== e.cardId; });
           }
         }
       });
       await saveGroups(groups);
+      for (var dai = 0; dai < doomedAll.length; dai++) await _releaseCardImage(doomedAll[dai]);
       // 刷新
       if (groups[activeGroupIndex]) {
         speeddials = groups[activeGroupIndex].cards;
@@ -847,10 +875,8 @@ async function editSpeeddial(id, name, url, image) {
 
 async function deleteSpeeddialById(id) {
   var card = speeddials.find(function (c) { return c.id === id; });
-  if (card && card.image && card.image.startsWith('idx:')) {
-    _clearCardBlobCache(card.image.replace('idx:', ''));
-    if (typeof deleteCardIcon === 'function') deleteCardIcon(id);
-  }
+  // BUG-059：按卡片真实的 image 引用回收（cardimg_<id> 与上传图 card_<ts>_<rand> 都要能删掉）
+  await _releaseCardImage(card);
   speeddials = speeddials.filter((c) => c.id !== id);
   await saveSpeeddials(speeddials);
   renderSpeeddials();
@@ -1000,12 +1026,10 @@ async function saveDialog() {
 
   if (editingId) {
     // 编辑时清理旧缓存（仅当图片被更换为新值时）
-    if (typeof deleteCardIcon === 'function') {
-      var oldCard = speeddials.find(function (c) { return c.id === editingId; });
-      if (oldCard && oldCard.image && oldCard.image.startsWith('idx:') && oldCard.image !== image) {
-        _clearCardBlobCache(oldCard.image.replace('idx:', ''));
-        deleteCardIcon(editingId);
-      }
+    var oldCard = speeddials.find(function (c) { return c.id === editingId; });
+    if (oldCard && oldCard.image && oldCard.image.startsWith('idx:') && oldCard.image !== image) {
+      // BUG-059：按旧引用删除（上传图是 card_* 前缀，原先按 id 拼 cardimg_ 删不掉）
+      await _releaseCardImage(oldCard);
     }
     await editSpeeddial(editingId, name, url, image);
   } else {

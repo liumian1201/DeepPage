@@ -102,17 +102,37 @@ async function cacheCardIcon(url, cardId) {
   }
 }
 
-/** 删除卡片图标缓存 */
-async function deleteCardIcon(cardId) {
-  var key = 'cardimg_' + cardId;
+/** BUG-059：该键是否属于壁纸（单张壁纸 'wallpaper' / 本地多图列表里的 wp__*）
+ *  壁纸键绝不能被「卡片图片回收」误删 —— 卡片引用异常或 GC 判定都要先过这道闸。 */
+function isWallpaperImageKey(key) {
+  if (key === 'wallpaper') return true;
+  var list = (typeof currentSettings === 'object' && currentSettings && currentSettings.localWallpapers) || [];
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && list[i].key === key) return true;
+  }
+  return false;
+}
+
+/** BUG-059：按卡片真实的 image 引用删除 IndexedDB 图片
+ *  上传的自定义图键是 card_<时间戳>_<随机>（main.js 的 uploadImage(file, 'card')），
+ *  不是 cardimg_<卡片id>；原先按 id 拼前缀删除/GC，导致这类图片永远留在库里。 */
+async function deleteCardImageRef(imageRef) {
+  var key = String(imageRef == null ? '' : imageRef).replace(/^idx:/, '');
+  if (!key) return;
+  if (isWallpaperImageKey(key)) return;
   await deleteImage(key);
 }
 
 /* ========== IndexedDB 垃圾回收 (GC) ========== */
 
 /**
- * 清理 IndexedDB 中无主卡片图标（已删除卡片/分组的残留 cardimg_* 图片）
+ * 清理 IndexedDB 中无主的卡片图片（已删除卡片/分组的残留）
  * 静默执行，不影响用户操作
+ *
+ * BUG-059：不再只认 `cardimg_` 前缀 —— 上传的自定义图键是 `card_<时间戳>_<随机>`，
+ * 原先的前缀过滤让它们永远进不了回收分支（图片库无限增长，扩展又声明了 unlimitedStorage）。
+ * 现在反过来判定：**只要不被任何卡片引用、也不是壁纸键，就回收**（将来新增前缀也自动覆盖）。
+ * 老数据兼容：卡片上仍带 `card_*` 引用时照常保留（validKeys 按卡片真实引用收集，与前缀无关）。
  */
 async function collectCardImageGarbage() {
   try {
@@ -134,6 +154,10 @@ async function collectCardImageGarbage() {
     });
     var bakGroups = bakResult.groups_local_bak || [];
     var allGroups = groups.concat(bakGroups);
+    // BUG-059 安全闸：一处分组都读不到时放弃本轮 GC。判定条件放宽后（非壁纸即回收），
+    // 若 storage 读取异常返回空数组就会把整个图片库清空 —— 宁可少回收一轮（泄漏），
+    // 也不能因为一次读取失败丢掉用户图片。
+    if (allGroups.length === 0) return;
     for (var i = 0; i < allGroups.length; i++) {
       var cards = allGroups[i].cards || [];
       for (var j = 0; j < cards.length; j++) {
@@ -144,7 +168,22 @@ async function collectCardImageGarbage() {
       }
     }
 
-    // 遍历 IndexedDB，删除不在有效集合中的 cardimg_ 条目
+    // BUG-059：壁纸键（单张壁纸 + 本地多图列表）一律不回收
+    var wallpaperKeys = new Set(['wallpaper']);
+    var settingsData = await new Promise(function (resolve) {
+      chrome.storage.sync.get(['settings'], function (data) { resolve(data.settings || null); });
+    });
+    if (!settingsData) {
+      settingsData = await new Promise(function (resolve) {
+        chrome.storage.local.get(['settings'], function (data) { resolve(data.settings || null); });
+      });
+    }
+    var lwList = (settingsData && settingsData.localWallpapers) || [];
+    for (var li = 0; li < lwList.length; li++) {
+      if (lwList[li] && lwList[li].key) wallpaperKeys.add(lwList[li].key);
+    }
+
+    // 遍历 IndexedDB，删除「无卡片引用且非壁纸」的条目
     var db = await openImgDB();
     var orphans = [];
     await new Promise(function (resolve) {
@@ -155,7 +194,7 @@ async function collectCardImageGarbage() {
         var cursor = e.target.result;
         if (cursor) {
           var key = cursor.key;
-          if (typeof key === 'string' && key.startsWith('cardimg_') && !validKeys.has(key)) {
+          if (typeof key === 'string' && !validKeys.has(key) && !wallpaperKeys.has(key)) {
             orphans.push(key);
             cursor.delete();
           }

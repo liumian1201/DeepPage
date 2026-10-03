@@ -182,14 +182,20 @@ function isWithinBase(baseUrl, subUrl) {
 
 async function webdavProxy(method, payload) {
   payload = payload || {};
-  // 支持直接传凭据（测试连接等场景），回退到 storage.local
+  // BUG-064：区分「未提供凭据」与「显式空值」——
+  //   · payload 上完全没有 _url/_user/_pass（也没有 _hasCreds 标记）→ 回退 storage.local
+  //   · 任一字段显式提供（哪怕是空串）→ 按提供值使用，允许空密码（NAS 匿名/访客共享）
+  // 原先的 `!url || !user || !pass` 把「空密码」当成「没传凭据」，于是：空密码服务器恒报
+  // 「WebDAV 未配置」（假阴性）；只传部分字段时会静默回退到 storage 里的旧服务器（假阳性）。
+  var provided = payload._hasCreds === true ||
+    payload._url !== undefined || payload._user !== undefined || payload._pass !== undefined;
   var url = payload._url, user = payload._user, pass = payload._pass;
-  if (!url || !user || !pass) {
+  if (!provided) {
     var cfg = await new Promise(function (r) { chrome.storage.local.get(['webdav_url','webdav_user','webdav_pass'], r); });
     url = cfg.webdav_url; user = cfg.webdav_user; pass = cfg.webdav_pass;
   }
-  if (!url || !user || !pass) {
-    return { ok: false, error: 'WebDAV 未配置' };
+  if (!url || !user) {
+    return { ok: false, error: !url ? 'WebDAV 未配置：缺少服务器地址' : 'WebDAV 未配置：缺少用户名' };
   }
   // v1.3.1: 协议白名单（允许本地 http WebDAV，阻断其它协议）
   if (!isProxyUrlAllowed(url)) {
@@ -381,10 +387,25 @@ async function webdavProxy(method, payload) {
 
 // ---- 网页截图（v1.1.5） ----
 
+/** BUG-046：http 页面需要可选的 host 权限（manifest 的 optional_host_permissions）
+ *  未授权时 chrome.scripting.executeScript 必被拒，页面里永远不会出现截图按钮。 */
+async function swHasHttpHostPermission() {
+  try {
+    return await new Promise(function (resolve) {
+      chrome.permissions.contains({ origins: ['http://*/*'] }, function (has) { resolve(!!has); });
+    });
+  } catch (e) { return false; }
+}
+
 async function captureScreenshot(url) {
   // v1.3.1: 只对 http/https 页面开截图窗口（chrome:// / file:// 无法注入脚本）
   if (!isProxyUrlAllowed(url)) {
     throw new Error('unsupported protocol');
+  }
+  // BUG-046：http 未授权时**不要开窗**（原先会开一个 1280×720 窗口，注入静默失败，
+  // 用户干等 120 秒才收到与真实原因无关的「用户超时未截图」）
+  if (/^http:\/\//i.test(url) && !(await swHasHttpHostPermission())) {
+    throw new Error('需要「访问 http 网站」权限才能截取 http 页面，请先在设置中授权');
   }
   var win = await chrome.windows.create({
     url: url,
@@ -396,6 +417,9 @@ async function captureScreenshot(url) {
   });
   var tabId = win.tabs[0].id;
   var closed = false;
+  // BUG-046：注入失败要立刻结束等待（下面 Promise 里的 doReject 挂到这里），
+  // 原先 injectButton 的 catch 是空的 → Promise 只能等 120s 超时。
+  var rejectCapture = null;
 
   function injectButton() {
     chrome.scripting.executeScript({
@@ -416,7 +440,10 @@ async function captureScreenshot(url) {
         };
         document.body.appendChild(btn);
       }
-    }).catch(function () {});
+    }).catch(function (err) {
+      // BUG-046：注入失败（权限不足 / 页面限制）必须回传真实原因，不能静默等 120s 超时
+      if (rejectCapture) rejectCapture('无法注入截图按钮：' + ((err && err.message) || '未知原因'));
+    });
   }
 
   // 页面每次导航完成后重新注入按钮
@@ -447,6 +474,8 @@ async function captureScreenshot(url) {
       if (!skipWinRemove) { try { chrome.windows.remove(win.id); } catch (e) {} }
       reject(new Error(msg));
     }
+    // BUG-046：把提前失败的出口交给 injectButton（同一时刻只有一个有效）
+    rejectCapture = doReject;
 
     timeout = setTimeout(function () { doReject('用户超时未截图'); }, 120000);
 

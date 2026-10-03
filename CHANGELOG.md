@@ -1,5 +1,96 @@
 # DeepPage 更新日志
 
+## v1.5.13 (2026-10-04) — 审计清零：最后 8 条缺陷（权限闸门 / 资源回收 / 空断言 / 判定歧义）
+
+> 本版是 v1.5.5 全量代码审计的**最后 8 条**：BUG-046 / 051 / 058 / 059 / 064 / 067 / 068 / 072。
+> 至此该轮审计的 **42 条缺陷全部修完**（v1.5.6 ~ v1.5.13 八批）。
+> 这批散在 8 个文件、互不相关，主题是「**测试看不见的那一半**」：一条空断言、三条资源回收、
+> 两条「未授权 / 未配置」的判定歧义、两条一行修。
+> 修复前 / 后对照（`DP_EXT_DIR` 指向修复前的源码）：**20 项断言失败 → 0 项失败**。
+
+### 🐛 BUG-046 http 页面截图链路缺可选权限闸门（截图完全不可用，还要白等 2 分钟）
+- **根因**：`manifest` 只把 `https://*/*` 列为必需权限，`http://*/*` 是**可选**权限。
+  未授权时 `chrome.scripting.executeScript` 对 http 页面必然被拒，而编辑弹窗的
+  「📸 截取网页」是**全项目唯一漏掉权限闸门**的截图入口（另一个入口与批量截图都有），
+  SW 侧也没有权限判定，且 `injectButton` 的 catch 是空的 → 异常被完全吞掉：
+  按钮永不出现、Promise 无任何分支能提前结束，只能等 120 秒定时器，最后报
+  「用户超时未截图」——与真实原因无关。期间一个真实浏览器窗口被占用且无按钮可用。
+- **修复**：三处一起补 —— ① 弹窗点击处理器最前面调用 `ensurePermissionForUrl(url)`
+  （与卡片右键截图同一套闸门，未授权时给出权限提示）；② SW 侧 `captureScreenshot`
+  开窗前用 `chrome.permissions.contains({origins:['http://*/*']})` 判定，未授权**直接拒绝、不开窗**；
+  ③ `injectButton` 的失败回传 `rejectCapture(...)`，不再静默等 120 秒。
+
+### 🐛 BUG-051 每次采样主题色 / 网页截图都泄漏一个 `blob:` URL
+- **根因**：`_extractThemeColorFromBlob()` 用 `URL.createObjectURL(blob)` 给 `<img>` 赋值，
+  但 onload / onerror 都只 `resolve`，整个函数体内没有任何 `revokeObjectURL`；
+  blob URL store 会一直持有该 Blob 直到文档卸载（截图 PNG 可达数 MB）→ 长开的新标签页内存单调增长。
+- **修复**：objectURL 提为局部变量并抽出 `finish(color)`，在 onload / onerror / 空采样三个出口统一释放
+  （同仓 `wallpaper.js` 本就是「用完即 revoke」的写法）。
+
+### 🐛 BUG-059 上传的自定义卡片图片永远不会被删除（图片库无限增长）
+- **根因**：卡片编辑弹窗「上传图片」用的键前缀是 `card_<时间戳>_<随机>`，
+  而删除逻辑按「卡片 id 拼 `cardimg_<id>`」定位、GC 又只扫描 `cardimg_` 前缀 ——
+  两边都碰不到 `card_*`，于是这些 Blob 永久留在 IndexedDB（扩展声明了 `unlimitedStorage`，
+  浏览器不会自动清理；用户上传的壁纸级大图会一直占空间）。
+- **修复**：**不改前缀**（老数据里已有的 `card_*` 引用必须继续能用），改为
+  **按卡片真实的 image 引用回收**：新增 `deleteCardImageRef(imageRef)`（受保护的壁纸键不删）
+  与 `isWallpaperImageKey()` 闸门，删除路径统一走它；GC 的前缀过滤放宽为
+  「**只要不被任何卡片引用、也不是壁纸键就回收**」（将来新增前缀自动覆盖）。
+  同时补一道安全闸：一处分组都读不到时放弃本轮 GC —— 判定放宽后，
+  若 storage 读取异常返回空数组就会把整个图片库清空。
+  顺带删掉因本次修复失去最后调用方的 `deleteCardIcon()`（它只会按 id 拼 `cardimg_` 前缀）。
+
+### 🐛 BUG-068 批量删除 / 去重清理不回收图标缓存；兜底的 `_clearAllBlobCaches()` 从无调用方
+- **根因**：单张删除会清 `_cardBlobCache` 并删除 IndexedDB 图标，但批量删除、批量移动、
+  重复检查弹窗的单行删除与一键清理都只 `splice/filter` 数据 → 被删卡片的 `blob:` URL
+  及其整张图片 Blob 常驻内存直到页面关闭；唯一能整体兜底的 `_clearAllBlobCaches()`
+  经全仓库 grep 只有定义、没有任何调用点。
+- **修复**：新增 `_releaseCardImage(card)`（清 blob URL 缓存 + 按真实引用删 IndexedDB 实体），
+  接入批量删除、去重单行删除、一键清理三条路径（**只回收被删项**，未删卡片的图片不受影响）；
+  兜底的 `_clearAllBlobCaches()` 接进「重置全部数据」路径（整库即将删除，所有 `blob:` URL 都会失效）。
+
+### 🐛 BUG-064 WebDAV 凭据回退分不清「未提供」与「空值」
+- **根因**：SW 侧用 `!url || !user || !pass` 判断「是否传了凭据」，且把三个字段一起换成 storage 里的值。
+  于是空密码（NAS 匿名/访客共享）恒被当成「未配置」——直接返回错误、一个请求都不发；
+  而只提供部分字段时又会静默回退到 storage 里的**旧服务器**并返回「连接成功」（假阳性）。
+- **修复**：区分「未提供」与「显式空值」—— 仅当 payload 上完全没有 `_url/_user/_pass`
+  （也没有 `_hasCreds` 标记）时才回退 `storage.local`，任一字段显式提供就按提供值使用
+  （**允许空密码**）；错误信息按缺失字段区分「缺少服务器地址 / 缺少用户名」；
+  页面侧 `_wdSend` / `_wdSendFull` 统一打上 `_hasCreds` 标记。
+
+### 🐛 BUG-072 城市留空（默认「自动检测」）时天气缓存永远失效
+- **根因**：写入缓存时 `meta.city` 记的是 `settings.weatherCity || data.city`（探测到的城市名，如「北京」），
+  校验时却拿 `settings.weatherCity`（默认空串）去比 → 恒不相等。
+  于是文件头声明的「缓存机制，避免频繁请求触发 API 限制」对**最常见配置**完全失效：
+  每开一个新标签页都发一次 Open-Meteo 请求并写一次 `storage.local`。
+- **修复**：只在 `settings.weatherCity` 非空时才比对城市（留空 = 自动检测模式，只校验数据源与 TTL），
+  写入与校验用同一语义。
+
+### ♿ BUG-067 Bing 壁纸「区域」下拉框没有可访问名称
+- **根因**：邻近文本是普通 `<div class="settings-section-title">🌍 区域</div>` 而非 `<label>`，
+  下拉框也没有 `aria-label` → 屏幕阅读器只能读出「组合框 zh-CN」，用户无法判断控件用途
+  （把 `id="setting-*"` 与 `for="setting-*"` 做差集，它是**全页面唯一**真正缺失关联的表单项）。
+- **修复**：改成 `<label for="setting-bing-region" class="settings-section-title">🌍 区域</label>`，
+  与同文件其它设置项写法一致。
+
+### ✅ 测试（BUG-058：消灭最后两条空断言）
+- `tests/e2e-p0.test.js` 里最后两条**空断言**被替换为**行为断言**：
+  ① 「WebDAV 按钮已接入权限守卫」原先只判断两个全局函数的 `typeof`（把按钮 handler 整段删掉依然通过）
+  → 改为**真实点击**「测试连接」：断言权限申请真的发起、未授权时不发任何 `webdav:*` 请求、且给出权限提示；
+  ② 「批量截图已接入 http 权限降级」原先用 `startBatchCapture.toString().includes("httpTargets")`
+  匹配源码文本 → 改为**真实调用 `startBatchCapture()`**：断言 http 目标一张都不截、进度弹窗不开、
+  Toast 明说「跳过 N 张」。
+- **断言非空转证明（变异测试）**：在**新代码**上人为删掉 WebDAV 按钮闸门与批量截图降级分支后，
+  这 5 条断言 **5/5 失败**（旧版空断言在同样变异下依然全绿，正是 BUG-058 指出的问题）。
+- **顺带修一处假对照**：`tests/e2e-sw-protocol.test.js` 原先**没有实现 `DP_EXT_DIR`**，
+  用「修复前源码」跑它实际跑的还是新代码（假绿）；现已与 p0 / WebDAV 套件统一支持该开关，
+  并给 `_private/tools/audit-probe.js` 也补上。
+- 新增 E2E 断言 **35 项**：[10] 段 5 项（BUG-058 替换）+ [32] 段 27 项（BUG-046/051/059/064/067/068/072）
+  + SW 协议 3 项（http 截图未授权立即拒绝、不开窗）+ WebDAV 3 项（BUG-064 真实服务器证据）。
+- 修复前 / 后对照：旧代码 **20 项失败**（p0 14 + SW 3 + WebDAV 3）→ 新代码 **0 项失败**；
+  探针 `rt03-uploaded-card-image-leak` 修复前 / 后翻转；`audit-static-scan.mjs` 第 2 节保持清零。
+- 全量验证：E2E **421 项**（p0 356 + SW 10 + WebDAV 55）｜ 逻辑桩测 29 ｜ 工程反向对照 52 ｜ ESLint 0 error。
+
 ## v1.5.12 (2026-10-04) — 交互与死代码：6 条「界面承诺没兑现」缺陷 + 本地搜索下拉注入修复
 
 > 本版是 v1.5.5 全量代码审计的**交互与死代码 6 条**（BUG-060 / 074 / 075 / 076 / 065 / 066）

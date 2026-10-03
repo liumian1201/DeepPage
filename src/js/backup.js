@@ -326,6 +326,9 @@ function resetAll() {
 async function doResetAll() {
   // v1.3.3: 先落盘再清空，避免清空后仍有待写数据落地
   if (typeof flushSyncWrites === 'function') await flushSyncWrites();
+  // BUG-068：兜底清空 blob URL 缓存 —— 整库即将删除，所有 blob: URL 都会失效。
+  // 该函数原先全仓库无调用方（死代码），这里接上真正的「重置全部数据」路径。
+  if (typeof _clearAllBlobCaches === 'function') _clearAllBlobCaches();
   var fallback = setTimeout(function () { window.location.reload(); }, 5000);
 
   // 清理 sync + local（大容量回退数据在 local）
