@@ -327,7 +327,25 @@ chrome.storage.onChanged.addListener(function (changes, areaName) {
     var newGroups = changes.groups.newValue;
     var _selfGroupsWrite = typeof isSelfSyncValue === 'function' && isSelfSyncValue('groups', newGroups);
     if (newGroups && Array.isArray(newGroups) && !_selfGroupsWrite) {
+      // BUG-045: 另一个标签页删组/重排后，本页的 activeGroupIndex 可能越界或指向别的分组。
+      // 不校正的后果：speeddials 被置空（看板空白、圆点无选中），此后本页新增卡片还会以
+      // 越界/错位的索引写盘 —— 把别的分组的卡片整组覆盖。与 doDeleteGroup/moveGroupTo 一致：
+      // 先按 id 跟随原分组，找不到再夹紧索引。
+      var prevActiveId = (groups && groups[activeGroupIndex]) ? groups[activeGroupIndex].id : null;
       groups = newGroups;
+      var followIdx = prevActiveId
+        ? groups.findIndex(function (g) { return g && g.id === prevActiveId; })
+        : -1;
+      var clamped;
+      if (followIdx !== -1) clamped = followIdx;
+      else if (!groups.length) clamped = 0;
+      else clamped = Math.min(activeGroupIndex, groups.length - 1);
+      if (clamped !== activeGroupIndex) {
+        activeGroupIndex = clamped;
+        // 本页视图变了 → 同步 activeGroup，否则本页下一次 saveSpeeddials 会按 storage 里的
+        // 陈旧索引把卡片写到别的分组（getActiveGroup 读的就是这个键）
+        if (typeof saveActiveGroup === 'function') saveActiveGroup(activeGroupIndex);
+      }
       speeddials = (groups[activeGroupIndex] && groups[activeGroupIndex].cards)
         ? groups[activeGroupIndex].cards : [];
       // 外部改动可能涉及任意分组 → 除当前分组外整体失效 DOM 池，
@@ -802,6 +820,13 @@ function bindKeyboardShortcuts() {
       var dupDlg = document.getElementById('dialog-duplicate');
       if (dupDlg && !dupDlg.classList.contains('hidden')) {
         dupDlg.classList.add('hidden');
+        return;
+      }
+      // 8b. 重复卡片「检查」结果弹窗（BUG-063：原先漏挂 → ESC 关不掉它，
+      // 反而把底下仍打开的设置面板关掉）
+      var dupCheckDlg = document.getElementById('dialog-duplicate-check');
+      if (dupCheckDlg && !dupCheckDlg.classList.contains('hidden')) {
+        dupCheckDlg.classList.add('hidden');
         return;
       }
       // 9. 卡片编辑弹窗

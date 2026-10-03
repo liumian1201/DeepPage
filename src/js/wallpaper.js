@@ -233,7 +233,7 @@ function getEffectiveWallpaperOpacity(settings) {
   return typeof _localWallpaperOpacityOverride === 'number' ? _localWallpaperOpacityOverride : global;
 }
 
-async function applyWallpaper(settings) {
+async function applyWallpaper(settings, advance) {
   var body = document.body;
   body.style.backgroundImage = '';
   body.classList.remove('has-wallpaper', 'wallpaper-bing');
@@ -244,7 +244,7 @@ async function applyWallpaper(settings) {
     if (mode === 'bing') { body.classList.add('wallpaper-bing'); await applyBingWallpaper(settings); }
     else if (mode === 'custom') {
       // v1.5.0: 本地多图优先；列表为空时回退到旧的单图/URL 逻辑
-      var applied = await applyLocalWallpapers(settings);
+      var applied = await applyLocalWallpapers(settings, advance);
       if (!applied) await applyCustomWallpaper(settings.wallpaperUrl);
     }
   } catch (e) {
@@ -365,14 +365,19 @@ function getLocalWallpapers(settings) {
  *   off      → 0（固定第一张）
  *   newtab   → 每次新标签页 +1（序号存 local，多标签页各自递增）
  *   interval → 按时间片计算 floor(now / interval)，所有标签页一致且到点自动切换
+ * BUG-057: advance 只有「新标签页」路径（initWallpaper）才传 true。
+ * 其余重刷路径（改设置、调遮罩、增删壁纸）只读当前序号 —— 否则序号按「重刷次数」递增，
+ * 拖遮罩滑块松手就会跳到下一张图，所见与所改错位。
  */
-async function _pickLocalWallpaperIndex(list, settings) {
+async function _pickLocalWallpaperIndex(list, settings, advance) {
   var mode = settings.wallpaperRotate || 'off';
   if (list.length <= 1) return 0;
   if (mode === 'newtab') {
     var cur = await new Promise(function (r) {
       chrome.storage.local.get([LOCAL_WP_ROTATE_IDX_KEY], function (d) { r(d[LOCAL_WP_ROTATE_IDX_KEY] || 0); });
     });
+    cur = cur % list.length;                       // 列表变短时序号可能越界
+    if (!advance) return cur;                      // 重刷：只读，不推进
     var next = (cur + 1) % list.length;
     chrome.storage.local.set({ [LOCAL_WP_ROTATE_IDX_KEY]: next });
     return next;
@@ -384,11 +389,11 @@ async function _pickLocalWallpaperIndex(list, settings) {
   return 0;
 }
 
-/** 应用本地多图壁纸（含单张独立遮罩） */
-async function applyLocalWallpapers(settings) {
+/** 应用本地多图壁纸（含单张独立遮罩）；advance=true 仅用于「新标签页」路径 */
+async function applyLocalWallpapers(settings, advance) {
   var list = getLocalWallpapers(settings);
   if (list.length === 0) return false;
-  var idx = await _pickLocalWallpaperIndex(list, settings);
+  var idx = await _pickLocalWallpaperIndex(list, settings, advance);
   var item = list[idx];
   var blob = await loadImage(item.key);
   if (!blob) { console.warn('本地壁纸缺失:', item.key); return false; }
@@ -544,7 +549,9 @@ async function initWallpaper() {
     cache.idx = Math.floor(Math.random() * cache.images.length);
     await setBingCache(cache);
   }
-  await applyWallpaper(currentSettings);
+  // BUG-057: 只有这里是「新标签页」路径 → 传 advance=true 让 newtab 轮播序号 +1；
+  // 其余 applyWallpaper 调用（设置变更重刷）只读序号，不换图
+  await applyWallpaper(currentSettings, true);
   bindWallpaperUpload();
   bindWallpaperNav();
 }

@@ -893,19 +893,11 @@ function bindSettingsEvents() {
     }
   });
 
-  // ESC 关闭面板（若有子弹窗打开则优先关子弹窗，不关面板）
-  document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape' || domSettings.panel.classList.contains('hidden')) return;
-    // 子弹窗打开时，ESC 仅关子弹窗不关面板（由 main.js 的 ESC 链处理）
-    // 覆盖所有可从设置面板内打开的弹窗
-    var guards = ['dialog-search-engines', 'dialog-import-confirm', 'dialog-reset',
-                  'dialog-group-manager', 'dialog-group', 'dialog-confirm'];
-    for (var gi = 0; gi < guards.length; gi++) {
-      var el = document.getElementById(guards[gi]);
-      if (el && !el.classList.contains('hidden')) return;
-    }
-    closeSettingsPanel();
-  });
+  // ESC 关闭面板统一由 main.js 的 ESC 链（第 10 层）负责。
+  // BUG-071: 这里原本还有一个独立的 document keydown 监听器做「子弹窗打开时不关面板」的守卫，
+  // 但它在首次打开面板时才注册，必然晚于 main.js 的链 —— main.js 先把子弹窗关掉并 return，
+  // 轮到守卫时子弹窗已是 hidden，守卫全部落空 → 面板被一起关掉（守卫形同死代码）。
+  // 删掉它即可：main.js 的链按层处理，命中子弹窗就 return，天然不会误关面板。
 
   // ---- 备份模式切换 ----
   if (domSettings.backupMode) {

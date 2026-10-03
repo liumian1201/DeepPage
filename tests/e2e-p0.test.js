@@ -855,10 +855,13 @@ function send(method, params, sessionId) {
   await sleep(300);
   check('清除后回退为跟随全局', (await evalJs('getLocalWallpapers()[0].opacity')) === null);
 
-  // 轮播：newtab 每次递增；interval 按时间片固定
-  await evalJs(`(async () => { currentSettings.wallpaperRotate = 'newtab'; const a = await _pickLocalWallpaperIndex(getLocalWallpapers(), currentSettings); const b = await _pickLocalWallpaperIndex(getLocalWallpapers(), currentSettings); return JSON.stringify([a, b]); })()`);
-  const rot = JSON.parse(await evalJs(`(async () => { const a = await _pickLocalWallpaperIndex(getLocalWallpapers(), currentSettings); const b = await _pickLocalWallpaperIndex(getLocalWallpapers(), currentSettings); return JSON.stringify([a, b]); })()`));
-  check('newtab 模式逐次递增', rot[1] === (rot[0] + 1) % 2, rot);
+  // 轮播：newtab 只在「新标签页」路径（advance=true）递增；interval 按时间片固定
+  await evalJs(`(async () => { currentSettings.wallpaperRotate = 'newtab'; const a = await _pickLocalWallpaperIndex(getLocalWallpapers(), currentSettings, true); const b = await _pickLocalWallpaperIndex(getLocalWallpapers(), currentSettings, true); return JSON.stringify([a, b]); })()`);
+  const rot = JSON.parse(await evalJs(`(async () => { const a = await _pickLocalWallpaperIndex(getLocalWallpapers(), currentSettings, true); const b = await _pickLocalWallpaperIndex(getLocalWallpapers(), currentSettings, true); return JSON.stringify([a, b]); })()`));
+  check('newtab 模式逐次递增（新标签页路径 advance=true）', rot[1] === (rot[0] + 1) % 2, rot);
+  // BUG-057: 重刷路径（不传 advance）只读序号，不推进
+  const rotRead = JSON.parse(await evalJs(`(async () => { currentSettings.wallpaperRotate = 'newtab'; const a = await _pickLocalWallpaperIndex(getLocalWallpapers(), currentSettings); const b = await _pickLocalWallpaperIndex(getLocalWallpapers(), currentSettings); return JSON.stringify([a, b]); })()`));
+  check('BUG-057 newtab 重刷只读（序号不变）', rotRead[0] === rotRead[1], rotRead);
   const rot2 = JSON.parse(await evalJs(`(async () => { currentSettings.wallpaperRotate = 'interval'; currentSettings.wallpaperRotateMin = 30; const a = await _pickLocalWallpaperIndex(getLocalWallpapers(), currentSettings); const b = await _pickLocalWallpaperIndex(getLocalWallpapers(), currentSettings); return JSON.stringify([a, b]); })()`));
   check('interval 模式同一时间片内固定', rot2[0] === rot2[1] && rot2[0] >= 0 && rot2[0] < 2, rot2);
 
@@ -1442,7 +1445,142 @@ function send(method, params, sessionId) {
   await evalJs(`(async () => { currentSettings.todoItems = []; currentSettings.columns = 5; saveSettings(currentSettings); await flushSyncWrites(); return 'ok'; })()`);
   await sleep(600);
 
-  console.log('\n[28] 页面无 JS 报错');
+  console.log('\n[28] v1.5.8 审计第二批：BUG-045 / 057 / 063 / 071');
+
+  // ---- BUG-045：跨标签页删组后本页 activeGroupIndex 必须校正（否则看板空白） ----
+  const idxClamp = JSON.parse(await evalJs(`(async () => {
+    const mk = (id, name, card) => ({ id, name, sortMode: 'manual', cards: [{ id: id + '_c', name: card, url: 'https://' + card.toLowerCase() + '.example.com/', visitCount: 0 }] });
+    groups = [mk('q1','Q1','ONE'), mk('q2','Q2','TWO'), mk('q3','Q3','THREE'), mk('q4','Q4','FOUR')];
+    activeGroupIndex = 3; speeddials = groups[3].cards;
+    await saveGroups(groups); renderSpeeddials(); renderGroupDots();
+    await new Promise(r => setTimeout(r, 300));
+    // 模拟另一个标签页删掉两个分组（索引 3 越界）
+    const shrunk = [mk('q1','Q1','ONE'), mk('q2','Q2','TWO')];
+    await new Promise(r => chrome.storage.sync.set({ groups: shrunk, groups_rev: Date.now() }, r));
+    await new Promise(r => setTimeout(r, 700));
+    return JSON.stringify({
+      idx: activeGroupIndex, len: groups.length,
+      outOfRange: activeGroupIndex >= groups.length,
+      speeddials: speeddials.length,
+      visible: document.querySelectorAll('.speeddial-group .card-wrapper[data-id]').length,
+      activeDots: document.querySelectorAll('#group-dots .group-dot.active, #group-dots .group-tab.active').length
+    });
+  })()`));
+  check('BUG-045 跨标签页删组后索引被校正（不再越界）', idxClamp.outOfRange === false && idxClamp.idx === 1, idxClamp);
+  check('BUG-045 看板不再空白且有选中分组', idxClamp.visible > 0 && idxClamp.speeddials > 0 && idxClamp.activeDots === 1, idxClamp);
+
+  // 真实双标签页：B 停在最后一个分组，A 删组后 B 的视图必须仍然合法
+  const tabD = await (async () => {
+    const t = await send('Target.createTarget', { url: `chrome-extension://${EXT_ID}/index.html` });
+    const a = await send('Target.attachToTarget', { targetId: t.targetId, flatten: true });
+    await send('Runtime.enable', {}, a.sessionId);
+    await send('Page.enable', {}, a.sessionId);
+    return { targetId: t.targetId, sid: a.sessionId };
+  })();
+  const evalD = async (expr) => {
+    const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, tabD.sid);
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || 'eval error');
+    return r.result.value;
+  };
+  let dReady = false;
+  for (let i = 0; i < 40; i++) {
+    try { if (await evalD('typeof currentSettings === "object" && !!currentSettings && !!document.getElementById("dashboard-grid")')) { dReady = true; break; } } catch (e) { /* 导航中 */ }
+    await sleep(300);
+  }
+  check('BUG-045 第四个标签页已就绪（真实双标签页场景）', dReady);
+  await evalJs(`(async () => {
+    const mk = (id, name, card) => ({ id, name, sortMode: 'manual', cards: [{ id: id + '_c', name: card, url: 'https://' + card.toLowerCase() + '.example.com/', visitCount: 0 }] });
+    groups = [mk('r1','R1','RONE'), mk('r2','R2','RTWO'), mk('r3','R3','RTHREE')];
+    activeGroupIndex = 0; speeddials = groups[0].cards;
+    await saveGroups(groups); renderSpeeddials(); renderGroupDots();
+    return 'ok';
+  })()`);
+  await sleep(900);
+  await evalD(`(async () => { switchGroup(2); await new Promise(r => setTimeout(r, 300)); return 'ok'; })()`);
+  check('BUG-045 B 页停在最后一个分组', (await evalD('activeGroupIndex')) === 2);
+  await evalJs(`(async () => { _pendingDeleteGroup = 0; await doDeleteGroup(); return 'ok'; })()`);
+  await sleep(1400);
+  const bState = JSON.parse(await evalD(`JSON.stringify({
+    idx: activeGroupIndex, len: groups.length,
+    outOfRange: activeGroupIndex >= groups.length,
+    speeddials: speeddials.length,
+    visible: document.querySelectorAll('.speeddial-group .card-wrapper[data-id]').length
+  })`));
+  check('BUG-045 B 页索引在 A 删组后被校正且看板非空', bState.outOfRange === false && bState.visible > 0, bState);
+  try { await send('Target.closeTarget', { targetId: tabD.targetId }); } catch (e) { /* 忽略 */ }
+  await sleep(300);
+
+  // ---- BUG-057：newtab 轮播序号只在「新标签页」推进，重刷不得换图 ----
+  const rotState = JSON.parse(await evalJs(`(async () => {
+    const b64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const bin = atob(b64); const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    await ensureSettingsPanelReady();
+    currentSettings.wallpaperMode = 'custom';
+    currentSettings.wallpaperRotate = 'newtab';
+    currentSettings.localWallpapers = [];
+    await new Promise(r => chrome.storage.local.set({ wallpaper_rotate_idx: 0 }, r));
+    await addLocalWallpapers([new File([bytes], 'R1.png', { type: 'image/png' }), new File([bytes], 'R2.png', { type: 'image/png' })]);
+    await new Promise(r => setTimeout(r, 500));
+    const readIdx = () => new Promise(r => chrome.storage.local.get(['wallpaper_rotate_idx'], d => r(d.wallpaper_rotate_idx || 0)));
+    const afterAdd = await readIdx();
+    await applyWallpaper(currentSettings);            // 等价于「改任意设置触发重刷」
+    await new Promise(r => setTimeout(r, 400));
+    const afterRefresh1 = await readIdx();
+    await applyWallpaper(currentSettings);
+    await new Promise(r => setTimeout(r, 400));
+    const afterRefresh2 = await readIdx();
+    await initWallpaper();                            // 等价于「新开一个标签页」
+    await new Promise(r => setTimeout(r, 500));
+    const afterNewTab = await readIdx();
+    return JSON.stringify({ afterAdd, afterRefresh1, afterRefresh2, afterNewTab });
+  })()`));
+  check('BUG-057 重刷壁纸不推进轮播序号', rotState.afterRefresh1 === rotState.afterAdd && rotState.afterRefresh2 === rotState.afterAdd, rotState);
+  check('BUG-057 新标签页推进一次序号', rotState.afterNewTab === (rotState.afterRefresh2 + 1) % 2, rotState);
+
+  // ---- BUG-063：ESC 能关掉「重复卡片检查」弹窗，且不误关设置面板 ----
+  await evalJs(`(async () => {
+    const mk = (id, name, card) => ({ id, name, sortMode: 'manual', cards: [{ id: card, name: card, url: 'https://dup.example.com/', visitCount: 0 }] });
+    groups = [mk('s1','S1','SDUP_A'), mk('s2','S2','SDUP_B')];
+    activeGroupIndex = 0; speeddials = groups[0].cards;
+    await saveGroups(groups); renderSpeeddials(); renderGroupDots();
+    openSettingsPanel();
+    await new Promise(r => setTimeout(r, 400));
+    showDuplicateCheckDialog();
+    await new Promise(r => setTimeout(r, 400));
+    return 'ok';
+  })()`);
+  check('BUG-063 重复检查弹窗已打开', (await evalJs(`!document.getElementById('dialog-duplicate-check').classList.contains('hidden')`)) === true);
+  await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await sleep(400);
+  check('BUG-063 ESC 关掉了重复检查弹窗', (await evalJs(`document.getElementById('dialog-duplicate-check').classList.contains('hidden')`)) === true);
+  check('BUG-063 ESC 未误关底下的设置面板', (await evalJs(`!document.getElementById('settings-panel').classList.contains('hidden')`)) === true);
+  await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await sleep(400);
+  check('BUG-063 再按一次 ESC 才关设置面板', (await evalJs(`document.getElementById('settings-panel').classList.contains('hidden')`)) === true);
+
+  // ---- BUG-071：设置面板内打开子弹窗后，ESC 只关子弹窗 ----
+  await evalJs(`(async () => { openSettingsPanel(); await new Promise(r => setTimeout(r, 300)); openGroupManager(); await new Promise(r => setTimeout(r, 300)); return 'ok'; })()`);
+  check('BUG-071 分组管理器已打开且面板仍在', (await evalJs(`!document.getElementById('dialog-group-manager').classList.contains('hidden') && !document.getElementById('settings-panel').classList.contains('hidden')`)) === true);
+  await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await sleep(400);
+  check('BUG-071 ESC 只关掉分组管理器', (await evalJs(`document.getElementById('dialog-group-manager').classList.contains('hidden')`)) === true);
+  check('BUG-071 设置面板仍然打开（守卫不再失效）', (await evalJs(`!document.getElementById('settings-panel').classList.contains('hidden')`)) === true);
+  await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await sleep(400);
+  check('BUG-071 再按一次 ESC 才关设置面板', (await evalJs(`document.getElementById('settings-panel').classList.contains('hidden')`)) === true);
+  // 收尾：清掉测试壁纸与轮播设置
+  await evalJs(`(async () => {
+    currentSettings.localWallpapers = [];
+    currentSettings.wallpaperRotate = 'off';
+    currentSettings.wallpaperMode = 'bing';
+    await saveSettings(currentSettings);
+    await flushSyncWrites();
+    return 'ok';
+  })()`);
+  await sleep(600);
+
+  console.log('\n[29] 页面无 JS 报错');
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);
