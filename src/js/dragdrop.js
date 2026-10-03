@@ -17,6 +17,7 @@ function cleanupDrag() {
   if (dragClone && dragClone.parentNode) dragClone.parentNode.removeChild(dragClone);
   if (dragCard) { dragCard.classList.remove('dragging'); dragCard = null; }
   dragClone = null;
+  dragOrigIndex = -1;   // BUG-070: 复位索引，避免残留负值参与后续重排计算
   domMain.grid.querySelectorAll('.drag-over').forEach(function (el) { el.classList.remove('drag-over'); });
 }
 
@@ -49,7 +50,14 @@ function onMouseDown(e) {
   for (var si = 0; si < speeddials.length; si++) {
     if (speeddials[si].id === cardId) { dragOrigIndex = si; break; }
   }
-  if (dragOrigIndex < 0) return;
+  if (dragOrigIndex < 0) {
+    // BUG-070: 这里必须一并清掉 dragCard —— 否则 document 级 mousemove 仍会建克隆、
+    // mouseup 带着 dragOrigIndex=-1 一路走到 doReorder(-1, to)，而 splice(-1,1) 取的是
+    // 数组**最后一个**元素：被拖的卡片纹丝不动，当前分组的最后一张却被静默搬走并落盘。
+    dragCard = null;
+    dragOrigIndex = -1;
+    return;
+  }
   dragStartX = e.clientX;
   dragStartY = e.clientY;
   // BUG-007: 预计算所有卡片中心坐标，mousemove 期间避免 DOM 查询
@@ -96,7 +104,14 @@ document.addEventListener('mouseup', function (e) {
   document.removeEventListener('wheel', blockWheelDuringDrag);
   if (_dragCleanup) { _dragCleanup(); _dragCleanup = null; }
   if (!dragCard) return;
-  if (!dragClone) { dragCard = null; return; }
+  if (!dragClone) { dragCard = null; dragOrigIndex = -1; return; }
+  // BUG-070 纵深防御：任何负索引都不允许进入重排计算（splice(-1) 会取走最后一张卡片）
+  if (dragOrigIndex < 0 || dragOrigIndex >= speeddials.length) {
+    dragCard.classList.remove('dragging');
+    dragCard = null;
+    dragOrigIndex = -1;
+    return;
+  }
 
   // 标记拖拽过，阻止后续 click 误触发打开卡片
   window._justDragged = Date.now();
@@ -190,6 +205,12 @@ function highlightDropTarget(e) {
 }
 
 async function doReorder(from, to) {
+  // BUG-070: 边界兜底 —— 任何越界索引直接拒绝，避免 splice(-1) 这类「取最后一个元素」的静默错排。
+  // 注意 to 允许等于 length（= 插到末尾，mouseup 分支刻意保留了这个取值），所以是 > 不是 >=。
+  if (!Array.isArray(speeddials)) return;
+  if (from < 0 || from >= speeddials.length) return;
+  if (to < 0 || to > speeddials.length) return;
+  if (from === to) return;
   var moved = speeddials.splice(from, 1)[0];
   speeddials.splice(to, 0, moved);
   await saveSpeeddials(speeddials);

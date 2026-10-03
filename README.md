@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Manifest-V3-blue?logo=googlechrome" alt="Manifest V3">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/Version-1.5.10-brightgreen" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.5.11-brightgreen" alt="Version">
   <img src="https://img.shields.io/badge/PRs-Welcome-orange" alt="PRs Welcome">
 </p>
 
@@ -182,7 +182,7 @@ DeepPage/
 │   ├── e2e-exit-code.test.js       # E2E 退出码语义反向对照（30 项）
 │   ├── lib/console-error-filter.js # 两个 E2E 共用的来源精确过滤器
 │   ├── lib/webdav-test-server.js   # 零依赖最小 WebDAV 测试服务器（真实 HTTP 联调用）
-│   ├── e2e-p0.test.js              # headless Chromium + CDP 端到端（286 项）
+│   ├── e2e-p0.test.js              # headless Chromium + CDP 端到端（303 项，支持 DP_EXT_DIR 探针）
 │   ├── e2e-sw-protocol.test.js     # Service Worker 消息协议（7 项）
 │   └── e2e-webdav.test.js          # 真实 WebDAV 服务器联调：备份/恢复/目录穿越（51 项）
 ├── tools/

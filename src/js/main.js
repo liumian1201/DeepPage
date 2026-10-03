@@ -943,11 +943,15 @@ var _batchCaptureActive = false;
 async function startBatchCapture() {
   if (_batchCaptureActive) { showToast('批量截图正在进行中', 'warning'); return; }
   // 扫描当前分组无封面的卡片
-  var cards = speeddials || [];
+  // BUG-062: 固定住「开始截图时的分组与卡片数组」—— 截图每张间隔 2 秒，期间用户按 Alt+↑/↓
+  // 切组会改写全局 speeddials（switchGroup 直接换引用），若结果按全局查找/按下标回写，
+  // 剩余截图会被静默丢弃、甚至写进别的分组。下面一律只认这两个快照。
+  var batchCards = speeddials || [];
+  var startGroupIndex = activeGroupIndex;
   var targets = [];
-  for (var i = 0; i < cards.length; i++) {
-    if (!cards[i].image && cards[i].url && /^https?:\/\//i.test(cards[i].url)) {
-      targets.push({ id: cards[i].id, name: cards[i].name, url: cards[i].url, index: i });
+  for (var i = 0; i < batchCards.length; i++) {
+    if (!batchCards[i].image && batchCards[i].url && /^https?:\/\//i.test(batchCards[i].url)) {
+      targets.push({ id: batchCards[i].id, name: batchCards[i].name, url: batchCards[i].url, index: i });
     }
   }
   if (targets.length === 0) {
@@ -990,6 +994,7 @@ async function startBatchCapture() {
 
   var okCount = 0;
   var failCount = 0;
+  var skipCount = 0;
 
   for (var ti = 0; ti < targets.length; ti++) {
     if (!_batchCaptureActive) break;
@@ -1007,10 +1012,16 @@ async function startBatchCapture() {
       });
       if (resp.ok && resp.dataUrl) {
         // 保存截图到卡片
-        var card = speeddials.find(function (c) { return c.id === t.id; });
+        // BUG-062: 查 batchCards（开始时的分组），不查可能已被切组换掉的全局 speeddials
+        var card = null;
+        for (var bi = 0; bi < batchCards.length; bi++) {
+          if (batchCards[bi].id === t.id) { card = batchCards[bi]; break; }
+        }
         if (card) {
           card.image = resp.dataUrl;
           okCount++;
+        } else {
+          skipCount++;   // 卡片在截图期间被删除：明确计数，不再静默丢弃
         }
       } else {
         failCount++;
@@ -1026,18 +1037,25 @@ async function startBatchCapture() {
   }
 
   // 保存并刷新
-  if (groups[activeGroupIndex]) {
-    groups[activeGroupIndex].cards = speeddials;
-  }
+  // BUG-062: 不再写 `groups[activeGroupIndex].cards = speeddials`（切组后那会指向别的分组）——
+  // 截图结果已经就地写进 batchCards，而它就是开始时分组的那个数组。
   await saveGroups(groups);
-  renderSpeeddials();
+  var switched = activeGroupIndex !== startGroupIndex;
+  if (switched) {
+    if (typeof renderGroupDots === 'function') renderGroupDots();
+  } else {
+    renderSpeeddials();
+  }
 
   // 关闭弹窗
   progDlg.classList.add('hidden');
   _batchCaptureActive = false;
   if (progCancel) progCancel.textContent = '取消';
 
-  showToast('📸 批量截图完成：' + okCount + ' 成功，' + failCount + ' 失败', failCount > 0 ? 'warning' : 'success');
+  var summary = '📸 批量截图完成：' + okCount + ' 成功，' + failCount + ' 失败';
+  if (skipCount > 0) summary += '，' + skipCount + ' 张卡片已被删除';
+  if (switched) summary += '（结果已写回原分组）';
+  showToast(summary, failCount > 0 ? 'warning' : 'success');
 }
 
 /* ==================== 启动 ==================== */

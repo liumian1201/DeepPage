@@ -11,6 +11,7 @@
    历史坑: 退出码 2 曾同时承担「环境跳过」与「全局 catch 兜底」，而 CI 把 2 一律映射为成功，
            于是页面/SW 真坏掉、测试崩溃、浏览器没装上全都静默变绿；现在崩溃一律 1，跳过只用 3。
    自检: DP_E2E_SELFTEST=crash 会在建连前抛错，供 tests/e2e-exit-code.test.js 验证「崩溃 → 1」
+   探针: DP_EXT_DIR=<目录> 可指向另一份扩展源码 —— 「修复前 / 后对比」就是拿它跑同一套断言
 */
 const { spawn } = require('child_process');
 const crypto = require('crypto');
@@ -21,7 +22,7 @@ const { createConsoleErrorCollector } = require('./lib/console-error-filter');
 /** 环境不满足的专用退出码：CI 只对这一个码放行（并打 warning），其余非 0 一律红 */
 const EXIT_ENV_SKIP = 3;
 
-const SRC = path.resolve(__dirname, '../src');
+const SRC = process.env.DP_EXT_DIR ? path.resolve(process.env.DP_EXT_DIR) : path.resolve(__dirname, '../src');
 const CHROME = process.env.CHROME_BIN || '/usr/bin/chromium';
 // 随机端口 + 每次独立 profile：避免与残留浏览器实例、并行测试撞车
 const PORT = 9300 + Math.floor(Math.random() * 500);
@@ -1602,7 +1603,176 @@ function send(method, params, sessionId) {
   })()`);
   await sleep(600);
 
-  console.log('\n[29] 页面无 JS 报错');
+  console.log('\n[29] v1.5.11 竞态与体验：BUG-062 / 047 / 070 / 069');
+
+  // ---- BUG-069：12 小时制必须带午别（13:45 与 01:45 原先逐字节相同）----
+  const clockAt = (h) => evalJs(`(() => {
+    var RealDate = Date;
+    try {
+      window.Date = class extends RealDate {
+        constructor() { if (arguments.length) { super(...arguments); } else { super(2026, 0, 1, ${h}, 45, 0); } }
+        static now() { return new RealDate(2026, 0, 1, ${h}, 45, 0).getTime(); }
+      };
+      currentSettings.clockFormat = '12h';
+      updateClock();
+      var p = document.querySelector('.clock-period');
+      return JSON.stringify({
+        period: p ? p.textContent : null,
+        visible: p ? getComputedStyle(p).display !== 'none' : false,
+        time: document.querySelector('.clock-time').textContent
+      });
+    } finally { window.Date = RealDate; }
+  })()`);
+  const clock13 = JSON.parse(await clockAt(13));
+  const clock01 = JSON.parse(await clockAt(1));
+  check('BUG-069 13:45 → 「下午 01:45」', clock13.period === '下午' && clock13.time === '01:45' && clock13.visible, clock13);
+  check('BUG-069 01:45 → 「上午 01:45」（与 13:45 不再无法区分）', clock01.period === '上午' && clock01.time === '01:45' && clock01.visible, clock01);
+  const clock24 = JSON.parse(await evalJs(`(() => {
+    currentSettings.clockFormat = '24h'; updateClock();
+    var p = document.querySelector('.clock-period');
+    return JSON.stringify({ period: p ? p.textContent : null, visible: p ? getComputedStyle(p).display !== 'none' : false });
+  })()`));
+  check('BUG-069 24 小时制不显示午别', clock24.period === '' && !clock24.visible, clock24);
+
+  // ---- BUG-047：分组圆点的 Enter/Space 激活 ----
+  await evalJs(`(async () => {
+    var mk = function (id, name) { return { id: id, name: name, url: 'https://' + id + '.example.com/', visitCount: 0, image: '' }; };
+    groups = [
+      { id: 'gk1', name: '甲组', sortMode: 'manual', cards: [mk('k1', 'K1')] },
+      { id: 'gk2', name: '乙组', sortMode: 'manual', cards: [mk('k2', 'K2')] },
+      { id: 'gk3', name: '丙组', sortMode: 'manual', cards: [mk('k3', 'K3')] }
+    ];
+    activeGroupIndex = 0; speeddials = groups[0].cards;
+    await saveGroups(groups); renderSpeeddials(); renderGroupDots();
+    return 'ok';
+  })()`);
+  await sleep(400);
+  const dotMeta = JSON.parse(await evalJs(`JSON.stringify((() => {
+    var dots = document.querySelectorAll('#group-dots .group-dot, #group-dots .group-tab');
+    return { n: dots.length, role: dots.length > 1 ? dots[1].getAttribute('role') : null, tabindex: dots.length > 1 ? dots[1].getAttribute('tabindex') : null };
+  })())`));
+  check('BUG-047 圆点具备 button 语义且可聚焦（复现前提）', dotMeta.n === 3 && dotMeta.role === 'button' && dotMeta.tabindex === '0', dotMeta);
+  await evalJs(`(() => { var d = document.querySelectorAll('#group-dots .group-dot, #group-dots .group-tab')[1]; d.focus(); d.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return 'ok'; })()`);
+  await sleep(500);
+  check('BUG-047 Enter 激活圆点 → 切到第 2 组', (await evalJs('activeGroupIndex')) === 1, await evalJs('activeGroupIndex'));
+  await evalJs(`(() => { var d = document.querySelectorAll('#group-dots .group-dot, #group-dots .group-tab')[2]; d.focus(); d.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true })); return 'ok'; })()`);
+  await sleep(500);
+  check('BUG-047 Space 激活圆点 → 切到第 3 组', (await evalJs('activeGroupIndex')) === 2, await evalJs('activeGroupIndex'));
+  const idxBeforeOther = await evalJs('activeGroupIndex');
+  await evalJs(`(() => { var d = document.querySelectorAll('#group-dots .group-dot, #group-dots .group-tab')[0]; d.focus(); d.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true })); return 'ok'; })()`);
+  await sleep(300);
+  check('BUG-047 其它按键不切组（不是「任意键都激活」）', (await evalJs('activeGroupIndex')) === idxBeforeOther, { before: idxBeforeOther, after: await evalJs('activeGroupIndex') });
+
+  // ---- BUG-070：拖拽早退必须复位 dragCard；负索引不得进入重排 ----
+  const dragProbe = JSON.parse(await evalJs(`(async () => {
+    var mk = function (id) { return { id: id, name: id, url: 'https://' + id + '.example.com/', visitCount: 0, image: '' }; };
+    isLocked = false;
+    groups = [{ id: 'gd', name: '拖拽组', sortMode: 'manual', cards: [mk('d1'), mk('d2'), mk('d3')] }];
+    activeGroupIndex = 0; speeddials = groups[0].cards;
+    await saveGroups(groups); renderSpeeddials(); renderGroupDots();
+    await new Promise(function (r) { setTimeout(r, 300); });
+    var container = (typeof _activeGroupContainer === 'function' ? _activeGroupContainer() : null) || document.getElementById('speeddial-grid');
+    var wrappers = container.querySelectorAll('.card-wrapper:not(.card-wrapper-add)');
+    var center = function (el) { var r = el.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; };
+    var drag = function (fromEl, toEl) {
+      var a = center(fromEl), b = center(toEl);
+      fromEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: a.x, clientY: a.y }));
+      // 关键采样点：mousedown 之后立刻看 dragCard 有没有被复位（等 mouseup 之后再看就晚了）
+      var down = { engaged: !!dragCard, origIndex: dragOrigIndex };
+      document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: b.x, clientY: b.y }));
+      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: b.x, clientY: b.y }));
+      return down;
+    };
+    var orderBefore = speeddials.map(function (c) { return c.id; }).join(',');
+
+    // 正对照：真实卡片拖到末尾必须真的换位（证明拖拽监听确实挂着，下面不是空断言）
+    var realDown = drag(wrappers[0].querySelector('.speeddial-card'), wrappers[2].querySelector('.speeddial-card'));
+    await new Promise(function (r) { setTimeout(r, 400); });
+    var orderAfterReal = speeddials.map(function (c) { return c.id; }).join(',');
+
+    // 复位顺序，再做幽灵卡片（DOM 里有、speeddials 里没有）
+    groups[0].cards = [mk('d1'), mk('d2'), mk('d3')];
+    speeddials = groups[0].cards;
+    await saveGroups(groups); renderSpeeddials();
+    await new Promise(function (r) { setTimeout(r, 300); });
+    container = (typeof _activeGroupContainer === 'function' ? _activeGroupContainer() : null) || document.getElementById('speeddial-grid');
+    wrappers = container.querySelectorAll('.card-wrapper:not(.card-wrapper-add)');
+    var ghost = wrappers[0].cloneNode(true);
+    ghost.dataset.id = 'ghost-x';
+    container.appendChild(ghost);
+    var ghostOrderBefore = speeddials.map(function (c) { return c.id; }).join(',');
+    var ghostDown = drag(ghost.querySelector('.speeddial-card'), wrappers[1].querySelector('.speeddial-card'));
+    await new Promise(function (r) { setTimeout(r, 400); });
+    var ghostOrderAfter = speeddials.map(function (c) { return c.id; }).join(',');
+    if (ghost.parentNode) ghost.parentNode.removeChild(ghost);
+    cleanupDrag();
+    return JSON.stringify({
+      realDown: realDown, orderBefore: orderBefore, orderAfterReal: orderAfterReal,
+      ghostDown: ghostDown, ghostOrderBefore: ghostOrderBefore, ghostOrderAfter: ghostOrderAfter
+    });
+  })()`));
+  check('BUG-070 正对照：真实卡片拖拽确实换位（拖拽链路是活的）', dragProbe.realDown.engaged === true && dragProbe.orderAfterReal !== dragProbe.orderBefore, dragProbe);
+  check('BUG-070 幽灵卡片按下后 dragCard 立即复位（不再进入拖拽链路）', dragProbe.ghostDown.engaged === false && dragProbe.ghostDown.origIndex === -1, dragProbe.ghostDown);
+  check('BUG-070 幽灵卡片拖拽后顺序不变（修复前会搬走最后一张）', dragProbe.ghostOrderAfter === dragProbe.ghostOrderBefore, dragProbe);
+  const reorderGuard = JSON.parse(await evalJs(`(async () => {
+    groups = [{ id: 'gr', name: '边界组', sortMode: 'manual', cards: [
+      { id: 'r1', name: 'R1', url: 'https://r1.example.com/', visitCount: 0, image: '' },
+      { id: 'r2', name: 'R2', url: 'https://r2.example.com/', visitCount: 0, image: '' }
+    ] }];
+    activeGroupIndex = 0; speeddials = groups[0].cards;
+    await saveGroups(groups);
+    var before = speeddials.map(function (c) { return c.id; }).join(',');
+    await doReorder(-1, 0);
+    var afterNeg = speeddials.map(function (c) { return c.id; }).join(',');
+    await doReorder(0, 99);
+    var afterBig = speeddials.map(function (c) { return c.id; }).join(',');
+    await doReorder(0, 1);
+    var afterValid = speeddials.map(function (c) { return c.id; }).join(',');
+    return JSON.stringify({ before: before, afterNeg: afterNeg, afterBig: afterBig, afterValid: afterValid });
+  })()`));
+  check('BUG-070 doReorder 拒绝负索引（splice(-1) 取最后一张的路径被堵死）', reorderGuard.afterNeg === reorderGuard.before, reorderGuard);
+  check('BUG-070 doReorder 拒绝越界索引', reorderGuard.afterBig === reorderGuard.before, reorderGuard);
+  check('BUG-070 合法重排仍然生效（不是把功能一起关掉）', reorderGuard.afterValid === 'r2,r1', reorderGuard);
+
+  // ---- BUG-062：批量截图期间切组，结果必须写回原分组 ----
+  await evalJs(`(async () => {
+    var mk = function (id) { return { id: id, name: id, url: 'https://' + id + '.example.com/', visitCount: 0, image: '' }; };
+    groups = [
+      { id: 'gb1', name: '截图组', sortMode: 'manual', cards: [mk('s1'), mk('s2'), mk('s3')] },
+      { id: 'gb2', name: '别的组', sortMode: 'manual', cards: [mk('s4')] }
+    ];
+    activeGroupIndex = 0; speeddials = groups[0].cards;
+    await saveGroups(groups); renderSpeeddials(); renderGroupDots();
+    // 桩掉 SW 消息：真的去截图既慢又要网络
+    window.__origSendMessage = chrome.runtime.sendMessage;
+    chrome.runtime.sendMessage = function (msg, cb) {
+      if (msg && msg.type === 'batch-capture-one') {
+        setTimeout(function () { cb({ ok: true, dataUrl: 'data:image/png;base64,iVBORw0KGgo=' }); }, 5);
+        return;
+      }
+      return window.__origSendMessage.apply(this, arguments);
+    };
+    return 'ok';
+  })()`);
+  await evalJs(`window.__batchPromise = startBatchCapture(); 'started'`);
+  await sleep(300);
+  await evalJs(`switchGroup(1)`);          // 截图进行中切到「别的组」
+  await sleep(500);
+  const batchMid = JSON.parse(await evalJs(`JSON.stringify({ active: activeGroupIndex, bImages: groups[1].cards.map(function (c) { return !!c.image; }) })`));
+  check('BUG-062 截图期间确实切到了另一个分组（复现前提）', batchMid.active === 1, batchMid);
+  await evalJs(`window.__batchPromise`);
+  await sleep(300);
+  const batchRes = JSON.parse(await evalJs(`JSON.stringify({
+    aImages: groups[0].cards.map(function (c) { return !!c.image; }),
+    bImages: groups[1].cards.map(function (c) { return !!c.image; }),
+    active: activeGroupIndex
+  })`));
+  check('BUG-062 切组后剩余截图仍写回原分组（不再静默丢弃）', batchRes.aImages.every(Boolean), batchRes);
+  check('BUG-062 当前分组的卡片没有被误写', batchRes.bImages.every(function (v) { return !v; }), batchRes);
+  check('BUG-062 当前分组未被强行切回', batchRes.active === 1, batchRes);
+  await evalJs(`chrome.runtime.sendMessage = window.__origSendMessage; delete window.__origSendMessage; 'restored'`);
+
+  console.log('\n[30] 页面无 JS 报错');
   consoleLog.report();
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 

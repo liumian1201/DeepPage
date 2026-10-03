@@ -1223,6 +1223,16 @@ body.dash-editing .btn-dash-done { display: block; }
   color: var(--text-primary);
 }
 
+/* BUG-069: 12 小时制的午别（上午/下午）；24 小时制下由 JS 置 display:none */
+.clock-period {
+  font-size: 0.9rem;
+  font-weight: 400;
+  color: var(--text-secondary);
+  margin-right: 6px;
+  align-self: center;
+  white-space: nowrap;
+}
+
 .clock-seconds {
   font-size: 2rem;
   font-weight: 300;

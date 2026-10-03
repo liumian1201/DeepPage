@@ -15,15 +15,17 @@
 
 ## 探针：让同一套断言跑在旧代码上（修复前 / 后对比）
 
-`e2e-webdav.test.js` 支持用环境变量指定另一份扩展源码，用来证明「缺陷真的存在、修复真的生效」：
+`e2e-p0.test.js` 与 `e2e-webdav.test.js` 都支持用环境变量指定另一份扩展源码，用来证明「缺陷真的存在、修复真的生效」：
 
 ```bash
 # 1) 取一份修复前的扩展源码
 mkdir -p /tmp/dp-old-ext && git archive HEAD src | tar -x -C /tmp/dp-old-ext
 # 2) 同一套断言跑在旧代码上 → 应当在对应断言上失败（v1.5.10 实测：22 项失败）
 CHROME_BIN=/usr/bin/chromium DP_EXT_DIR=/tmp/dp-old-ext/src node tests/e2e-webdav.test.js
+CHROME_BIN=/usr/bin/chromium DP_EXT_DIR=/tmp/dp-old-ext/src node tests/e2e-p0.test.js
 # 3) 跑在当前代码上 → 全绿
 CHROME_BIN=/usr/bin/chromium node tests/e2e-webdav.test.js
+CHROME_BIN=/usr/bin/chromium node tests/e2e-p0.test.js
 ```
 
 E2E 内部按「段」包裹：某一段异常中断只记一次失败，不会吞掉后面几段的结论（旧代码常常缺函数/缺字段，

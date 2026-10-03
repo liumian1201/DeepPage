@@ -57,9 +57,18 @@ function renderGroupDots() {
   domMain.groupDots.innerHTML = html;
 
   domMain.groupDots.querySelectorAll('.group-tab, .group-dot').forEach(function (dot) {
-    dot.addEventListener('click', function () {
-      var idx = parseInt(this.dataset.group, 10);
+    var activate = function () {
+      var idx = parseInt(dot.dataset.group, 10);
       if (idx !== activeGroupIndex) switchGroup(idx);
+    };
+    dot.addEventListener('click', activate);
+    // BUG-047: a11y.js 给圆点加了 role=button + tabindex=0，但 div 不会像 <button> 那样
+    // 把 Enter/Space 合成为 click —— 只有 click 监听时键盘用户根本切不了分组。
+    dot.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+        e.preventDefault();   // 防止 Space 把页面往下滚
+        activate();
+      }
     });
     dot.addEventListener('contextmenu', function (e) {
       e.preventDefault();

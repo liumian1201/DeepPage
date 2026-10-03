@@ -6,14 +6,21 @@ function updateClock() {
   var clockEl = document.querySelector('.clock-time');
   var secondsEl = document.querySelector('.clock-seconds');
   var dateEl = document.querySelector('.clock-date');
+  var periodEl = document.querySelector('.clock-period');
   var now = new Date();
 
   var fmt = (currentSettings && currentSettings.clockFormat === '12h') ? 12 : 24;
-  var h = fmt === 12 ? (now.getHours() % 12 || 12) : now.getHours();
+  var is12 = fmt === 12;
+  var h = is12 ? (now.getHours() % 12 || 12) : now.getHours();
   var hh = String(h).padStart(2, '0');
   var mm = String(now.getMinutes()).padStart(2, '0');
   var ss = String(now.getSeconds()).padStart(2, '0');
   if (clockEl) clockEl.textContent = hh + ':' + mm;
+  // BUG-069：12 小时制必须带午别 —— 否则 13:45 显示成 01:45，与凌晨 01:45 逐字节相同（差 12 小时的歧义）
+  if (periodEl) {
+    periodEl.textContent = is12 ? (now.getHours() < 12 ? '上午' : '下午') : '';
+    periodEl.style.display = is12 ? '' : 'none';
+  }
   if (secondsEl) {
     secondsEl.style.display = (currentSettings && currentSettings.clockShowSeconds === false) ? 'none' : '';
     secondsEl.textContent = ':' + ss;
