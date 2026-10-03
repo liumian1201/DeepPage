@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Manifest-V3-blue?logo=googlechrome" alt="Manifest V3">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/Version-1.5.8-brightgreen" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.5.9-brightgreen" alt="Version">
   <img src="https://img.shields.io/badge/PRs-Welcome-orange" alt="PRs Welcome">
 </p>
 
@@ -177,9 +177,12 @@ DeepPage/
 │   └── assets/
 │       └── icons/          # icon-16/48/128.png
 ├── tests/                  ← 零依赖验证脚本（不随扩展发布）
-│   ├── dashboard-logic.test.js  # 看板布局模型桩测（29 项）
-│   ├── e2e-p0.test.js           # headless Chromium + CDP 端到端（283 项）
-│   └── e2e-sw-protocol.test.js  # Service Worker 消息协议（6 项）
+│   ├── dashboard-logic.test.js     # 看板布局模型桩测（29 项）
+│   ├── console-error-filter.test.js # console.error 过滤规则双向断言（22 项）
+│   ├── e2e-exit-code.test.js       # E2E 退出码语义反向对照（20 项）
+│   ├── lib/console-error-filter.js # 两个 E2E 共用的来源精确过滤器
+│   ├── e2e-p0.test.js              # headless Chromium + CDP 端到端（286 项）
+│   └── e2e-sw-protocol.test.js     # Service Worker 消息协议（7 项）
 ├── tools/
 │   ├── bump-version.mjs    ← 版本号单一来源同步（manifest 为准）
 │   └── fvd-to-deeppage.html  ← FVD Speed Dial 迁移工具

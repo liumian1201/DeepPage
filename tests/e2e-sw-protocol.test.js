@@ -3,13 +3,22 @@
    headless Chromium + CDP（Node 内置 WebSocket），无第三方依赖
    运行: node tests/e2e-sw-protocol.test.js   （或 npm run test:e2e）
    前置: CHROME_BIN 指向 Chromium 构建，默认 /usr/bin/chromium
-   注意: Chrome 137+ 的官方 branded 构建已移除 --load-extension，必须用 Chromium / Chrome for Testing；
-        环境不支持时脚本以退出码 2 跳过（CI 据此区分「环境不满足」与「断言失败」）
+   注意: Chrome 137+ 的官方 branded 构建已移除 --load-extension，必须用 Chromium / Chrome for Testing
+   退出码（BUG-041 / AUD-001 修正）:
+     0 = 全部断言通过 ｜ 1 = 断言失败或测试崩溃（CI 必须红）｜ 3 = 环境不满足（显式跳过）
+   历史坑: 退出码 2 曾同时用于「环境跳过」与「全局 catch 兜底」，CI 一律映射为成功；
+           本文件最典型的假绿路径是 SW 无响应 → evalJs 返回 undefined → r1.includes 抛 TypeError
+           → 全局 catch → 2 → 判绿。现在崩溃一律 1，且 eval 结果先做类型断言。
+   自检: DP_E2E_SELFTEST=crash 会在建连前抛错，供 tests/e2e-exit-code.test.js 验证「崩溃 → 1」
 */
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { createConsoleErrorCollector } = require('./lib/console-error-filter');
+
+/** 环境不满足的专用退出码：CI 只对这一个码放行（并打 warning），其余非 0 一律红 */
+const EXIT_ENV_SKIP = 3;
 
 const SRC = path.resolve(__dirname, '../src');
 const CHROME = process.env.CHROME_BIN || '/usr/bin/chromium';
@@ -19,7 +28,7 @@ const PROFILE = `/tmp/dp-e2e-profile-${process.pid}`;
 
 if (!fs.existsSync(CHROME)) {
   console.error(`⚠️ 未找到 Chromium（${CHROME}）—— 设置 CHROME_BIN 环境变量后重试，跳过本次 E2E`);
-  process.exit(2);
+  process.exit(EXIT_ENV_SKIP);
 }
 
 function extensionId(dir) {
@@ -67,7 +76,9 @@ async function waitBrowserWs() {
 
 let ws, msgId = 0;
 const pending = new Map();
-const consoleErrors = [];
+// BUG-073：来源精确过滤（原实现在本文件里连断言都没有，是彻底的死门）
+const consoleLog = createConsoleErrorCollector();
+const consoleErrors = consoleLog.failures;
 
 function send(method, params, sessionId) {
   const id = ++msgId;
@@ -78,6 +89,8 @@ function send(method, params, sessionId) {
 }
 
 (async () => {
+  // BUG-041 自检钩子：验证「未捕获异常 → 退出码 1」这条语义（见 tests/e2e-exit-code.test.js）
+  if (process.env.DP_E2E_SELFTEST === 'crash') throw new Error('DP_E2E_SELFTEST=crash（自检注入的崩溃）');
   const browserWs = await waitBrowserWs();
   ws = new WebSocket(browserWs);
   await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
@@ -91,14 +104,11 @@ function send(method, params, sessionId) {
     }
     if (msg.method === 'Runtime.consoleAPICalled' && msg.params.type === 'error') {
       const text = msg.params.args.map(a => a.value || a.description).join(' ');
-      // CI runner 可能访问不到外部服务（天气/壁纸），这类网络失败不是代码回归；
-      // 真正的 JS 异常仍由下面的 exceptionThrown 捕获并一律判失败
-      if (!/Open-Meteo|OpenWeatherMap|和风|Bing 壁纸|天气|net::ERR|Failed to fetch|NetworkError/i.test(text)) {
-        consoleErrors.push(text);
-      }
+      // BUG-073：过滤规则收窄为「来源精确 + 网络失败」两条同时成立（见 tests/lib/console-error-filter.js）
+      consoleLog.add(text);
     }
     if (msg.method === 'Runtime.exceptionThrown') {
-      consoleErrors.push('EXCEPTION: ' + (msg.params.exceptionDetails.exception?.description || msg.params.exceptionDetails.text));
+      consoleLog.addException(msg.params.exceptionDetails.exception?.description || msg.params.exceptionDetails.text);
     }
   };
 
@@ -152,7 +162,7 @@ function send(method, params, sessionId) {
     console.error('   该浏览器很可能已禁用 --load-extension（Chrome 137+ 的已知变化），跳过 E2E');
     ws.close();
     killBrowser();
-    process.exit(2);
+    process.exit(EXIT_ENV_SKIP);
   }
   const sid = page.sid;
 
@@ -178,7 +188,7 @@ function send(method, params, sessionId) {
     console.error('⚠️ 页面 init 未在 20s 内就绪（CI 机器较慢或扩展初始化异常），跳过 E2E');
     ws.close();
     killBrowser();
-    process.exit(2);
+    process.exit(EXIT_ENV_SKIP);
   }
 
   const evalJs = async (expr) => {
@@ -195,26 +205,38 @@ function send(method, params, sessionId) {
 
   console.log('\n[P0-4] 页面 → SW 消息协议白名单');
   const msg = (payload) => `new Promise(r=>chrome.runtime.sendMessage(${JSON.stringify(payload)},resp=>r(JSON.stringify(resp))))`;
-  const r1 = await evalJs(msg({ type: 'image-fetch', url: 'file:///etc/passwd' }));
+  // BUG-041：eval 结果先做类型断言 —— SW 无响应时 evalJs 返回 undefined，
+  // 直接 .includes() 会抛 TypeError 落进全局 catch，看不出是哪条协议断言失败
+  const NOT_A_STRING = '«SW 无响应或返回非字符串»';
+  const evalJsStr = async (expr) => {
+    const v = await evalJs(expr);
+    return typeof v === 'string' ? v : `${NOT_A_STRING}: ${JSON.stringify(v)}`;
+  };
+  const r1 = await evalJsStr(msg({ type: 'image-fetch', url: 'file:///etc/passwd' }));
   check('image-fetch file:// 被拒', r1.includes('unsupported protocol'), r1);
-  const r2 = await evalJs(msg({ type: 'image-fetch', url: 'chrome://settings' }));
+  const r2 = await evalJsStr(msg({ type: 'image-fetch', url: 'chrome://settings' }));
   check('image-fetch chrome:// 被拒', r2.includes('unsupported protocol'), r2);
-  const r3 = await evalJs(msg({ type: 'weather-fetch', url: 'javascript:alert(1)' }));
+  const r3 = await evalJsStr(msg({ type: 'weather-fetch', url: 'javascript:alert(1)' }));
   check('weather-fetch javascript: 被拒', r3.includes('unsupported protocol'), r3);
-  const r4 = await evalJs(msg({ type: 'image-fetch', url: 'data:text/html,<h1>x</h1>' }));
+  const r4 = await evalJsStr(msg({ type: 'image-fetch', url: 'data:text/html,<h1>x</h1>' }));
   check('image-fetch data: 被拒', r4.includes('unsupported protocol'), r4);
-  const r5 = await evalJs(msg({ type: 'webdav:test', payload: { _url: 'file:///tmp/dav', _user: 'u', _pass: btoa('p') } }));
+  const r5 = await evalJsStr(msg({ type: 'webdav:test', payload: { _url: 'file:///tmp/dav', _user: 'u', _pass: btoa('p') } }));
   check('WebDAV file:// 被拒', r5.includes('http/https'), r5);
   // 合法 https 不应命中协议白名单（允许进入真实 fetch，结果可能是网络失败）
-  const r6 = await evalJs(msg({ type: 'image-fetch', url: 'https://example.com/' }));
-  check('image-fetch https 未被协议拦截', !r6.includes('unsupported protocol'), r6.slice(0, 120));
+  const r6 = await evalJsStr(msg({ type: 'image-fetch', url: 'https://example.com/' }));
+  check('image-fetch https 未被协议拦截', !r6.startsWith(NOT_A_STRING) && !r6.includes('unsupported protocol'), r6.slice(0, 120));
+
+  // BUG-073：本文件原先收集了 console error 却从不检查（死门），现在与 e2e-p0 用同一套来源精确过滤
+  consoleLog.report();
+  check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);
   ws.close();
   killBrowser();
   process.exit(fail ? 1 : 0);
 })().catch(async (e) => {
-  console.error('❌ 测试异常:', e.message);
+  // BUG-041：崩溃必须让 CI 变红，绝不能再伪装成「环境不满足」被跳过
+  console.error('❌ 测试崩溃（非环境问题，CI 必须红）:', e && e.stack || e);
   killBrowser();
-  process.exit(2);
+  process.exit(1);
 });

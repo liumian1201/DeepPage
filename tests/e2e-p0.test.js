@@ -3,13 +3,23 @@
    headless Chromium + CDP（Node 内置 WebSocket），无第三方依赖
    运行: node tests/e2e-p0.test.js   （或 npm run test:e2e）
    前置: CHROME_BIN 指向 Chromium 构建，默认 /usr/bin/chromium
-   注意: Chrome 137+ 的官方 branded 构建已移除 --load-extension，必须用 Chromium / Chrome for Testing；
-        环境不支持时脚本以退出码 2 跳过（CI 据此区分「环境不满足」与「断言失败」）
+   注意: Chrome 137+ 的官方 branded 构建已移除 --load-extension，必须用 Chromium / Chrome for Testing
+   退出码（BUG-041 / AUD-001 修正）:
+     0 = 全部断言通过
+     1 = 断言失败 **或测试自身崩溃**（CI 必须红）
+     3 = 环境不满足（显式跳过：找不到浏览器 / 扩展加载不了 / init 超时）
+   历史坑: 退出码 2 曾同时承担「环境跳过」与「全局 catch 兜底」，而 CI 把 2 一律映射为成功，
+           于是页面/SW 真坏掉、测试崩溃、浏览器没装上全都静默变绿；现在崩溃一律 1，跳过只用 3。
+   自检: DP_E2E_SELFTEST=crash 会在建连前抛错，供 tests/e2e-exit-code.test.js 验证「崩溃 → 1」
 */
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { createConsoleErrorCollector } = require('./lib/console-error-filter');
+
+/** 环境不满足的专用退出码：CI 只对这一个码放行（并打 warning），其余非 0 一律红 */
+const EXIT_ENV_SKIP = 3;
 
 const SRC = path.resolve(__dirname, '../src');
 const CHROME = process.env.CHROME_BIN || '/usr/bin/chromium';
@@ -19,7 +29,7 @@ const PROFILE = `/tmp/dp-e2e-profile-${process.pid}`;
 
 if (!fs.existsSync(CHROME)) {
   console.error(`⚠️ 未找到 Chromium（${CHROME}）—— 设置 CHROME_BIN 环境变量后重试，跳过本次 E2E`);
-  process.exit(2);
+  process.exit(EXIT_ENV_SKIP);
 }
 
 function extensionId(dir) {
@@ -67,7 +77,9 @@ async function waitBrowserWs() {
 
 let ws, msgId = 0;
 const pending = new Map();
-const consoleErrors = [];
+// BUG-073：只有「已知外部服务的网络失败」被忽略（且单独计数打印），其余一律计入失败
+const consoleLog = createConsoleErrorCollector();
+const consoleErrors = consoleLog.failures;
 
 function send(method, params, sessionId) {
   const id = ++msgId;
@@ -78,6 +90,8 @@ function send(method, params, sessionId) {
 }
 
 (async () => {
+  // BUG-041 自检钩子：验证「未捕获异常 → 退出码 1」这条语义（见 tests/e2e-exit-code.test.js）
+  if (process.env.DP_E2E_SELFTEST === 'crash') throw new Error('DP_E2E_SELFTEST=crash（自检注入的崩溃）');
   const browserWs = await waitBrowserWs();
   ws = new WebSocket(browserWs);
   await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
@@ -91,14 +105,11 @@ function send(method, params, sessionId) {
     }
     if (msg.method === 'Runtime.consoleAPICalled' && msg.params.type === 'error') {
       const text = msg.params.args.map(a => a.value || a.description).join(' ');
-      // CI runner 可能访问不到外部服务（天气/壁纸），这类网络失败不是代码回归；
-      // 真正的 JS 异常仍由下面的 exceptionThrown 捕获并一律判失败
-      if (!/Open-Meteo|OpenWeatherMap|和风|Bing 壁纸|天气|net::ERR|Failed to fetch|NetworkError/i.test(text)) {
-        consoleErrors.push(text);
-      }
+      // BUG-073：过滤规则收窄为「来源精确 + 网络失败」两条同时成立（见 tests/lib/console-error-filter.js）
+      consoleLog.add(text);
     }
     if (msg.method === 'Runtime.exceptionThrown') {
-      consoleErrors.push('EXCEPTION: ' + (msg.params.exceptionDetails.exception?.description || msg.params.exceptionDetails.text));
+      consoleLog.addException(msg.params.exceptionDetails.exception?.description || msg.params.exceptionDetails.text);
     }
   };
 
@@ -156,7 +167,7 @@ function send(method, params, sessionId) {
     console.error('   该浏览器很可能已禁用 --load-extension（Chrome 137+ 的已知变化），跳过 E2E');
     ws.close();
     killBrowser();
-    process.exit(2);
+    process.exit(EXIT_ENV_SKIP);
   }
   const sid = page.sid;
 
@@ -182,7 +193,7 @@ function send(method, params, sessionId) {
     console.error('⚠️ 页面 init 未在 20s 内就绪（CI 机器较慢或扩展初始化异常），跳过 E2E');
     ws.close();
     killBrowser();
-    process.exit(2);
+    process.exit(EXIT_ENV_SKIP);
   }
 
   const evalJs = async (expr) => {
@@ -979,9 +990,18 @@ function send(method, params, sessionId) {
   await evalJs('closeSettingsPanel()');
   await sleep(300);
 
-  // 自测过滤规则：外部服务网络错误应被忽略（CI 上真实出现过），真实 JS 异常仍会被捕获
+  // 自测过滤规则（BUG-073 双向对照）：外部服务网络失败应被忽略，代码回归必须被计入。
+  // 只注入「应被忽略」的样本是原实现的老毛病 —— 过滤规则被放宽到吞掉一切时，自测照样通过。
+  // 第二条特意带上 Open-Meteo 前缀（旧关键词黑名单会连它一起吞掉）但错误类型是代码 bug，必须计入。
   await evalJs('console.error("Open-Meteo error: fetch failed（测试注入，应被忽略）")');
-  await sleep(200);
+  await evalJs('console.error("Open-Meteo error: TypeError: boom（测试注入，必须计入）")');
+  await sleep(300);
+  check('过滤规则：外部服务网络失败被忽略（不计入失败门）', consoleLog.ignored.some(t => t.includes('应被忽略')), consoleLog.ignored.slice(0, 3));
+  check('过滤规则：普通 console.error 仍被计入', consoleErrors.some(t => t.includes('必须计入')), consoleErrors.slice(0, 3));
+  { // 清掉自检注入的「必须计入」样本，避免污染 [29] 的全局报错门
+    const i = consoleErrors.findIndex(t => t.includes('必须计入'));
+    if (i >= 0) consoleErrors.splice(i, 1);
+  }
 
   console.log('\n[20] 版式回归（看板不强制换行 / 信息条不压搜索栏与卡片）');
   await evalJs('closeSettingsPanel()');
@@ -1046,7 +1066,9 @@ function send(method, params, sessionId) {
   // 刷新后宽度必须保持（用户复现：刷新后剩余看板回到初始宽度）
   await send('Page.navigate', { url: `chrome-extension://${EXT_ID}/index.html` }, sid);
   await sleep(1600);
-  await waitForReady();
+  // BUG-041：原先这里丢弃了 waitForReady() 的返回值 —— 页面没就绪时后续 evalJs 拿到 undefined，
+  // JSON.parse(undefined) 抛 SyntaxError 被全局 catch 吞成「环境跳过」→ 断言实际没跑却判绿。
+  check('刷新后页面重新就绪（后续断言才有意义）', (await waitForReady()) === true);
   const afterReload = JSON.parse(await evalJs(`JSON.stringify({
     spans: Object.fromEntries(DASHBOARD_WIDGETS.map(w => [w.id, getDashboardLayout()[w.id].span])),
     domN: Object.fromEntries([...document.querySelectorAll('#dashboard-grid .dashboard-item')].map(e => [e.dataset.widget, e.style.getPropertyValue('--dash-n')])),
@@ -1581,6 +1603,7 @@ function send(method, params, sessionId) {
   await sleep(600);
 
   console.log('\n[29] 页面无 JS 报错');
+  consoleLog.report();
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);
@@ -1588,7 +1611,8 @@ function send(method, params, sessionId) {
   killBrowser();
   process.exit(fail ? 1 : 0);
 })().catch(async (e) => {
-  console.error('❌ 测试异常:', e.message);
+  // BUG-041：崩溃必须让 CI 变红，绝不能再伪装成「环境不满足」被跳过
+  console.error('❌ 测试崩溃（非环境问题，CI 必须红）:', e && e.stack || e);
   killBrowser();
-  process.exit(2);
+  process.exit(1);
 });

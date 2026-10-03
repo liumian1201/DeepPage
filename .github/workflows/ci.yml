@@ -45,25 +45,26 @@ jobs:
 
       - name: 准备 Chromium（E2E 用）
         if: steps.cache-chromium.outputs.cache-hit != 'true'
-        continue-on-error: true
         run: npx --yes @puppeteer/browsers install chromium@latest --path .cache/chromium
 
       - name: 真实浏览器 E2E
         run: |
           BIN=$(find .cache/chromium -type f -name chrome 2>/dev/null | head -1)
           if [ -z "$BIN" ]; then
-            echo "⚠️ 未能准备 Chromium，跳过 E2E（本地可用 npm run test:e2e 验证）"
-            exit 0
+            # BUG-041：原先这里是「打印一行跳过 + exit 0」—— Chromium 没装上时 217 条 E2E 一条没跑，job 仍然绿
+            echo "::error::未能准备 Chromium —— E2E 完全未执行，按失败处理（本地可用 npm run test:e2e 验证）"
+            exit 1
           fi
           echo "使用浏览器: $BIN"
           "$BIN" --version
-          # 退出码约定：2 = 环境不满足（跳过），1 = 断言失败（必须红），0 = 通过
+          # 退出码约定（BUG-041 修正）：0 = 通过；1 = 断言失败或测试崩溃（必须红）；3 = 显式环境不满足（跳过）
+          # 只有 3 允许放行，且必须打出 warning 注解 —— 崩溃不再是 2，不会再被误当作「环境缺失」
           set +e
           CHROME_BIN="$BIN" npm run test:e2e
           code=$?
           set -e
-          if [ "$code" -eq 2 ]; then
-            echo "⚠️ E2E 环境不满足（退出码 2），跳过"
+          if [ "$code" -eq 3 ]; then
+            echo "::warning::E2E 环境不满足（退出码 3），本次跳过；请确认日志中的原因是环境问题而非崩溃"
             exit 0
           fi
           exit "$code"
