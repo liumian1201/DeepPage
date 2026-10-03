@@ -9,7 +9,25 @@
 | `e2e-exit-code.test.js` | **BUG-041 反向对照**：退出码语义（环境不满足 → 3 / 测试崩溃 → 1 且不得打印「跳过」） | 仅 Node（`spawnSync`） | `npm test` |
 | `e2e-p0.test.js` | 真实浏览器：ESC 退出编辑态 / 锁定禁用编辑 / 箭头换位 + 落盘 / 页面无报错 | Node + Chromium 构建 | `npm run test:e2e` |
 | `e2e-sw-protocol.test.js` | 真实 SW 链路：`image-fetch` / `weather-fetch` / WebDAV 非法协议被拒，https 不被误伤 | Node + Chromium 构建 | `npm run test:e2e` |
+| `e2e-webdav.test.js` | **真实 WebDAV 服务器**联调：目录穿越 / 恶意 manifest 注入 / 导入白名单 / 分组导出图片 / 上传失败与孤儿 GC / 中文密码 | Node + Chromium 构建 | `npm run test:e2e` |
 | `lib/console-error-filter.js` | 两个 E2E 共用的 console.error 来源精确过滤器（被上面两个测试直接断言） | 仅 Node | — |
+| `lib/webdav-test-server.js` | 零依赖最小 WebDAV 服务器（请求日志 + PUT 故障注入），供 `e2e-webdav.test.js` 使用 | 仅 Node | — |
+
+## 探针：让同一套断言跑在旧代码上（修复前 / 后对比）
+
+`e2e-webdav.test.js` 支持用环境变量指定另一份扩展源码，用来证明「缺陷真的存在、修复真的生效」：
+
+```bash
+# 1) 取一份修复前的扩展源码
+mkdir -p /tmp/dp-old-ext && git archive HEAD src | tar -x -C /tmp/dp-old-ext
+# 2) 同一套断言跑在旧代码上 → 应当在对应断言上失败（v1.5.10 实测：22 项失败）
+CHROME_BIN=/usr/bin/chromium DP_EXT_DIR=/tmp/dp-old-ext/src node tests/e2e-webdav.test.js
+# 3) 跑在当前代码上 → 全绿
+CHROME_BIN=/usr/bin/chromium node tests/e2e-webdav.test.js
+```
+
+E2E 内部按「段」包裹：某一段异常中断只记一次失败，不会吞掉后面几段的结论（旧代码常常缺函数/缺字段，
+逐段隔离才能一次跑出完整对照表）。
 
 ## 浏览器要求（重要）
 

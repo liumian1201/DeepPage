@@ -41,6 +41,30 @@ async function ensurePermissionForUrl(url) {
    所有网络请求通过 background.js SW 代理，彻底免疫 CORS
    ============================================================ */
 
+/** BUG-054：UTF-8 安全的 base64 编解码（btoa/atob 只接受码点 ≤ 0xFF，中文/emoji 密码会抛异常）
+ *  ⚠️ 页面与 SW 是两个独立上下文，background.js 有同名的一份实现，改动请同步。
+ *  兼容旧数据：原先存的 ASCII 密码是同一字节序列，解码结果不变。 */
+function b64EncodeUtf8(str) {
+  var bytes = new TextEncoder().encode(String(str == null ? '' : str));
+  var bin = '';
+  for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+function b64DecodeUtf8(b64) {
+  var bin = atob(String(b64 == null ? '' : b64));
+  var bytes = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+/** BUG-042：远端文件名校验（与 background.js 的 sanitizeRemoteName 同一规则，含 128 字符上限）
+ *  页面侧提前拦截，给出可读错误；真正的强制点在 SW（远端数据不可信，只有 SW 那道闸算数）。 */
+function isSafeRemoteName(name) {
+  var n = String(name == null ? '' : name);
+  if (!/^[A-Za-z0-9._-]{1,128}$/.test(n)) return false;
+  return n.charAt(0) !== '.';
+}
+
 var WEBDAV_MSG = {
   PUT: 'webdav:put',
   GET: 'webdav:get',

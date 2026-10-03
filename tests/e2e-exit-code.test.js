@@ -12,7 +12,7 @@ const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const SCRIPTS = ['e2e-p0.test.js', 'e2e-sw-protocol.test.js'];
+const SCRIPTS = ['e2e-p0.test.js', 'e2e-sw-protocol.test.js', 'e2e-webdav.test.js'];
 const NO_BROWSER = path.join(__dirname, '__no_such_browser_for_selftest__');
 
 let pass = 0, fail = 0;

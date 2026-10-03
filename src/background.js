@@ -133,6 +133,53 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
 var WEBDAV_BACKUP_FILE = 'DeepPage_Backup.zip';
 
+/** BUG-054 纵深防御：UTF-8 安全的 base64 编解码
+ *  btoa/atob 只接受码点 ≤ 0xFF 的字符串，含中文/emoji 的密码会抛 InvalidCharacterError。
+ *  ⚠️ SW 与页面是两个独立上下文，页面侧（webdav.js）有同名的一份实现，改动请同步。 */
+function b64EncodeUtf8(str) {
+  var bytes = new TextEncoder().encode(String(str == null ? '' : str));
+  var bin = '';
+  for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+function b64DecodeUtf8(b64) {
+  var bin = atob(String(b64 == null ? '' : b64));
+  var bytes = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+/** BUG-042 / AUD-003：远端可控文件名净化（CWE-22 目录穿越）
+ *
+ *  config/ 与 img/ 子路径的文件名有两个来源是**服务端可控**的：
+ *    · manifest.json 的 configs[].name（GET/DELETE 配置快照）
+ *    · PROPFIND 列表项 name（GC 删除图片、删除旧配置）
+ *  原先直接拼进 URL：baseUrl + '/config/' + '../../Documents/tax.pdf'，经 WHATWG URL 归一化后
+ *  会越出备份目录，对同源**任意路径**发 GET/DELETE（用用户自己的 WebDAV 凭据）。
+ *  这里集中收口，只放行「单层普通文件名」：
+ *    · 仅 [A-Za-z0-9._-]，长度 1~128
+ *    · 不得以 '.' 开头（一并挡住 '.'、'..'、'.hidden'）
+ *    · 因此 '/'、'\'、'?'、'#'、'%'、控制字符与任何多段路径全部被拒
+ *  合法名全部通过：_genConfigName() 的 20261003_120000.json（20 字符）、图片 md5（64 字符）、
+ *  **旧格式的 <md5>.bin（68 字符 —— 上限必须容得下它，否则 GC 会静默删不掉历史图片文件）**、manifest.json。
+ *  zip 分支（GET/PUT/DELETE）本就用 encodeURIComponent，不受影响。 */
+function sanitizeRemoteName(name) {
+  var n = String(name == null ? '' : name);
+  if (!/^[A-Za-z0-9._-]{1,128}$/.test(n)) return null;
+  if (n.charAt(0) === '.') return null;
+  return n;
+}
+
+/** BUG-042 纵深防御：断言最终 URL 归一化后仍落在 baseUrl 目录之内（净化之外的第二道闸） */
+function isWithinBase(baseUrl, subUrl) {
+  try {
+    var b = new URL(baseUrl), s = new URL(subUrl);
+    if (b.origin !== s.origin) return false;
+    var bp = b.pathname.replace(/\/+$/, '');
+    return s.pathname === bp || s.pathname.indexOf(bp + '/') === 0;
+  } catch (e) { return false; }
+}
+
 async function webdavProxy(method, payload) {
   payload = payload || {};
   // 支持直接传凭据（测试连接等场景），回退到 storage.local
@@ -149,7 +196,13 @@ async function webdavProxy(method, payload) {
     return { ok: false, error: 'WebDAV 地址必须是 http/https' };
   }
   var baseUrl = url.replace(/\/$/, '');
-  var auth = 'Basic ' + btoa(user + ':' + atob(pass));
+  // BUG-054：凭据按 UTF-8 解码后再 base64（原先 atob(pass) 只支持 Latin-1，中文密码变乱码）
+  var auth;
+  try {
+    auth = 'Basic ' + b64EncodeUtf8(user + ':' + b64DecodeUtf8(pass));
+  } catch (e) {
+    return { ok: false, error: 'WebDAV 凭据解码失败，请在设置中重新保存密码' };
+  }
   var headers = { Authorization: auth };
 
   // v1.2.6: PROPFIND 列表（列出所有 .zip 备份文件）
@@ -233,15 +286,31 @@ async function webdavProxy(method, payload) {
   }
 
   // v1.2.8: 增量备份子路径操作
+  // BUG-042：文件名先净化再拼路径（子路径名可能来自远端 manifest / PROPFIND 列表）
   var subPath = '';
   if (method === 'MANIFEST_GET' || method === 'MANIFEST_PUT') subPath = 'manifest.json';
   else if (method === 'CONFIG_LIST') subPath = 'config/';
   else if (method === 'IMG_LIST') subPath = 'img/';
-  else if (method.startsWith('CONFIG_')) subPath = 'config/' + (payload._filename || 'latest.json');
-  else if (method.startsWith('IMG_') && method !== 'IMG_LIST') subPath = 'img/' + (payload._filename || 'unknown.bin');
+  else if (method.startsWith('CONFIG_')) {
+    var rawCfg = payload._filename;
+    var cfgName = (rawCfg === undefined || rawCfg === null || rawCfg === '')
+      ? 'latest.json' : sanitizeRemoteName(rawCfg);
+    if (!cfgName) return { ok: false, error: '非法文件名（仅允许字母数字._-，且不得以点开头）' };
+    subPath = 'config/' + cfgName;
+  } else if (method.startsWith('IMG_') && method !== 'IMG_LIST') {
+    var rawImg = payload._filename;
+    var imgName = (rawImg === undefined || rawImg === null || rawImg === '')
+      ? 'unknown.bin' : sanitizeRemoteName(rawImg);
+    if (!imgName) return { ok: false, error: '非法文件名（仅允许字母数字._-，且不得以点开头）' };
+    subPath = 'img/' + imgName;
+  }
 
   if (subPath) {
     var subUrl = baseUrl + '/' + subPath;
+    // 纵深防御：净化之后仍断言最终路径没越出备份目录
+    if (!isWithinBase(baseUrl, subUrl)) {
+      return { ok: false, error: '非法路径（越出备份目录）' };
+    }
     if (method === 'MANIFEST_GET' || method === 'CONFIG_GET' || method === 'IMG_GET') {
       var res = await fetch(subUrl, { method: 'GET', headers: headers });
       if (res.status === 404) return { ok: true, data: null };

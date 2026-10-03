@@ -1,13 +1,13 @@
 {
   "name": "deeppage",
-  "version": "1.5.9",
+  "version": "1.5.10",
   "private": true,
   "description": "DeepPage — Chrome 新标签页扩展（开发工具链，不随扩展发布）",
   "scripts": {
     "lint": "eslint src/js src/background.js tools tests",
     "lint:fix": "eslint --fix src/js src/background.js tools tests",
     "test": "node tests/dashboard-logic.test.js && node tests/console-error-filter.test.js && node tests/e2e-exit-code.test.js",
-    "test:e2e": "node tests/e2e-p0.test.js && node tests/e2e-sw-protocol.test.js",
+    "test:e2e": "node tests/e2e-p0.test.js && node tests/e2e-sw-protocol.test.js && node tests/e2e-webdav.test.js",
     "verify": "npm run lint && npm test",
     "bump": "node tools/bump-version.mjs"
   },

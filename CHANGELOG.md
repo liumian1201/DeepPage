@@ -1,5 +1,84 @@
 # DeepPage 更新日志
 
+## v1.5.10 (2026-10-03) — 安全与备份：7 条「信任边界」缺陷修复（含真实 WebDAV 服务器联调）
+
+> 本版是 v1.5.5 全量代码审计的**安全 3 条 + 备份与云端 4 条**：BUG-042 / 043 / 050 / 040 / 061 / 044 / 054。
+> 它们的共同前提是「云端 manifest / 备份文件不可信」，因此本次专门补上了审计报告里被列为
+> **未覆盖边界**的那一环 —— `tests/e2e-webdav.test.js` 会在测试进程内起一个**真实 WebDAV 服务器**，
+> 不只断言「扩展发了什么请求」，还能断言「服务端最终留下了什么」。
+> 修复前 / 后对照：同一套 51 项断言，**旧代码 22 项失败 → 新代码 0 项失败**。
+
+### 🔒 BUG-042 WebDAV 文件名未净化：可越出备份目录对同源任意路径发 GET/DELETE（目录穿越）
+- **根因**：`config/`、`img/` 子路径的文件名有两个**服务端可控**来源（manifest 的 `configs[].name`、
+  PROPFIND 列表项），却直接拼进 URL：`baseUrl + '/config/' + '../../x'` 经 URL 归一化后越出备份目录，
+  而 `CONFIG_DELETE` / `IMG_DELETE` 会真的发 DELETE。用户点「🗑️」删除某行时，删掉的可能是服务器上与本扩展无关的文件。
+- **实测（修复前）**：测试服务器记录到 `DELETE /pwned.txt` —— 备份目录**之外**的哨兵文件被真删掉，
+  且 `'..'` 这个文件名会把**备份目录本身**删掉；8 个恶意文件名全部返回「删除成功」。
+- **修复**：SW 侧集中收口 `sanitizeRemoteName()`（仅 `[A-Za-z0-9._-]`、长度 ≤128、不得以 `.` 开头）
+  + 纵深防御 `isWithinBase()`（净化后仍断言最终 URL 未越出 baseUrl）；页面侧 `isSafeRemoteName()` 提前拦截。
+- ⚠️ 上限为什么是 128 而不是 64：图片 md5 是 64 字符，**旧格式的 `<md5>.bin` 是 68 字符** ——
+  写成 64 会让孤儿 GC 静默删不掉历史图片文件（这个回归是本次 E2E 抓出来的）。
+
+### 🔒 BUG-043 导入 / 云端恢复把 settings 原样写入 storage：一份备份即可劫持搜索与外链
+- **根因**：全仓唯一的 URL 校验在搜索引擎 UI 里，导入路径完全绕过；`config.settings` 整体写盘，
+  随后被直接消费（`wallpaperUrl` → 每个新标签页发一次请求、`weatherApiUrl` + `weatherApiKey` → key 被送到攻击者地址）。
+- **修复**：新增 `normalizeImportedSettings()`，**ZIP 导入与 WebDAV 恢复共用**：
+  ① 以 `DEFAULT_SETTINGS` 键集合做交集白名单（未知键丢弃，天然挡住 `__proto__` 原型污染）；
+  ② 逐键类型/范围/枚举校验（枚举表与 `index.html` 的下拉选项一一对应）；
+  ③ URL 类字段强制 https（`wallpaperUrl` / `weatherApiUrl`），`searchEngines[].url` 复用 UI 同款 `https + {q}` 规则；
+  ④ 数组做元素级校验与数量上限；⑤ 导出时写入 `schemaVersion` 供将来迁移。
+- ⚠️ 白名单必须包含 **`dashboardWidgetLayout` / `dashboardOrder`** 这两个「表单管不到」的键
+  （它们不在 `DEFAULT_SETTINGS` 里，只按表单字段做白名单会把用户的看板布局吃掉 —— 即 v1.5.2/v1.5.5 同族事故）。
+  E2E 专门有断言守住这一点。
+
+### 🔒 BUG-050 云端 manifest 字段未转义直接拼进 innerHTML
+- **根因**：版本列表的 config 分支（`backup.js`）对 `c.name` / `c.cardCount` 零转义，
+  而同一函数的旧 ZIP 分支和 `settings-webdav.js` 都手工转义过 —— 属漏改。CSP 挡住内联脚本，
+  但允许内联样式与外链图片：可整页覆盖做钓鱼；`c.name` 里的引号还会截断 `value=""` / `data-name=""`。
+- **实测（修复前）**：恶意 manifest 渲染出 **3 个注入元素**（`<img>` + `<b>`）。
+- **修复**：三处手工拼 HTML 合并为 `_renderVersionListHTML()`，用新的 `_escapeAttr()`
+  （注意：`main.js` 的 `escapeHtml()` 走 `div.innerHTML`，**不转义引号**，不能用于属性值）
+  + 接上 BUG-042 的文件名白名单：非法名那一行**不可选、不可删**，只留一行 `⚠️ 已忽略`。
+
+### 🐛 BUG-040 图片上传失败被吞掉，但 manifest / 快照仍记录该 md5 → 云端永久缺图
+- **根因**：上传循环 `catch` 只 `console.warn`，随后**无条件**把每张本地图片写进 `manifest.images` 与
+  `configSnapshot.imageRefs`；下一轮备份按 manifest 里的 md5 判定「已在云端」而跳过重传 → 不可自愈。
+- **修复**：维护 `failedMd5s`，manifest 与 `imageRefs` 都跳过失败项；存在失败项时返回 `false`
+  （交给重试队列），并提示「N 张图片上传失败，下次备份会自动重试」。
+- **实测**：修复前「上传失败仍返回 true 且 manifest 记录了它」→ 修复后返回 `false`、manifest 无记录，
+  服务恢复后重跑**真的补传成功**（而不是永久跳过）。
+
+### 🐛 BUG-061 孤儿 GC 的结果在上传之后才赋值 → 永不落云端，manifest 只增不减
+- **根因**：`webdavPutManifest()` 在清理**之前**执行，之后算出的 `cleanedImages` 只改了内存，函数结束前没有第二次上传。
+- **修复**：阶段 5 重排为「先算收缩后的 manifest（并剔除已淘汰 config 的 `refs`）→ 上传 → 再删文件」。
+  顺序刻意选「先传清单再删文件」：中途失败只会留下多余文件（无害），不会出现「清单引用了已删文件」。
+
+### 🐛 BUG-044 单分组导出把 `idx:` 前缀的键直接传给 IndexedDB → 导出的分组**从来**不含本地图片
+- **根因**：全项目约定 IndexedDB 键不带前缀（写入 `saveImage(key)` 后置 `image='idx:'+key`，读取一律先剥前缀），
+  只有 `_buildGroupExport` 没剥 → `store.get()` 必然 miss → `if (blob)` 静默跳过。
+- **实测**：修复前导出的 `images` 是空对象 `[]`，导入方图片全丢且两侧都提示成功。
+- **修复**：`loadImage(String(img).replace('idx:', ''))`，与 `cards.js` 保持一致。
+
+### 🐛 BUG-054 含中文/emoji 的 WebDAV 密码：保存静默失败，界面毫无反馈
+- **根因**：`btoa(webdavPassEl.value)` 在 `chrome.storage.local.set` 的**实参求值阶段**抛
+  `InvalidCharacterError`，异常直接冒泡出 click 监听器：不落库、无 toast、无状态提示；
+  读取侧 `atob` 无 try/catch 还会中断 `initWebdavSection` 的加载回调。
+- **实测**：修复前 E2E 捕获到 `InvalidCharacterError: Failed to execute 'btoa'`，
+  密码框回填出乱码 `å¯ç 123`，状态区为空字符串。
+- **修复**：新增 UTF-8 安全的 `b64EncodeUtf8` / `b64DecodeUtf8`（页面与 SW 各一份，SW 侧用于构造 Basic 凭据）；
+  保存分支补 try/catch + `chrome.runtime.lastError` 检查并显示失败原因；读取分支容错降级为空串。
+
+### 🧪 新增真实 WebDAV 联调套件（`tests/e2e-webdav.test.js`，51 项）
+- `tests/lib/webdav-test-server.js`：零依赖最小 WebDAV 服务器（OPTIONS/PROPFIND/MKCOL/PUT/GET/DELETE），
+  支持请求日志与**故障注入**（指定 PUT 返回 507），根目录含「备份目录之外的哨兵文件」用于验证目录穿越。
+- 断言覆盖：目录穿越（8 个恶意名 + 哨兵文件存活 + 服务端零越界 DELETE）、恶意 manifest 渲染（无注入元素 / 非法行禁用）、
+  导入白名单（纯函数 + **真实 `_importConfig` 路径**）、分组导出图片往返（IndexedDB → dataURL → 重新落库）、
+  上传失败不记 manifest 且能补传、GC 结果落回云端 + 陈旧文件被删 + `refs` 收缩、UTF-8 凭据端到端 + 中文密码保存/回填。
+- 探针支持：`DP_EXT_DIR=<目录>` 可让整套断言跑在另一份扩展源码上，用于「修复前 / 后对比」。
+
+**验证**：E2E **343 项**（286 + 7 + 51）｜ 逻辑桩测 **29 项** ｜ 工程反向对照 **52 项** ｜ ESLint 0 error
+**修复前 / 后对照**（同一套断言，`DP_EXT_DIR` 指向 `git HEAD` 的旧源码）：**22 项失败 → 0 项失败**
+
 ## v1.5.9 (2026-10-03) — CI 可信度：E2E 门禁不再把「崩溃」当「环境缺失」
 
 > 本版是 v1.5.5 全量代码审计里**最该先修的两条工程缺陷**：BUG-041（AUD-001）与 BUG-073（AUD-036）。

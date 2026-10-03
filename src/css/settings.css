@@ -527,6 +527,25 @@
   background: rgba(220, 38, 38, 0.12);
 }
 
+/* BUG-050：云端返回非法文件名的行 —— 不可选、不可删，只留一行可见的警告 */
+.webdav-version-invalid {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.webdav-version-invalid:hover {
+  background: transparent;
+}
+
+.version-invalid-tip {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  padding: 2px 6px;
+}
+
 /* 纯色文字卡片（v1.0.7） */
 .card-pure-text-inner {
   width: 100%;

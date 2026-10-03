@@ -39,7 +39,8 @@ function initWebdavSection() {
         chrome.storage.local.set({
           webdav_url: webdavUrlEl.value.trim(),
           webdav_user: webdavUserEl.value.trim(),
-          webdav_pass: btoa(webdavPassEl.value)
+          // BUG-054：UTF-8 安全编码（原先 btoa 遇中文/emoji 密码抛 InvalidCharacterError）
+          webdav_pass: b64EncodeUtf8(webdavPassEl.value)
         }, r);
       });
       await webdavTestConnection();
@@ -50,12 +51,27 @@ function initWebdavSection() {
   // ---- 保存配置 ----
   var btnSave = document.getElementById('btn-webdav-save');
   if (btnSave) btnSave.addEventListener('click', function () {
+    // BUG-054：整段补 try/catch —— 原先 btoa 在 storage.set 的实参求值阶段抛异常，
+    // 直接冒泡出 click 监听器：不落库、无提示，用户只看到「点了没反应」
+    var passEncoded;
+    try {
+      passEncoded = b64EncodeUtf8(webdavPassEl.value);
+    } catch (e) {
+      _showConfigStatus('❌ 密码编码失败: ' + e.message, false);
+      if (typeof showToast === 'function') showToast('WebDAV 配置未保存: ' + e.message, 'error');
+      return;
+    }
     chrome.storage.local.set({
       webdav_url: webdavUrlEl.value.trim(),
       webdav_user: webdavUserEl.value.trim(),
-      webdav_pass: btoa(webdavPassEl.value),
+      webdav_pass: passEncoded,
       webdav_auto_backup: toggleWebdavAuto ? toggleWebdavAuto.checked : false
     }, function () {
+      if (chrome.runtime.lastError) {
+        _showConfigStatus('❌ 保存失败: ' + chrome.runtime.lastError.message, false);
+        if (typeof showToast === 'function') showToast('WebDAV 配置保存失败', 'error');
+        return;
+      }
       _showConfigStatus('✅ WebDAV 配置已保存', true);
       if (typeof showToast === 'function') showToast('WebDAV 配置已保存', 'success');
     });
@@ -126,15 +142,10 @@ function initWebdavSection() {
       return;
     }
     if (!versionList || !versionPicker) return;
-    var html = '';
-    for (var i = 0; i < backupList.length; i++) {
-      var f = backupList[i];
-      var fn = f.name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-      var timeStr = (f.lastModified || '-').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      var checked = i === 0 ? ' checked' : '';
-      html += '<label class="webdav-version-item"><input type="radio" name="webdav-version" value="' + fn + '"' + checked + '><span class="webdav-version-info"><strong>' + fn + '</strong><br><small>' + timeStr + '</small></span><span class="version-delete" data-name="' + fn + '" data-type="zip" title="删除此备份">🗑️</span></label>';
-    }
-    versionList.innerHTML = html;
+    // BUG-050：统一走 _renderVersionListHTML（转义 + 文件名白名单），不再各处手工拼 HTML
+    versionList.innerHTML = _renderVersionListHTML(backupList.map(function (f) {
+      return { name: f.name, label: f.name, sub: f.lastModified || '-' };
+    }), 'zip');
     versionPicker.classList.remove('hidden');
     _showWStatus('');
   }
@@ -190,7 +201,8 @@ function initWebdavSection() {
   // 恢复最新（快捷按钮，v1.2.8: 增量恢复）
   var btnRestoreLatest = document.getElementById('btn-webdav-restore-latest');
   if (btnRestoreLatest) btnRestoreLatest.addEventListener('click', function () {
-    var first = versionList ? versionList.querySelector('input[name="webdav-version"]') : null;
+    // BUG-050：跳过被白名单拦下的非法行（它们是 disabled 的，不能作为「最新」被选中）
+    var first = versionList ? versionList.querySelector('input[name="webdav-version"]:not(:disabled)') : null;
     if (!first) { _showWStatus('无可用版本', false); return; }
     if (typeof _doIncrementalRestore === 'function') {
       _doIncrementalRestore(first.value);
@@ -216,7 +228,15 @@ function initWebdavSection() {
   chrome.storage.local.get(['webdav_url','webdav_user','webdav_pass','webdav_auto_backup'], function (r) {
     if (webdavUrlEl) webdavUrlEl.value = r.webdav_url || '';
     if (webdavUserEl) webdavUserEl.value = r.webdav_user || '';
-    if (webdavPassEl) webdavPassEl.value = r.webdav_pass ? atob(r.webdav_pass) : '';
+    // BUG-054：损坏/非 base64 的值不能让回调整个中断（否则下面的 _updateBackupModeUI 不再执行）
+    if (webdavPassEl) {
+      try {
+        webdavPassEl.value = r.webdav_pass ? b64DecodeUtf8(r.webdav_pass) : '';
+      } catch (e) {
+        webdavPassEl.value = '';
+        console.warn('[WebDAV] 已保存的密码无法解码，请重新填写:', e.message);
+      }
+    }
     if (typeof _updateBackupModeUI === 'function') _updateBackupModeUI();
   });
 }

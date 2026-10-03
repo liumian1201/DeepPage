@@ -134,7 +134,7 @@ async function exportAll() {
       imageManifest.push({ key: img.key, type: img.blob.type || 'image/png', size: buf.byteLength });
     }
 
-    zipFiles['config.json'] = fflate.strToU8(JSON.stringify(config));
+    zipFiles['config.json'] = fflate.strToU8(JSON.stringify(_withSchemaVersion(config)));
     zipFiles['manifest.json'] = fflate.strToU8(JSON.stringify({
       version: 3, type: 'backup',
       hasConfig: true, imageCount: imageManifest.length, images: imageManifest
@@ -640,6 +640,10 @@ async function _incrementalBackup(data, isSilent) {
 
     // 阶段 3: 上传新图片
     var uploadedCount = 0;
+    // BUG-040：上传失败的图片**绝不能**写进 manifest / imageRefs
+    //  （原先 catch 只 console.warn，随后无条件把每张本地图片都记进 manifest；
+    //    下一轮备份又按 manifest 里的 md5 判定「已在云端」而跳过重传 → 云端永久缺图且不可自愈）
+    var failedMd5s = new Set();
     if (newImages.length > 0) {
       if (!isSilent) _updateProgress(30, 'upload', 'active', '上传图片... (0/' + newImages.length + ')');
       for (var ni = 0; ni < newImages.length; ni++) {
@@ -648,7 +652,8 @@ async function _incrementalBackup(data, isSilent) {
           await webdavPutImage(newImages[ni].md5, newImages[ni].blob);
           uploadedCount++;
         } catch (e) {
-          if (!isSilent) console.warn('图片上传失败:', newImages[ni].key, e.message);
+          failedMd5s.add(newImages[ni].md5);
+          if (!isSilent) console.warn('图片上传失败（不记入清单，下次重试）:', newImages[ni].key, e.message);
         }
         if (!isSilent) {
           var upPct = 30 + Math.round((ni + 1) / newImages.length * 55);
@@ -658,12 +663,13 @@ async function _incrementalBackup(data, isSilent) {
     }
     if (!isSilent) _updateProgress(85, 'upload', 'done', '上传图片... (' + uploadedCount + '/' + newImages.length + ')');
 
-    // 更新 manifest（记录所有图片的 MD5 和 refs）
+    // 更新 manifest（记录所有图片的 MD5 和 refs）—— 跳过上传失败的 md5
     var configName = _genConfigName();
     for (var kj = 0; kj < totalImages; kj++) {
       var img2 = images[kj];
       var md5_2 = hashMap[img2.key];
       if (!md5_2 || md5_2.startsWith('err_')) continue;
+      if (failedMd5s.has(md5_2)) continue;   // BUG-040
       if (!manifestImages[img2.key]) {
         manifestImages[img2.key] = { md5: md5_2, size: img2.blob.size, type: img2.blob.type || 'image/png', refs: [] };
       }
@@ -685,7 +691,7 @@ async function _incrementalBackup(data, isSilent) {
     };
     for (var mk = 0; mk < totalImages; mk++) {
       var k = images[mk].key;
-      if (hashMap[k] && !hashMap[k].startsWith('err_')) {
+      if (hashMap[k] && !hashMap[k].startsWith('err_') && !failedMd5s.has(hashMap[k])) {
         configSnapshot.imageRefs[k] = { md5: hashMap[k], type: images[mk].blob.type || 'image/png' };
       }
     }
@@ -710,36 +716,44 @@ async function _incrementalBackup(data, isSilent) {
     var oldConfigs = configs.slice(5);
     configs = configs.slice(0, 5);
     manifest.configs = configs;
-    manifest.images = manifestImages;
-
-    try { await webdavPutManifest(manifest); } catch (e) {
-      if (!isSilent) { _updateProgress(85, 'config', 'error', '上传清单失败: ' + e.message); _hideProgress(); }
-      return false;
-    }
-    if (!isSilent) _updateProgress(92, 'config', 'done', '配置快照已保存');
+    // 注意：manifest 的上传移到阶段 5 的清理之后（BUG-061），避免「清理结果永不落云端」
 
     // 阶段 5: 孤儿 GC — 清理无引用的图片和过期 config
     if (!isSilent) _updateProgress(92, 'cleanup', 'active', '清理旧文件...');
-    // 收集所有被引用的 MD5
-    var referencedMd5s = new Set();
-    var allImages = manifest.images || {};
-    var imgKeys = Object.keys(allImages);
-    for (var ri = 0; ri < configs.length; ri++) {
-      var cfgName = configs[ri].name;
-      for (var rj = 0; rj < imgKeys.length; rj++) {
-        var refs2 = allImages[imgKeys[rj]].refs || [];
-        if (refs2.indexOf(cfgName) !== -1) {
-          referencedMd5s.add(allImages[imgKeys[rj]].md5);
-        }
-      }
-    }
 
-    // 删除过期 config 文件
+    // 5.1 先在内存里收缩 manifest.images：丢掉无引用的条目，并把已淘汰 config 名从 refs 里剔除
+    //     （refs 不收缩的话，下一轮备份会读到陈旧引用，判定「仍被引用」而永不回收）
+    var allImages = manifestImages;
+    var imgKeys = Object.keys(allImages);
+    var keptNames = configs.map(function (c) { return c.name; });
+    var cleanedImages = {};
+    var referencedMd5s = new Set();
+    for (var ci = 0; ci < imgKeys.length; ci++) {
+      var key = imgKeys[ci];
+      var item = allImages[key] || {};
+      var itemRefs = (item.refs || []).filter(function (r) { return keptNames.indexOf(r) !== -1; });
+      if (!itemRefs.length) continue;
+      cleanedImages[key] = { md5: item.md5, size: item.size, type: item.type, refs: itemRefs };
+      referencedMd5s.add(item.md5);
+    }
+    manifest.images = cleanedImages;
+
+    // 5.2 上传收缩后的 manifest（含本轮新 config）
+    //     BUG-061：原先这一步在清理**之前**执行，之后算出的 cleanedImages 只改了内存、
+    //     没有任何一次上传 → 云端 manifest.json 只增不减（幽灵引用还会让同内容图片不再重传）。
+    //     顺序选择：先上传清单再删文件 —— 中途失败只会留下多余文件（无害），不会出现「清单引用了已删文件」。
+    try { await webdavPutManifest(manifest); } catch (e) {
+      if (!isSilent) { _updateProgress(92, 'config', 'error', '上传清单失败: ' + e.message); _hideProgress(); }
+      return false;
+    }
+    if (!isSilent) _updateProgress(95, 'config', 'done', '配置快照已保存');
+
+    // 5.3 删除过期 config 文件
     for (var oc = 0; oc < oldConfigs.length; oc++) {
       try { await webdavDeleteConfig(oldConfigs[oc].name); } catch (e) {}
     }
 
-    // 列出云端 img 目录，删除无引用的图片
+    // 5.4 列出云端 img 目录，删除无引用的图片
     try {
       var imgFiles = await webdavListImages();
       if (Array.isArray(imgFiles)) {
@@ -752,25 +766,22 @@ async function _incrementalBackup(data, isSilent) {
       }
     } catch (e) { /* GC 失败不影响主流程 */ }
 
-    // 清理 manifest.images 中无引用的条目
-    var cleanedImages = {};
-    for (var ci = 0; ci < imgKeys.length; ci++) {
-      var key = imgKeys[ci];
-      var item = allImages[key];
-      var itemRefs = item.refs || [];
-      var stillReferenced = false;
-      for (var sr = 0; sr < configs.length; sr++) {
-        if (itemRefs.indexOf(configs[sr].name) !== -1) { stillReferenced = true; break; }
-      }
-      if (stillReferenced) cleanedImages[key] = item;
-    }
-    manifest.images = cleanedImages;
-
     if (!isSilent) _updateProgress(100, 'cleanup', 'done', '清理完成');
 
     // 更新备份时间
     setWebdavLastBackupFilename(configName);
     setWebdavLastBackup(new Date().toISOString());
+
+    // BUG-040：有图片没传上去 → 本次备份不算成功，交给重试队列；manifest 里也没有它们的记录，
+    // 所以下一轮会重新尝试上传（而不是像修复前那样永远跳过）。
+    if (failedMd5s.size > 0) {
+      if (!isSilent) {
+        _updateProgress(100, 'cleanup', 'error', failedMd5s.size + ' 张图片上传失败，将在下次备份重试');
+        _hideProgress();
+        if (typeof showToast === 'function') showToast('⚠️ ' + failedMd5s.size + ' 张图片上传失败，已从本次云端清单中排除，下次备份会自动重试', 'warning');
+      }
+      return false;
+    }
 
     if (!isSilent) {
       _updateProgress(100, 'cleanup', 'done', '备份完成！');
@@ -818,6 +829,43 @@ async function webdavIncrementalBackup() {
   }
 }
 
+/** BUG-050：属性/文本安全的 HTML 转义
+ *  注意不能用 main.js 的 escapeHtml()（走 div.innerHTML，只转义 &<> ，**不转义引号**），
+ *  属性值里出现引号会截断 value="" / data-name=""，使「看到的行」与「删掉的文件」不一致。 */
+function _escapeAttr(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/** BUG-050：版本列表渲染（原先三处手工拼 HTML，只有两处做了转义 → 云端 manifest 的 name/cardCount 可注入）
+ *  同时接上 BUG-042 的文件名白名单：非法名的行**不可选、不可删**，只留一行警告，
+ *  这样服务端返回 '"><img src=...>' 这类名字时既注入不了，也不会成为删除目标。
+ *  @param {Array<{name:string,label:string,sub:string}>} items
+ *  @param {'zip'|'config'} type
+ */
+function _renderVersionListHTML(items, type) {
+  var html = '';
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i];
+    var safe = isSafeRemoteName(it.name);
+    var nm = _escapeAttr(it.name);
+    var checked = (i === 0 && safe) ? ' checked' : '';
+    html += '<label class="webdav-version-item' + (safe ? '' : ' webdav-version-invalid') + '">'
+      + '<input type="radio" name="webdav-version" value="' + nm + '"' + checked + (safe ? '' : ' disabled') + '>'
+      + '<span class="webdav-version-info"><strong>' + _escapeAttr(it.label) + '</strong>'
+      + '<br><small>' + _escapeAttr(it.sub) + '</small></span>'
+      + (safe
+        ? '<span class="version-delete" data-name="' + nm + '" data-type="' + type + '" title="删除此备份">🗑️</span>'
+        : '<span class="version-invalid-tip" title="云端返回了非法文件名，已拒绝操作">⚠️ 已忽略</span>')
+      + '</label>';
+  }
+  return html;
+}
+
 /** v1.2.8: 增量恢复入口 */
 async function webdavIncrementalRestore() {
   // 获取 manifest
@@ -840,14 +888,9 @@ async function webdavIncrementalRestore() {
           if (typeof showToast === 'function') showToast('云端暂无备份文件', 'warning');
           return;
         }
-        var html = '';
-        for (var i = 0; i < backupList.length; i++) {
-          var f = backupList[i];
-          var fn = f.name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-          var timeStr = (f.lastModified || '-').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-          var checked = i === 0 ? ' checked' : '';
-          html += '<label class="webdav-version-item"><input type="radio" name="webdav-version" value="' + fn + '"' + checked + '><span class="webdav-version-info"><strong>' + fn + '</strong><br><small>' + timeStr + '</small></span><span class="version-delete" data-name="' + fn + '" data-type="zip" title="删除此备份">🗑️</span></label>';
-        }
+        var html = _renderVersionListHTML(backupList.map(function (f) {
+          return { name: f.name, label: f.name, sub: f.lastModified || '-' };
+        }), 'zip');
         versionList.innerHTML = html;
         versionPicker.classList.remove('hidden');
       }).catch(function () {
@@ -862,14 +905,14 @@ async function webdavIncrementalRestore() {
   var versionPicker = document.getElementById('webdav-version-picker');
   var versionList = document.getElementById('webdav-version-list');
   if (!versionPicker || !versionList) return;
-  var html = '';
-  for (var i = 0; i < configs.length; i++) {
-    var c = configs[i];
-    var checked = i === 0 ? ' checked' : '';
-    var timeStr = c.time ? new Date(c.time).toLocaleString('zh-CN') : '-';
-    html += '<label class="webdav-version-item"><input type="radio" name="webdav-version" value="' + c.name + '"' + checked + '><span class="webdav-version-info"><strong>' + timeStr + '</strong><br><small>' + c.cardCount + ' 张卡片</small></span><span class="version-delete" data-name="' + c.name + '" data-type="config" title="删除此备份">🗑️</span></label>';
-  }
-  versionList.innerHTML = html;
+  // BUG-050：c.name / c.cardCount 来自云端 manifest，必须转义 + 白名单（原先这一支零转义）
+  versionList.innerHTML = _renderVersionListHTML(configs.map(function (c) {
+    return {
+      name: c && c.name,
+      label: (c && c.time) ? new Date(c.time).toLocaleString('zh-CN') : '-',
+      sub: String((c && c.cardCount) != null ? c.cardCount : 0) + ' 张卡片'
+    };
+  }), 'config');
   versionPicker.classList.remove('hidden');
 }
 
@@ -945,10 +988,19 @@ async function _doIncrementalRestore(configName) {
     }
 
     // 3. 写入配置到 storage
+    // BUG-043：云端恢复与 ZIP 导入共用同一套白名单（manifest 同样来自服务端，不可信）
+    var safeSettings = normalizeImportedSettings(config.settings);
+    var rejected = countRejectedSettings(config.settings, safeSettings);
+    if (rejected > 0) {
+      console.warn('[恢复] 已忽略 ' + rejected + ' 项未知/不合法的设置');
+      if (typeof showToast === 'function') {
+        showToast('⚠️ 已忽略 ' + rejected + ' 项未知或不合法的设置（备份可能被篡改）', 'warning');
+      }
+    }
     var syncFailed = false;
     await new Promise(function (resolve) {
       chrome.storage.sync.set({
-        settings: config.settings || {},
+        settings: safeSettings,
         groups: config.groups || [],
         activeGroup: config.activeGroup || 0,
         groups_rev: Date.now()   // BUG-036: 版本号随数据同写
@@ -958,7 +1010,7 @@ async function _doIncrementalRestore(configName) {
       });
     });
     if (syncFailed) {
-      var fSettings = config.settings || {};
+      var fSettings = safeSettings;
       fSettings.storageFallback = 'local';
       await new Promise(function (resolve) {
         chrome.storage.local.set({ groups: config.groups || [], activeGroup: config.activeGroup || 0, groups_rev: Date.now() }, resolve);
@@ -1012,15 +1064,218 @@ async function _importImages(unzipped, manifest) {
   return imported;
 }
 
+/* ==================== BUG-043 / AUD-004：导入设置白名单 ====================
+   导入（ZIP）与云端恢复原先把 config.settings **原样**写进 storage，而全仓唯一的 URL 校验
+   在搜索引擎 UI 里（search-engines.js 的 /^https:\/\/.+\{q\}/i），导入路径完全绕过它。
+   于是一份不可信备份就能：把搜索重定向到攻击者站点、让每个新标签页向任意地址发请求
+   （wallpaperUrl → new Image().src）、把天气 API key 发到攻击者服务器
+   （weatherApiUrl 里的 {key} 会被替换成真实 key）。
+   这里做三件事：① 以 DEFAULT_SETTINGS 的键集合为白名单取交集（未知键一律丢弃，
+   同时天然挡住 __proto__ / constructor 这类原型污染键）；② 逐键类型/范围/枚举校验，
+   不合法就回落默认值；③ URL 类字段强制 https。
+   两条导入路径（ZIP 导入 / WebDAV 云端恢复）共用本函数，避免再次分叉。 */
+
+/** 当前导出格式版本（写入 config.schemaVersion，供将来迁移） */
+var IMPORT_SCHEMA_VERSION = 1;
+
+/** 不在 DEFAULT_SETTINGS 里、但确属合法设置数据的键（表单管不到，由看板模块写入） */
+var IMPORT_EXTRA_KEYS = ['dashboardWidgetLayout', 'dashboardOrder'];
+
+/** 枚举白名单：取值必须来自这里，否则回落默认值（与 index.html 的下拉选项一一对应） */
+var IMPORT_ENUMS = {
+  theme: ['light', 'dark', 'auto'],
+  cardOpenMode: ['current', 'foreground', 'background'],
+  groupPosition: ['left', 'top', 'right', 'bottom'],
+  showGroupName: ['active', 'all', 'off'],
+  dashboardLayout: ['row', 'column'],
+  clockFormat: ['24h', '12h'],
+  lunarStyle: ['double', 'single'],
+  wallpaperMode: ['bing', 'custom', 'none'],
+  wallpaperRotate: ['off', 'newtab', 'interval'],
+  weatherType: ['openmeteo', 'hefeng', 'openweathermap', 'custom'],
+  backupMode: ['off', 'remind', 'webdav'],
+  bingRegion: ['zh-CN', 'en-US', 'ja-JP', 'de-DE', 'en-GB', 'fr-FR']
+};
+
+/** 数值范围：取「比 UI 滑块更宽」的区间 —— 目的是挡住荒谬值（负数/1e9/NaN），
+ *  而不是把老版本留下的合法值强行夹到当前滑块范围（那会变成另一种静默改设置）。 */
+var IMPORT_RANGES = {
+  columns: [1, 12],
+  searchMarginTop: [0, 1000], searchMarginBottom: [0, 1000],
+  groupOffset: [0, 200], groupDotSize: [4, 48], groupTabSize: [8, 48],
+  dashLeft: [0, 2000], dashBottom: [0, 2000], dashItemW: [40, 600], dashItemH: [0, 600], dashGap: [0, 200],
+  cardWidth: [50, 2000], cardHeight: [0, 2000], cardBorderRadius: [0, 200], cardOpacity: [0, 100],
+  cardFontSize: [8, 48], cardsMarginTop: [0, 2000],
+  wallpaperOpacity: [0, 100], wallpaperRotateMin: [1, 1440], bingIdx: [0, 500],
+  bingRefreshMin: [1, 1440], weatherRefreshMin: [1, 1440], backupRemindDays: [1, 365]
+};
+
+/** 只允许 https 的 URL 类字段（http 会把 key/请求暴露给中间人；空串表示未设置） */
+var IMPORT_HTTPS_FIELDS = ['wallpaperUrl', 'weatherApiUrl'];
+
+/** 颜色类字段：只接受 #rgb/#rrggbb/#rrggbbaa 或空串 */
+var IMPORT_COLOR_FIELDS = ['bgColor', 'cardBgColor', 'cardTextColor', 'wallpaperColor'];
+
+/** 元素级校验：搜索引擎（URL 必须 https 且带 {q}，与 UI 的校验规则一致） */
+function _normalizeSearchEngines(list) {
+  if (!Array.isArray(list)) return null;
+  var out = [];
+  for (var i = 0; i < list.length && out.length < 30; i++) {
+    var e = list[i];
+    if (!e || typeof e !== 'object') continue;
+    var id = String(e.id == null ? '' : e.id);
+    var name = String(e.name == null ? '' : e.name);
+    var url = String(e.url == null ? '' : e.url);
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(id)) continue;
+    if (!name || name.length > 60) continue;
+    if (!/^https:\/\/.+\{q\}/i.test(url)) continue;   // 与 search-engines.js 的 UI 校验同规则
+    out.push({ id: id, name: name, url: url, enabled: e.enabled !== false });
+  }
+  return out;
+}
+
+/** 元素级校验：本地壁纸（key 必须是 IndexedDB 键格式 wp_...，name 是显示名） */
+function _normalizeLocalWallpapers(list) {
+  if (!Array.isArray(list)) return null;
+  var out = [];
+  for (var i = 0; i < list.length && out.length < 50; i++) {
+    var w = list[i];
+    if (!w || typeof w !== 'object') continue;
+    var key = String(w.key == null ? '' : w.key);
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(key)) continue;
+    var op = (w.opacity === null || w.opacity === undefined) ? null : Number(w.opacity);
+    if (op !== null && (!isFinite(op) || op < 0 || op > 100)) op = null;
+    out.push({ key: key, name: String(w.name == null ? '' : w.name).slice(0, 120), opacity: op });
+  }
+  return out;
+}
+
+/** 元素级校验：待办（上限与 todo.js 的 TODO_MAX_ITEMS 一致） */
+function _normalizeTodoItems(list) {
+  if (!Array.isArray(list)) return null;
+  var out = [];
+  for (var i = 0; i < list.length && out.length < 50; i++) {
+    var t = list[i];
+    if (!t || typeof t !== 'object') continue;
+    var text = String(t.text == null ? '' : t.text).slice(0, 200);
+    if (!text) continue;
+    out.push({ id: String(t.id == null ? '' : t.id).slice(0, 64) || ('t' + i), text: text, done: t.done === true });
+  }
+  return out;
+}
+
+/** 元素级校验：看板组件布局（只保留已知组件与数值字段；getDashboardLayout 还会再夹一次） */
+function _normalizeDashLayout(obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+  var out = {};
+  for (var i = 0; i < DASHBOARD_WIDGETS.length; i++) {
+    var id = DASHBOARD_WIDGETS[i].id;
+    var e = obj[id];
+    if (!e || typeof e !== 'object') continue;
+    var order = Number(e.order), span = Number(e.span);
+    if (!isFinite(order) || !isFinite(span)) continue;
+    out[id] = { order: Math.max(0, Math.min(99, Math.round(order))), span: Math.max(1, Math.min(DASHBOARD_COLUMNS, Math.round(span))) };
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/** 主函数：把「不可信的 settings 对象」规范化成「只含已知键 + 合法值」的对象 */
+function normalizeImportedSettings(raw) {
+  var src = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+  var out = {};
+  var allowed = Object.keys(DEFAULT_SETTINGS).concat(IMPORT_EXTRA_KEYS);
+
+  for (var i = 0; i < allowed.length; i++) {
+    var key = allowed[i];
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+    if (!Object.prototype.hasOwnProperty.call(src, key)) continue;
+    var val = src[key];
+
+    // ---- 表单管不到的看板字段 ----
+    if (key === 'dashboardWidgetLayout') {
+      var layout = _normalizeDashLayout(val);
+      if (layout) out[key] = layout;
+      continue;
+    }
+    if (key === 'dashboardOrder') {
+      if (Array.isArray(val)) {
+        var order = val.filter(function (id) { return typeof id === 'string' && DASHBOARD_WIDGETS.some(function (w) { return w.id === id; }); });
+        if (order.length) out[key] = order.slice(0, DASHBOARD_WIDGETS.length);
+      }
+      continue;
+    }
+
+    // ---- 数组类字段：元素级校验 ----
+    if (key === 'searchEngines') { var se = _normalizeSearchEngines(val); if (se && se.length) out[key] = se; continue; }
+    if (key === 'localWallpapers') { var lw = _normalizeLocalWallpapers(val); if (lw) out[key] = lw; continue; }
+    if (key === 'todoItems') { var td = _normalizeTodoItems(val); if (td) out[key] = td; continue; }
+
+    // ---- 其余按键的默认值类型做通用校验 ----
+    var def = DEFAULT_SETTINGS[key];
+    if (typeof def === 'boolean') {
+      if (typeof val === 'boolean') out[key] = val;
+      continue;
+    }
+    if (typeof def === 'number') {
+      var n = Number(val);
+      if (!isFinite(n)) continue;
+      var range = IMPORT_RANGES[key];
+      if (range && (n < range[0] || n > range[1])) continue;   // 越界 → 用默认值，不夹紧
+      if (Math.abs(n) > 1e9) continue;
+      out[key] = n;
+      continue;
+    }
+    if (typeof def === 'string') {
+      if (typeof val !== 'string') continue;
+      if (val.length > 4096) continue;
+      if (IMPORT_ENUMS[key] && IMPORT_ENUMS[key].indexOf(val) === -1) continue;
+      if (IMPORT_HTTPS_FIELDS.indexOf(key) !== -1 && val !== '' && !/^https:\/\/[^\s]+$/i.test(val)) continue;
+      if (IMPORT_COLOR_FIELDS.indexOf(key) !== -1 && val !== '' && !/^#[0-9a-fA-F]{3,8}$/.test(val)) continue;
+      if ((key === 'searchEngine' || key === 'activeSearchEngine') && !/^[A-Za-z0-9_-]{1,40}$/.test(val)) continue;
+      if (key === 'weatherApiKey' && val.length > 512) continue;
+      out[key] = val;
+      continue;
+    }
+    // 其它类型（对象等）不在设置数据模型内，丢弃
+  }
+  return out;
+}
+
+/** 导出时给 config 打上格式版本（BUG-043：供将来迁移，也便于识别「由本扩展导出」的备份） */
+function _withSchemaVersion(config) {
+  var out = {};
+  var src = config || {};
+  for (var k in src) {
+    if (Object.prototype.hasOwnProperty.call(src, k)) out[k] = src[k];
+  }
+  out.schemaVersion = IMPORT_SCHEMA_VERSION;
+  return out;
+}
+
+/** 统计被白名单/校验拒掉的键数（0 表示这份备份的设置全部合法） */function countRejectedSettings(raw, safe) {
+  if (!raw || typeof raw !== 'object') return 0;
+  var n = 0;
+  var keys = Object.keys(raw);
+  for (var i = 0; i < keys.length; i++) {
+    if (keys[i] === 'storageFallback') continue;   // 内部标记，不算用户设置
+    if (!Object.prototype.hasOwnProperty.call(safe, keys[i])) n++;
+  }
+  return n;
+}
+
 /** 导入配置到 storage */
 async function _importConfig(unzipped, manifest) {
   var config = JSON.parse(fflate.strFromU8(unzipped['config.json']));
   if (typeof config !== 'object' || config === null) return 0;
   var dupCount = dedupCardIds(config.groups, manifest, unzipped);
+  // BUG-043：白名单 + 逐键校验后再落盘（不再原样写入不可信备份里的 settings）
+  var safeSettings = normalizeImportedSettings(config.settings);
+  var rejectedCount = countRejectedSettings(config.settings, safeSettings);
+  if (rejectedCount > 0) console.warn('[导入] 已忽略 ' + rejectedCount + ' 项未知/不合法的设置');
   var syncFailed = false;
   await new Promise(function (resolve) {
     chrome.storage.sync.set({
-      settings: config.settings || {},
+      settings: safeSettings,
       groups: config.groups || [],
       activeGroup: config.activeGroup || 0,
       groups_rev: Date.now()   // BUG-036: 版本号随数据同写
@@ -1030,7 +1285,7 @@ async function _importConfig(unzipped, manifest) {
     });
   });
   if (syncFailed) {
-    var fSettings = config.settings || {};
+    var fSettings = safeSettings;
     fSettings.storageFallback = 'local';
     await new Promise(function (resolve) {
       chrome.storage.local.set({ groups: config.groups || [], activeGroup: config.activeGroup || 0, groups_rev: Date.now() }, resolve);
@@ -1132,7 +1387,7 @@ async function _buildZipBlob(data) {
     zipFiles[img.key] = new Uint8Array(buf);
     imageManifest.push({ key: img.key, type: img.blob.type || 'image/png', size: buf.byteLength });
   }
-  zipFiles['config.json'] = fflate.strToU8(JSON.stringify(data.config));
+  zipFiles['config.json'] = fflate.strToU8(JSON.stringify(_withSchemaVersion(data.config)));
   zipFiles['manifest.json'] = fflate.strToU8(JSON.stringify({
     version: 3, type: 'backup', hasConfig: true, imageCount: imageManifest.length, images: imageManifest
   }));
@@ -1197,7 +1452,10 @@ async function _buildGroupExport(groupId) {
     var img = group.cards[i].image;
     if (!img || img.indexOf('idx:') !== 0) continue;
     try {
-      var blob = await loadImage(img);
+      // BUG-044：IndexedDB 的键**不带** idx: 前缀（写入时 saveImage(key) 再置 card.image='idx:'+key，
+      // 读取时一律先剥前缀 —— cards.js 就是这么做的）。原先直接把 'idx:cardimg_x' 传进 loadImage，
+      // store.get() 精确匹配必然 miss → 导出文件里 images 永远为空，接收方导入后本地图片全丢。
+      var blob = await loadImage(String(img).replace('idx:', ''));
       if (blob) out.images[img] = await new Promise(function (resolve) {
         var fr = new FileReader();
         fr.onload = function () { resolve(fr.result); };
