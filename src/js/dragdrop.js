@@ -158,7 +158,8 @@ function getTargetCard(e) {
 var _cardCenters = null;
 function _cacheCardCenters() {
   // 仅缓存当前活跃分组的卡片（避免隐藏组的 0 尺寸污染）
-  var activeContainer = _groupContainers && _groupContainers[activeGroupIndex];
+  // BUG-038: 缓存按分组 id 索引，外部不能再按下标直接取（改用统一访问器）
+  var activeContainer = typeof _activeGroupContainer === 'function' ? _activeGroupContainer() : null;
   var wrappers = activeContainer ? activeContainer.querySelectorAll('.card-wrapper:not(.card-wrapper-add)') : domMain.grid.querySelectorAll('.card-wrapper:not(.card-wrapper-add)');
   // BUG-027: 回退分支中过滤 display:none 父容器内的 wrapper
   if (!activeContainer) {

@@ -181,6 +181,12 @@ function populateSettingsForm(settings) {
   if (domSettings.groupTabSize) domSettings.groupTabSize.value = settings.groupTabSize || 13;
   if (domSettings.groupTabSizeVal) domSettings.groupTabSizeVal.textContent = (settings.groupTabSize || 13) + 'px';
   if (domSettings.dashboardLayout) domSettings.dashboardLayout.value = (typeof settings.dashboardLayout === 'string' ? settings.dashboardLayout : 'row');
+  // BUG-039: 时钟格式 / 显示秒数 / 农历样式必须回填 —— 原实现只收集不回填，
+  // 控件永远停在 HTML 默认值（24h / 勾选 / double），任意一次设置变更都会把
+  // 用户保存的偏好静默写回默认值（面板显示值与实际生效值也不一致）
+  if (domSettings.clockFormat) domSettings.clockFormat.value = settings.clockFormat === '12h' ? '12h' : '24h';
+  if (domSettings.toggleClockSeconds) domSettings.toggleClockSeconds.checked = settings.clockShowSeconds !== false;
+  if (domSettings.lunarStyle) domSettings.lunarStyle.value = settings.lunarStyle === 'single' ? 'single' : 'double';
   if (domSettings.dashItemH) domSettings.dashItemH.value = settings.dashItemH || 0;
   if (domSettings.dashItemHVal) domSettings.dashItemHVal.textContent = (settings.dashItemH || 0) === 0 ? '自适应' : (settings.dashItemH || 0) + 'px';
   if (domSettings.dashGap) domSettings.dashGap.value = settings.dashGap || 16;
@@ -385,9 +391,13 @@ function applyWallpaperColor(settings) {
   }
 }
 
-/** 壁纸遮罩透明度 */
+/** 壁纸遮罩透明度（v1.5.0 规则：本地壁纸的单张遮罩优先于全局值） */
 function applyWallpaperOpacity(settings) {
-  document.documentElement.style.setProperty('--wallpaper-opacity', (settings.wallpaperOpacity || 30) / 100);
+  var op = (settings.wallpaperOpacity || 30);
+  // BUG-037 连带：跨标签页设置变更会走 applyAllSettings → 这里若直接写全局值，
+  // 会把用户给单张壁纸设的独立遮罩改回全局（实测被 E2E [17] 抓住）
+  if (typeof getEffectiveWallpaperOpacity === 'function') op = getEffectiveWallpaperOpacity(settings);
+  document.documentElement.style.setProperty('--wallpaper-opacity', op / 100);
 }
 
 /** 分组指示器位置 */
@@ -510,6 +520,9 @@ function openSettingsPanel() {
   // v1.5.0: 每次打开都以数据为准回填一次表单 —— 设置可能被其它入口改过
   // （导入、快捷键、分组管理器等），只回填不重新绑定事件
   populateSettingsForm(currentSettings || {});
+  // BUG-039 同类：外观区（卡片尺寸/圆角/透明度/列数/配色）也必须每次回填，
+  // 否则它会停留在首次打开时的值，之后任意保存都会把它写回数据
+  if (typeof populateAppearanceForm === 'function') populateAppearanceForm(domSettings, currentSettings || {});
   domSettings.panel.classList.remove('hidden');
   domSettings.overlay.classList.remove('hidden');
   // 重置面板位置

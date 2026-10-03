@@ -7,6 +7,9 @@ var STORAGE_KEYS = {
   GROUPS: 'groups',
   ACTIVE_GROUP: 'activeGroup',
   SETTINGS: 'settings',
+  // BUG-036: 分组数据的写入版本号 —— sync 与 local 各存一份，
+  // 用来判断「哪一份更新」，而不是「sync 里有没有值」（后者在配额拒绝时永远为真）
+  GROUPS_REV: 'groups_rev',
   SPEEDDIALS: 'speeddials' // 旧版，用于迁移
 };
 
@@ -122,23 +125,63 @@ var SYNC_WRITE_COALESCE_MS = 500;
 var _pendingSyncWrites = {};   // key → { value, afterFlush }
 var _pendingWriteTimers = {};  // key → timerId
 var _selfWriteAt = {};         // key → 本页写入时间戳（用于忽略 onChanged 回声）
+var _selfWriteJson = {};       // key → 本页最后写出的值（稳定序列化；回声判定按「值」而非「时间」）
 
-/** 立即写入 sync；失败只告警不抛（回退逻辑由调用方决定） */
-function _writeSyncKey(key, value) {
-  return new Promise(function (resolve) {
-    chrome.storage.sync.set({ [key]: value }, function () {
-      _selfWriteAt[key] = Date.now();
-      if (chrome.runtime.lastError) {
-        console.warn('[storage] sync 写入失败（' + key + '）:', chrome.runtime.lastError.message);
+/** 稳定序列化：对象键名递归排序后再 stringify。
+ *  chrome.storage 读回的对象键序与写入时不同（实测读回是字母序），
+ * 直接 JSON.stringify 比对会永远不相等，无法用于回声判定。 */
+function _stableJson(value) {
+  try {
+    return JSON.stringify(value, function (k, v) {
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        var out = {};
+        Object.keys(v).sort().forEach(function (key) { out[key] = v[key]; });
+        return out;
       }
-      resolve();
+      return v;
     });
+  } catch (e) { return null; }
+}
+
+/** 立即写入 sync；失败只告警不抛（回退逻辑由调用方决定）
+ *  BUG-036: 返回「本次写入是否成功」—— 原先无论 lastError 都 resolve()，
+ *  调用方无法区分「写成功」与「被配额拒绝」，导致 local 兜底永不触发。
+ *  extra 可传对象或求值函数：与主键在同一次 set 调用里写入（不额外消耗写入配额）。 */
+function _writeSyncKey(key, value, extra) {
+  return new Promise(function (resolve) {
+    var items = {};
+    items[key] = value;
+    if (typeof extra === 'function') {
+      try { extra = extra(); } catch (e) { extra = null; }
+    }
+    if (extra) Object.keys(extra).forEach(function (k) { items[k] = extra[k]; });
+    // BUG-037: onChanged 可能先于 set 回调触发（实测：回调里读到的 _selfWriteAt 还是上一次
+    // 写入的时间），因此回声标记必须在调用 set 之前打上，并且按「值」比对（isSelfSyncValue）
+    _selfWriteAt[key] = Date.now();
+    _selfWriteJson[key] = _stableJson(value);
+    if (_selfWriteJson[key] === null) delete _selfWriteJson[key];
+    try {
+      chrome.storage.sync.set(items, function () {
+        var err = chrome.runtime.lastError;
+        if (err) {
+          console.warn('[storage] sync 写入失败（' + key + '）:', err.message);
+          resolve(false);
+        } else {
+          resolve(true);
+        }
+      });
+    } catch (e) {
+      // 同步抛异常（如配额校验前置失败）同样视为写入失败，交给 local 兜底
+      console.warn('[storage] sync 写入异常（' + key + '）:', e && e.message);
+      resolve(false);
+    }
   });
 }
 
-/** 合并写：窗口内多次调用只保留最后一次；afterFlush 在真正写完后执行（如超限回退、菜单刷新） */
-function scheduleSyncWrite(key, value, afterFlush) {
-  _pendingSyncWrites[key] = { value: value, afterFlush: afterFlush };
+/** 合并写：窗口内多次调用只保留最后一次；afterFlush 在真正写完后执行（如超限回退、菜单刷新），
+ *  参数为本次写入是否成功（BUG-036）；extra 同 _writeSyncKey */
+function scheduleSyncWrite(key, value, afterFlush, extra) {
+  _pendingSyncWrites[key] = { value: value, afterFlush: afterFlush, extra: extra };
   if (_pendingWriteTimers[key]) clearTimeout(_pendingWriteTimers[key]);
   _pendingWriteTimers[key] = setTimeout(function () {
     flushSyncWrites([key]);
@@ -157,9 +200,9 @@ function flushSyncWrites(keys) {
       clearTimeout(_pendingWriteTimers[key]);
       delete _pendingWriteTimers[key];
     }
-    var p = _writeSyncKey(key, job.value);
+    var p = _writeSyncKey(key, job.value, job.extra);
     if (typeof job.afterFlush === 'function') {
-      p = p.then(function () { return job.afterFlush(); });
+      p = p.then(function (ok) { return job.afterFlush(ok); });
     }
     jobs.push(p);
   });
@@ -170,6 +213,17 @@ function flushSyncWrites(keys) {
 function isSelfSyncWrite(key, withinMs) {
   var t = _selfWriteAt[key];
   return !!t && (Date.now() - t) < (withinMs || 1500);
+}
+
+/** BUG-037: 本次 onChanged 携带的值是否就是本页刚写出去的那一份。
+ *  按「值」判定（键序无关），不受 onChanged / set 回调的先后顺序影响；
+ *  别的标签页改了别的字段 → 值不同 → 判定为外部变更（需要合并）。
+ *  注意：仅在 settings 这类小对象上使用，groups 大数组的序列化开销不划算（见 BUG-055）。 */
+function isSelfSyncValue(key, value) {
+  var j = _selfWriteJson[key];
+  if (!j) return false;
+  var got = _stableJson(value);
+  return got !== null && j === got;
 }
 
 // 关页/切后台前尽力落盘（合并写窗口内的数据不丢）
@@ -198,25 +252,80 @@ function saveToLocal(key, value) {
 }
 
 // ---- 分组数据 ----
+
+/** 版本号取值（缺失/非法一律视为 0，兼容升级前的数据） */
+function _groupsRevOf(v) {
+  return (typeof v === 'number' && isFinite(v)) ? v : 0;
+}
+
 async function getGroups() {
-  var groups = await loadFromStorage(STORAGE_KEYS.GROUPS, null);
-  if (groups && Array.isArray(groups) && groups.length > 0) return groups;
-  // 大容量回退：sync 为空时检查 local（导入超限场景）
-  groups = await loadFromLocal(STORAGE_KEYS.GROUPS, null);
-  if (groups && Array.isArray(groups) && groups.length > 0) return groups;
+  // BUG-036: 两侧都读出来，按写入版本号决定哪一份更新。
+  // 原实现是「sync 非空就信 sync」—— sync 写入被配额拒绝时旧值原样留着（非空），
+  // 于是 local 里的兜底数据永远读不到，刷新后回到超限前的旧版本（静默丢数据）。
+  var syncData = await new Promise(function (resolve) {
+    chrome.storage.sync.get([STORAGE_KEYS.GROUPS, STORAGE_KEYS.GROUPS_REV], function (r) { resolve(r || {}); });
+  });
+  var localData = await new Promise(function (resolve) {
+    chrome.storage.local.get([STORAGE_KEYS.GROUPS, STORAGE_KEYS.GROUPS_REV], function (r) { resolve(r || {}); });
+  });
+  var syncGroups = syncData[STORAGE_KEYS.GROUPS];
+  var localGroups = localData[STORAGE_KEYS.GROUPS];
+  var syncOk = Array.isArray(syncGroups) && syncGroups.length > 0;
+  var localOk = Array.isArray(localGroups) && localGroups.length > 0;
+  if (syncOk && localOk) {
+    // 版本号相同（或都没有版本号）时以 sync 为准 —— 保持升级前的语义
+    return _groupsRevOf(localData[STORAGE_KEYS.GROUPS_REV]) > _groupsRevOf(syncData[STORAGE_KEYS.GROUPS_REV])
+      ? localGroups : syncGroups;
+  }
+  if (syncOk) return syncGroups;
+  if (localOk) return localGroups;
   // 尝试从旧版 speeddials 迁移
   var oldCards = await loadFromStorage(STORAGE_KEYS.SPEEDDIALS, null);
   if (oldCards && Array.isArray(oldCards) && oldCards.length > 0) {
     var migrated = [{ id: 'g1', name: '常用', cards: oldCards }];
-    await saveToStorage(STORAGE_KEYS.GROUPS, migrated);
+    await _writeSyncKey(STORAGE_KEYS.GROUPS, migrated, function () {
+      return { [STORAGE_KEYS.GROUPS_REV]: Date.now() };
+    });
     await saveToStorage(STORAGE_KEYS.ACTIVE_GROUP, 0);
     chrome.storage.sync.remove(STORAGE_KEYS.SPEEDDIALS);
     return migrated;
   }
   // 全新安装
-  await saveToStorage(STORAGE_KEYS.GROUPS, DEFAULT_GROUPS);
+  await _writeSyncKey(STORAGE_KEYS.GROUPS, DEFAULT_GROUPS, function () {
+    return { [STORAGE_KEYS.GROUPS_REV]: Date.now() };
+  });
   await saveToStorage(STORAGE_KEYS.ACTIVE_GROUP, 0);
   return DEFAULT_GROUPS;
+}
+
+/** 分组写入的版本号载荷（求值函数，在真正写入时取时间戳，避免合并写窗口内产生陈旧版本号） */
+function _groupsRevPayload() {
+  return { [STORAGE_KEYS.GROUPS_REV]: Date.now() };
+}
+
+/** 把分组数据 + 版本号写入 local（sync 写入被拒时的兜底路径） */
+function _fallbackGroupsToLocal(groups) {
+  return new Promise(function (resolve) {
+    chrome.storage.local.set({
+      [STORAGE_KEYS.GROUPS]: groups,
+      [STORAGE_KEYS.GROUPS_REV]: Date.now()
+    }, function () {
+      if (chrome.runtime.lastError) {
+        console.warn('[storage] local 兜底写入失败:', chrome.runtime.lastError.message);
+      }
+      resolve();
+    });
+  });
+}
+
+var _syncWriteRejectedWarned = false;
+/** 写入被配额拒绝是用户可感知的数据安全事件 —— 提示一次，不再静默（BUG-036） */
+function _warnSyncWriteRejected() {
+  if (_syncWriteRejectedWarned) return;
+  _syncWriteRejectedWarned = true;
+  if (typeof showToast === 'function') {
+    showToast('云同步空间不足，已自动保存到本地（数据未丢失）', 'warning');
+  }
 }
 
 async function saveGroups(groups, opts) {
@@ -234,30 +343,36 @@ async function saveGroups(groups, opts) {
   // v1.3.3: 高频路径（滚轮切分组 / 访问计数）走合并写，避免连续触发 120 次/分钟配额；
   // 超限回退校验与右键菜单刷新挂到真正写完之后
   if (opts.coalesce) {
-    scheduleSyncWrite(STORAGE_KEYS.GROUPS, groups, function () {
-      return _verifyGroupsWrite(groups);
-    });
+    scheduleSyncWrite(STORAGE_KEYS.GROUPS, groups, function (ok) {
+      return _finalizeGroupsWrite(groups, ok);
+    }, _groupsRevPayload);
     return;
   }
 
   // BUG-028: _savingGroups 未定义时默认视为已在保存中，避免误复位
   var _wasSaving = typeof _savingGroups !== 'undefined' ? _savingGroups : true;
   if (typeof _savingGroups !== 'undefined') _savingGroups = true;
-  await saveToStorage(STORAGE_KEYS.GROUPS, groups);
+  var ok = await _writeSyncKey(STORAGE_KEYS.GROUPS, groups, _groupsRevPayload);
   if (typeof _savingGroups !== 'undefined' && !_wasSaving) _savingGroups = false;
+  await _finalizeGroupsWrite(groups, ok);
+}
+
+/** 写入收尾（BUG-036）：sync 被拒 → 无条件落 local 兜底 + 版本号 + 提示，绝不静默丢数据 */
+async function _finalizeGroupsWrite(groups, syncOk) {
+  if (syncOk === false) {
+    await _fallbackGroupsToLocal(groups);
+    _warnSyncWriteRejected();
+  }
   await _verifyGroupsWrite(groups);
 }
 
-/** 写入后校验：sync 超限被拒时回退到 local（同时刷新右键菜单） */
+/** 写入后校验：sync 里没有该键/为空数组时回退到 local（同时刷新右键菜单） */
 async function _verifyGroupsWrite(groups) {
   // 同步存储超限时自动回退到本地存储
   await new Promise(function (resolve) {
     chrome.storage.sync.get([STORAGE_KEYS.GROUPS], function (result) {
       if (!result[STORAGE_KEYS.GROUPS] || (Array.isArray(result[STORAGE_KEYS.GROUPS]) && result[STORAGE_KEYS.GROUPS].length === 0)) {
-        chrome.storage.local.set({ [STORAGE_KEYS.GROUPS]: groups }, function () {
-          if (chrome.runtime.lastError) { /* 静默处理：resize 后 resolve */ }
-          resolve();
-        });
+        _fallbackGroupsToLocal(groups).then(resolve);
       } else { resolve(); }
     });
   });

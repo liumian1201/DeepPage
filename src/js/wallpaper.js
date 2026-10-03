@@ -223,10 +223,22 @@ async function fetchBingWallpapers(settings) {
 }
 
 /* ========== 壁纸应用与导航 ========== */
+/** 当前展示的本地壁纸的单张遮罩（null = 跟随全局）。v1.5.0 规则：单张遮罩优先。
+ *  任意一次「应用全局遮罩」（如其它标签页改了设置触发 applyAllSettings）都不得把它覆盖掉。 */
+var _localWallpaperOpacityOverride = null;
+
+/** 当前生效的遮罩透明度：本地壁纸设了单张遮罩时以单张为准，否则用全局值 */
+function getEffectiveWallpaperOpacity(settings) {
+  var global = ((settings || currentSettings || {}).wallpaperOpacity) || 30;
+  return typeof _localWallpaperOpacityOverride === 'number' ? _localWallpaperOpacityOverride : global;
+}
+
 async function applyWallpaper(settings) {
   var body = document.body;
   body.style.backgroundImage = '';
   body.classList.remove('has-wallpaper', 'wallpaper-bing');
+  // 非本地壁纸没有「单张遮罩」概念 → 清掉 override，让全局值生效
+  _localWallpaperOpacityOverride = null;
   var mode = settings.wallpaperMode || 'bing';
   try {
     if (mode === 'bing') { body.classList.add('wallpaper-bing'); await applyBingWallpaper(settings); }
@@ -384,6 +396,8 @@ async function applyLocalWallpapers(settings) {
   var opacity = (item.opacity !== undefined && item.opacity !== null)
     ? item.opacity
     : (settings.wallpaperOpacity !== undefined ? settings.wallpaperOpacity : 30);
+  // 记录当前这张的 override，供 applyWallpaperOpacity 复用（全局遮罩不得覆盖单张）
+  _localWallpaperOpacityOverride = (item.opacity !== undefined && item.opacity !== null) ? item.opacity : null;
   setBackgroundImage(URL.createObjectURL(blob), opacity);
   document.documentElement.style.setProperty('--wallpaper-opacity', opacity / 100);
   if (typeof updateWallpaperInfo === 'function') {

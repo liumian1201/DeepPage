@@ -171,7 +171,10 @@ function bindAppearancePreview(dom, onChanged) {
   }
 }
 
-function initAppearance(dom, settings, cb) {
+/** 把外观数据回填到表单控件（与 collectAppearanceForm 严格对称）。
+ *  BUG-039: 单独抽出 —— 设置面板每次打开都必须「以数据为准」回填，
+ *  否则表单停留在 HTML 默认值 / 陈旧值，下一次任意设置变更就会把它写回数据。 */
+function populateAppearanceForm(dom, settings) {
   var dc = { bgColor: '#f0f2f5', cardBgColor: '#ffffff', cardTextColor: '#202124' };
   if (dom.bgColor) dom.bgColor.value = settings.bgColor || dc.bgColor;
   if (dom.cardBgColor) dom.cardBgColor.value = settings.cardBgColor || dc.cardBgColor;
@@ -188,6 +191,10 @@ function initAppearance(dom, settings, cb) {
   if (dom.cardBorderRadiusVal) dom.cardBorderRadiusVal.textContent = (settings.cardBorderRadius || 14) + 'px';
   if (dom.cardOpacity) dom.cardOpacity.value = settings.cardOpacity != null ? settings.cardOpacity : 100;
   if (dom.cardOpacityVal) dom.cardOpacityVal.textContent = (settings.cardOpacity != null ? settings.cardOpacity : 100) + '%';
+}
+
+function initAppearance(dom, settings, cb) {
+  populateAppearanceForm(dom, settings);
   applyAppearance(settings);
   bindAppearancePreview(dom, cb || function () {});
 }

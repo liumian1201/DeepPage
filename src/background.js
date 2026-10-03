@@ -584,12 +584,22 @@ chrome.contextMenus.onClicked.addListener(async function (info, tab) {
   groups[groupIndex].cards.push(card);
 
   // v1.2.8: 写入 sync，超限则回退 local（try-catch 防 reject 跳过回退）
+  // BUG-036: 必须按「这次写入是否成功」决定回退 —— 原先只看 sync 里有没有值，
+  // 配额拒绝时旧值原样留着（非空），新卡片只留在内存里，刷新即丢失
+  var groupsSyncOk = true;
   try {
-    await chrome.storage.sync.set({ groups: groups });
-  } catch (e) { /* 配额超限，静默回退到 local */ }
+    await chrome.storage.sync.set({ groups: groups, groups_rev: Date.now() });
+  } catch (e) { groupsSyncOk = false; }
+  if (!groupsSyncOk) {
+    chrome.storage.local.set({ groups: groups, groups_rev: Date.now() }).catch(function (e) {
+      console.warn('[bg] groups 本地兜底写入失败:', e && e.message);
+    });
+  }
   chrome.storage.sync.get(['groups'], function (check) {
     if (!check.groups || !Array.isArray(check.groups) || check.groups.length === 0) {
-      chrome.storage.local.set({ groups: groups }).catch(function () {});
+      chrome.storage.local.set({ groups: groups, groups_rev: Date.now() }).catch(function (e) {
+        console.warn('[bg] groups 本地兜底写入失败:', e && e.message);
+      });
     }
   });
 

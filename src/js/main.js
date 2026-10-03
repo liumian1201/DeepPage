@@ -333,12 +333,43 @@ chrome.storage.onChanged.addListener(function (changes, areaName) {
     }
   }
   if (changes.settings && changes.settings.newValue) {
-    var newLocked = changes.settings.newValue.isLocked;
+    var newSettings = changes.settings.newValue;
+    var newLocked = newSettings.isLocked;
     if (typeof newLocked === 'boolean') {
       setLocked(newLocked, true);
     }
+    // BUG-037: 跨标签页设置同步 —— 原先只同步 isLocked，本页内存里其余字段永远停留在
+    // 打开页面时的旧值，而下一次 saveSettings 会整份写回，于是把别的标签页刚改的设置覆盖掉
+    // （last-write-wins 丢更新）。这里把外部变更合并进内存并重渲染。
+    // 回声判定必须按「值」：实测 onChanged 会先于 set 回调触发，按时间戳会把自己的写入当成外部变更。
+    var _selfSettings = typeof isSelfSyncValue === 'function' && isSelfSyncValue('settings', newSettings);
+    if (!_selfSettings) {
+      currentSettings = Object.assign({}, currentSettings, newSettings);
+      _applySettingsFromStorage();
+    }
   }
 });
+
+/** BUG-037: 外部（其它标签页 / 导入）设置变更后把新设置应用到界面 */
+function _applySettingsFromStorage() {
+  if (typeof applyAllSettings === 'function') applyAllSettings(currentSettings);
+  if (typeof applyAppearance === 'function') applyAppearance(currentSettings);
+  // 看板布局有编辑期工作副本，必须一并丢弃，否则界面与数据不一致
+  if (typeof resetDashWorkingLayout === 'function') resetDashWorkingLayout();
+  if (typeof applyDashWidgetLayout === 'function' && typeof getDashboardLayout === 'function') {
+    applyDashWidgetLayout(getDashboardLayout());
+  }
+  if (typeof updateSortModeSelect === 'function') updateSortModeSelect();
+  if (typeof _debounceCollisionCheck === 'function') _debounceCollisionCheck();
+  // 面板开着时同步回填，避免面板显示值与数据不一致（用户接着操作会用旧值覆盖新值）
+  if (typeof _settingsPanelReady !== 'undefined' && _settingsPanelReady &&
+      typeof populateSettingsForm === 'function' && domSettings.panel &&
+      !domSettings.panel.classList.contains('hidden')) {
+    populateSettingsForm(currentSettings);
+    if (typeof populateAppearanceForm === 'function') populateAppearanceForm(domSettings, currentSettings);
+  }
+  _debouncedRefresh();
+}
 
 /* ==================== 主事件绑定 ==================== */
 function bindMainEvents() {

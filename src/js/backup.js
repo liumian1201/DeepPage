@@ -258,7 +258,9 @@ function importAll() {
             chrome.storage.sync.set({
               settings: data.settings || {},
               groups: data.groups || [],
-              activeGroup: data.activeGroup || 0
+              activeGroup: data.activeGroup || 0,
+              // BUG-036: 与数据同一次写入版本号，避免旧 local 兜底数据反超 sync
+              groups_rev: Date.now()
             }, function () {
               if (chrome.runtime.lastError) oldSyncFailed = true;
               resolve();
@@ -268,7 +270,7 @@ function importAll() {
             var oldFSettings = data.settings || {};
             oldFSettings.storageFallback = 'local';
             await new Promise(function (resolve) {
-              chrome.storage.local.set({ groups: data.groups || [], activeGroup: data.activeGroup || 0 }, resolve);
+              chrome.storage.local.set({ groups: data.groups || [], activeGroup: data.activeGroup || 0, groups_rev: Date.now() }, resolve);
             });
             var oldSettingsFailed = false;
             await new Promise(function (resolve) {
@@ -948,7 +950,8 @@ async function _doIncrementalRestore(configName) {
       chrome.storage.sync.set({
         settings: config.settings || {},
         groups: config.groups || [],
-        activeGroup: config.activeGroup || 0
+        activeGroup: config.activeGroup || 0,
+        groups_rev: Date.now()   // BUG-036: 版本号随数据同写
       }, function () {
         if (chrome.runtime.lastError) syncFailed = true;
         resolve();
@@ -958,7 +961,7 @@ async function _doIncrementalRestore(configName) {
       var fSettings = config.settings || {};
       fSettings.storageFallback = 'local';
       await new Promise(function (resolve) {
-        chrome.storage.local.set({ groups: config.groups || [], activeGroup: config.activeGroup || 0 }, resolve);
+        chrome.storage.local.set({ groups: config.groups || [], activeGroup: config.activeGroup || 0, groups_rev: Date.now() }, resolve);
       });
       var ssf2 = false;
       await new Promise(function (resolve) {
@@ -1019,7 +1022,8 @@ async function _importConfig(unzipped, manifest) {
     chrome.storage.sync.set({
       settings: config.settings || {},
       groups: config.groups || [],
-      activeGroup: config.activeGroup || 0
+      activeGroup: config.activeGroup || 0,
+      groups_rev: Date.now()   // BUG-036: 版本号随数据同写
     }, function () {
       if (chrome.runtime.lastError) { syncFailed = true; }
       resolve();
@@ -1029,7 +1033,7 @@ async function _importConfig(unzipped, manifest) {
     var fSettings = config.settings || {};
     fSettings.storageFallback = 'local';
     await new Promise(function (resolve) {
-      chrome.storage.local.set({ groups: config.groups || [], activeGroup: config.activeGroup || 0 }, resolve);
+      chrome.storage.local.set({ groups: config.groups || [], activeGroup: config.activeGroup || 0, groups_rev: Date.now() }, resolve);
     });
     var ssf = false;
     await new Promise(function (resolve) {
@@ -1088,16 +1092,22 @@ async function _collectAllData() {
   ]);
 
   var config = syncData;
-  if (!config.groups || (Array.isArray(config.groups) && config.groups.length === 0)) {
-    var localData = await new Promise(function (resolve) {
-      chrome.storage.local.get(['groups', 'activeGroup'], function (result) { resolve(result); });
-    });
-    if (localData.groups && Array.isArray(localData.groups) && localData.groups.length > 0) {
-      config = config || {};
-      config.groups = localData.groups;
-      config.activeGroup = localData.activeGroup;
-    }
+  // BUG-036: 与 getGroups 同规则 —— sync 里没有数据、或 local 兜底数据的版本更新时，
+  // 导出必须以 local 为准；否则 sync 写入被配额拒绝的用户会导出「超限前的旧数据」
+  var localData = await new Promise(function (resolve) {
+    chrome.storage.local.get(['groups', 'activeGroup', 'groups_rev'], function (result) { resolve(result); });
+  });
+  var syncRev = typeof config.groups_rev === 'number' ? config.groups_rev : 0;
+  var localRev = typeof localData.groups_rev === 'number' ? localData.groups_rev : 0;
+  var syncGroupsEmpty = !config.groups || (Array.isArray(config.groups) && config.groups.length === 0);
+  if (localData.groups && Array.isArray(localData.groups) && localData.groups.length > 0 &&
+      (syncGroupsEmpty || localRev > syncRev)) {
+    config = config || {};
+    config.groups = localData.groups;
+    config.activeGroup = localData.activeGroup;
   }
+  // groups_rev 只是本机判定 sync/local 谁更新的内部标记，不写进备份
+  if (config && config.groups_rev !== undefined) delete config.groups_rev;
   if (config.settings) config.settings._exportTime = new Date().toLocaleString('zh-CN');
 
   var images = await new Promise(function (resolve) {

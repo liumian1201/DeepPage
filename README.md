@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Manifest-V3-blue?logo=googlechrome" alt="Manifest V3">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/Version-1.5.5-brightgreen" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.5.6-brightgreen" alt="Version">
   <img src="https://img.shields.io/badge/PRs-Welcome-orange" alt="PRs Welcome">
 </p>
 
@@ -178,7 +178,7 @@ DeepPage/
 │       └── icons/          # icon-16/48/128.png
 ├── tests/                  ← 零依赖验证脚本（不随扩展发布）
 │   ├── dashboard-logic.test.js  # 看板布局模型桩测（29 项）
-│   ├── e2e-p0.test.js           # headless Chromium + CDP 端到端（217 项）
+│   ├── e2e-p0.test.js           # headless Chromium + CDP 端到端（247 项）
 │   └── e2e-sw-protocol.test.js  # Service Worker 消息协议（6 项）
 ├── tools/
 │   ├── bump-version.mjs    ← 版本号单一来源同步（manifest 为准）

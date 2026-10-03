@@ -143,14 +143,28 @@ async function doDeleteGroup() {
   // v1.2.1: 不在此处删除 IndexedDB 图片（保留给 bak 恢复用，GC 后续清理）
   // 原 deleteCardIcon 调用已移除
 
+  // 活动分组按 id 跟随（与 moveGroupTo 一致）：删掉活动组之前的分组时，
+  // 原实现只做「越界夹紧」，会让用户莫名其妙切到另一个分组
+  var activeId = groups[activeGroupIndex] ? groups[activeGroupIndex].id : null;
   groups.splice(index, 1);
-  if (activeGroupIndex >= groups.length) activeGroupIndex = groups.length - 1;
-  if (activeGroupIndex === index) activeGroupIndex = Math.min(activeGroupIndex, groups.length - 1);
+  if (activeId) {
+    var ni = groups.findIndex(function (gg) { return gg.id === activeId; });
+    activeGroupIndex = ni !== -1 ? ni : Math.min(index, groups.length - 1);
+  } else {
+    activeGroupIndex = Math.min(activeGroupIndex, groups.length - 1);
+  }
   speeddials = groups[activeGroupIndex] ? groups[activeGroupIndex].cards : [];
+  // BUG-038: 下标整体平移 → DOM 池缓存必须整体失效，否则切组会显示已删除分组的卡片
+  if (typeof _invalidateGroupDOMCache === 'function') _invalidateGroupDOMCache();
+  if (typeof clearCardSelection === 'function') clearCardSelection();
   await saveGroups(groups);
   await saveActiveGroup(activeGroupIndex);
   renderSpeeddials();
   renderGroupDots();
+  // BUG-035: 删除真正完成后才重渲染分组管理器列表 ——
+  // 原实现在「点删除按钮时」就重渲染（此时还没 splice），列表行上的 data-index
+  // 与 groups 数组错位，用户再点某行的 ✕ 会删掉另一个分组
+  renderGroupManagerList();
 }
 
 function showGroupContextMenu(x, y, index) {
@@ -283,6 +297,8 @@ async function moveGroupTo(from, to) {
     var ni = groups.findIndex(function (g) { return g.id === activeId; });
     if (ni !== -1) activeGroupIndex = ni;
   }
+  // BUG-038: 下标整体平移 → DOM 池缓存必须整体失效，否则切组会显示别的分组的卡片
+  if (typeof _invalidateGroupDOMCache === 'function') _invalidateGroupDOMCache();
   await saveGroups(groups);
   await saveActiveGroup(activeGroupIndex);
   renderGroupManagerList();
@@ -398,8 +414,9 @@ function renderGroupManagerList() {
         // v1.3.3: 单分组导出
         if (typeof exportGroup === 'function' && groups[idx]) exportGroup(groups[idx].id);
       } else if (action === 'mgr-delete') {
+        // BUG-035: 此处不再提前重渲染 —— 真正的 splice 发生在确认之后（doDeleteGroup），
+        // 提前重渲染只会留下与 groups 数组错位的 data-index
         deleteGroup(idx);
-        renderGroupManagerList();
       }
     });
   });

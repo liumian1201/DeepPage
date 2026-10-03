@@ -413,40 +413,79 @@ async function _extractAndSaveTheme(cardId) {
   }
 }
 
-/* ==================== DOM 分组容器缓存（LRU 3组） ==================== */
-var _groupContainers = {};   // { groupIndex: div }
-var _groupLru = [];          // [groupIndex, ...] 最近使用的在前
+/* ==================== DOM 分组容器缓存（LRU 3组） ====================
+   BUG-038: 缓存键必须是「分组 id」而不是「数组下标」—— 删组 / 拖拽重排会让下标整体平移，
+   按下标缓存会把「旧下标 → 旧分组的 DOM」在切组时原样显示（显示已删除分组的卡片）。
+   容器上的 data-group-id 记录归属，命中前一律校验，对不上就丢弃重建。 */
+var _groupContainers = {};   // { groupKey: div }
+var _groupLru = [];          // [groupKey, ...] 最近使用的在前
+
+/** 分组缓存键：优先用分组 id（不随下标平移），无 id 时退化为下标 */
+function _groupKey(groupIndex) {
+  var g = groups && groups[groupIndex];
+  if (g && g.id) return 'id:' + g.id;
+  return 'idx:' + groupIndex;
+}
+
+/** 容器归属校验：该容器是否确实属于当前下标对应的分组 */
+function _containerBelongsTo(container, groupIndex) {
+  if (!container) return false;
+  var g = groups && groups[groupIndex];
+  if (g && g.id) return container.dataset.groupId === String(g.id);
+  return container.dataset.group === String(groupIndex);
+}
 
 function _ensureGroupContainer(groupIndex) {
-  if (_groupContainers[groupIndex]) {
-    var pos = _groupLru.indexOf(groupIndex);
+  var key = _groupKey(groupIndex);
+  var cached = _groupContainers[key];
+  if (cached && _containerBelongsTo(cached, groupIndex)) {
+    var pos = _groupLru.indexOf(key);
     if (pos >= 0) _groupLru.splice(pos, 1);
-    _groupLru.unshift(groupIndex);
-    return _groupContainers[groupIndex];
+    _groupLru.unshift(key);
+    return cached;
   }
+  // 归属不符（下标平移后残留）→ 丢弃重建，绝不复用别的分组的 DOM
+  if (cached) { cached.remove(); delete _groupContainers[key]; }
   var div = document.createElement('div');
   div.className = 'speeddial-group';
   div.dataset.group = groupIndex;
+  div.dataset.groupId = (groups && groups[groupIndex] && groups[groupIndex].id) ? String(groups[groupIndex].id) : '';
   div.style.display = 'none';
   domMain.grid.appendChild(div);
-  _groupContainers[groupIndex] = div;
-  _groupLru.unshift(groupIndex);
+  _groupContainers[key] = div;
+  _groupLru.unshift(key);
   // LRU 驱逐：超过 3 组时销毁最久未用的
   while (_groupLru.length > 3) {
-    var oldIdx = _groupLru.pop();
-    var oldDiv = _groupContainers[oldIdx];
-    if (oldDiv) { oldDiv.remove(); delete _groupContainers[oldIdx]; }
+    var oldKey = _groupLru.pop();
+    var oldDiv = _groupContainers[oldKey];
+    if (oldDiv) { oldDiv.remove(); delete _groupContainers[oldKey]; }
   }
   return div;
+}
+
+/** BUG-035 / BUG-038: 分组增删 / 重排后统一失效 DOM 池（清空缓存并移除容器节点） */
+function _invalidateGroupDOMCache() {
+  Object.keys(_groupContainers).forEach(function (key) {
+    var el = _groupContainers[key];
+    if (el && typeof el.remove === 'function') el.remove();
+  });
+  _groupContainers = {};
+  _groupLru = [];
+}
+
+/** 当前活动分组的容器（不存在或不归属则为 null）——供拖拽等模块使用，避免外部按下标取缓存 */
+function _activeGroupContainer() {
+  var c = _groupContainers[_groupKey(activeGroupIndex)];
+  return _containerBelongsTo(c, activeGroupIndex) ? c : null;
 }
 
 function _showCurrentGroup() {
   // v1.2.9: 确保缓存的卡片高度与当前 CSS 变量一致（display:contents 下变量可能丢失）
   _syncCardHeights();
 
-  Object.keys(_groupContainers).forEach(function (gi) {
-    // eslint-disable-next-line eqeqeq -- gi 是对象键（字符串），必须与数字索引宽松比较
-    _groupContainers[gi].style.display = gi == activeGroupIndex ? 'contents' : 'none';
+  var activeKey = _groupKey(activeGroupIndex);
+  Object.keys(_groupContainers).forEach(function (key) {
+    _groupContainers[key].style.display = key === activeKey ? 'contents' : 'none';
   });
 }
 
@@ -460,10 +499,10 @@ function _syncCardHeights() {
   }
 }
 
-/** 检查当前分组是否已有缓存 DOM */
+/** 检查当前分组是否已有缓存 DOM（必须校验容器归属，见 BUG-038） */
 function _groupHasDOM(groupIndex) {
-  var c = _groupContainers[groupIndex];
-  return c && c.children.length > 0;
+  var c = _groupContainers[_groupKey(groupIndex)];
+  return !!(c && c.children.length > 0 && _containerBelongsTo(c, groupIndex));
 }
 
 /* ==================== 卡片渲染 ==================== */

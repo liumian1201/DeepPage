@@ -1056,7 +1056,235 @@ function send(method, params, sessionId) {
   check('刷新后隐藏的待办仍是隐藏', afterReload.todoVisible === false);
   check('刷新后待办内容与列数仍在', afterReload.todoItems >= 1 && afterReload.columns === 4, { todoItems: afterReload.todoItems, columns: afterReload.columns });
 
-  console.log('\n[22] 页面无 JS 报错');
+  console.log('\n[22] BUG-035 分组管理器删除后列表必须刷新（否则会删错分组）');
+  await evalJs(`(async () => {
+    const mk = (id, name, card) => ({ id, name, sortMode: 'manual', cards: [{ id: id + '_c', name: card, url: 'https://' + card.toLowerCase() + '.example.com/', visitCount: 0 }] });
+    groups = [mk('ga','A组','ALPHA'), mk('gb','B组','BRAVO'), mk('gc','C组','CHARLIE'), mk('gd','D组','DELTA')];
+    activeGroupIndex = 0; speeddials = groups[0].cards;
+    await saveGroups(groups);
+    renderSpeeddials(); renderGroupDots();
+    openGroupManager();
+    return 'ok';
+  })()`);
+  await sleep(500);
+  const mgrRows = () => evalJs(`JSON.stringify([...document.querySelectorAll('#group-manager-list .group-mgr-item')].map(el => el.dataset.index + ':' + ((el.querySelector('.group-mgr-name') || {}).value || '?')))`);
+  check('管理器列表与数据一致（4 行）', (await mgrRows()) === JSON.stringify(['0:A组', '1:B组', '2:C组', '3:D组']), await mgrRows());
+  // 删第 2 行（B组）→ 确认
+  await evalJs(`document.querySelector('#group-manager-list .group-mgr-item[data-index="1"] .group-mgr-btn[data-action="mgr-delete"]').click()`);
+  await sleep(250);
+  await evalJs(`document.getElementById('confirm-ok').click()`);
+  await sleep(900);
+  check('删除后列表已刷新（不再残留已删分组）', (await mgrRows()) === JSON.stringify(['0:A组', '1:C组', '2:D组']), await mgrRows());
+  check('删除后模型为 A,C,D', (await evalJs('groups.map(g => g.name).join(",")')) === 'A组,C组,D组', await evalJs('groups.map(g => g.name).join(",")'));
+  check('管理器仍打开（确认框是独立弹窗）', (await evalJs('!document.getElementById("dialog-group-manager").classList.contains("hidden")')) === true);
+  // 再点「行上显示为 D组」那一行的删除 —— 修好前这里删掉的是别的分组
+  const rowLabel = await evalJs(`(document.querySelector('#group-manager-list .group-mgr-item[data-index="2"] .group-mgr-name') || {}).value`);
+  await evalJs(`document.querySelector('#group-manager-list .group-mgr-item[data-index="2"] .group-mgr-btn[data-action="mgr-delete"]').click()`);
+  await sleep(250);
+  await evalJs(`document.getElementById('confirm-ok').click()`);
+  await sleep(900);
+  const modelAfter = await evalJs('groups.map(g => g.name).join(",")');
+  check('点「' + rowLabel + '」删除后删掉的正是该分组', rowLabel === 'D组' && modelAfter === 'A组,C组', { rowLabel, modelAfter });
+  check('删除后行索引与数据仍一一对应', (await mgrRows()) === JSON.stringify(['0:A组', '1:C组']), await mgrRows());
+  await evalJs('closeGroupManager()');
+  await sleep(400);
+
+  console.log('\n[23] BUG-038 DOM 池按分组 id 缓存（删组 / 重排后不再显示错卡片）');
+  await evalJs(`(async () => {
+    const mk = (id, name, card) => ({ id, name, sortMode: 'manual', cards: [{ id: id + '_c', name: card, url: 'https://' + card.toLowerCase() + '.example.com/', visitCount: 0 }] });
+    groups = [mk('pa','分组A','ALPHA'), mk('pb','分组B','BRAVO'), mk('pc','分组C','CHARLIE')];
+    activeGroupIndex = 0; speeddials = groups[0].cards;
+    await saveGroups(groups);
+    renderSpeeddials(); renderGroupDots();
+    for (let k = 0; k < 3; k++) { switchGroup(k); await new Promise(r => setTimeout(r, 200)); }
+    return 'ok';
+  })()`);
+  await sleep(600);
+  const visibleCards = () => evalJs(`JSON.stringify([...document.querySelectorAll('.speeddial-group')].filter(c => c.style.display !== 'none').map(c => (c.innerText || '').replace(/\\s+/g, ' ').trim().split(' ')[0]))`);
+  check('三组都进 DOM 池后只显示当前分组', (await visibleCards()) === JSON.stringify(['CHARLIE']), await visibleCards());
+  await evalJs(`(async () => { _pendingDeleteGroup = 0; await doDeleteGroup(); return 'ok'; })()`);
+  await sleep(700);
+  await evalJs(`(async () => { switchGroup(0); await new Promise(r => setTimeout(r, 300)); return 'ok'; })()`);
+  await sleep(400);
+  check('删掉 A 组后切到索引 0 显示的是 B 组卡片（不是已删除分组的）', (await visibleCards()) === JSON.stringify(['BRAVO']), await visibleCards());
+  // 重排：moveGroupTo(0,2) 后切回索引 0，必须显示该分组自己的卡片
+  await evalJs(`(async () => {
+    const mk = (id, name, card) => ({ id, name, sortMode: 'manual', cards: [{ id: id + '_c', name: card, url: 'https://' + card.toLowerCase() + '.example.com/', visitCount: 0 }] });
+    groups = [mk('ra','分组A','ALPHA'), mk('rb','分组B','BRAVO'), mk('rc','分组C','CHARLIE')];
+    activeGroupIndex = 0; speeddials = groups[0].cards;
+    await saveGroups(groups);
+    renderSpeeddials(); renderGroupDots();
+    for (let k = 0; k < 3; k++) { switchGroup(k); await new Promise(r => setTimeout(r, 200)); }
+    await moveGroupTo(0, 2);            // → [B, C, A]
+    await new Promise(r => setTimeout(r, 300));
+    switchGroup(0);
+    return 'ok';
+  })()`);
+  await sleep(800);
+  check('分组重排后切组显示该分组自己的卡片（BRAVO）', (await visibleCards()) === JSON.stringify(['BRAVO']), await visibleCards());
+  const poolState = JSON.parse(await evalJs(`JSON.stringify({
+    ids: [...document.querySelectorAll('.speeddial-group')].map(c => c.dataset.groupId),
+    modelIds: groups.map(g => g.id)
+  })`));
+  check('DOM 池容器数量不超过 LRU 上限', poolState.ids.length > 0 && poolState.ids.length <= 3, poolState.ids);
+  check('每个容器的 data-group-id 都能对应到现有分组（无已删除分组的残留容器）', poolState.ids.every(id => poolState.modelIds.indexOf(id) !== -1), poolState);
+
+  console.log('\n[24] BUG-036 sync 写入被配额拒绝时必须落 local 兜底（不再静默丢数据）');
+  const quotaProbe = JSON.parse(await evalJs(`(async () => {
+    const mk = (id, name, cardName) => ({ id, name, sortMode: 'manual', cards: [{ id: id + '_c', name: cardName, url: 'https://x.example.com/', visitCount: 0 }] });
+    groups = [mk('qa','A组','SMALL_A'), mk('qb','B组','SMALL_B')];
+    activeGroupIndex = 0; speeddials = groups[0].cards;
+    await saveGroups(groups);
+    await new Promise(r => setTimeout(r, 600));
+    // 单键超过 QUOTA_BYTES_PER_ITEM(8192) → chrome.storage.sync 真实拒绝
+    groups = [mk('qa','A组','HUGE_' + new Array(9000).join('X'))];
+    speeddials = groups[0].cards;
+    await saveGroups(groups);
+    await new Promise(r => setTimeout(r, 900));
+    const sync = await new Promise(r => chrome.storage.sync.get(['groups','groups_rev'], r));
+    const local = await new Promise(r => chrome.storage.local.get(['groups','groups_rev'], r));
+    const back = await getGroups();
+    const toast = document.querySelector('.toast');
+    return JSON.stringify({
+      syncHasHuge: JSON.stringify(sync.groups || []).indexOf('HUGE_') !== -1,
+      localHasHuge: JSON.stringify(local.groups || []).indexOf('HUGE_') !== -1,
+      localRev: typeof local.groups_rev === 'number',
+      readBackHasHuge: JSON.stringify(back || []).indexOf('HUGE_') !== -1,
+      toast: toast ? (toast.textContent || '') : ''
+    });
+  })()`));
+  check('sync 确实拒绝了超限写入（旧值未被覆盖）', quotaProbe.syncHasHuge === false, quotaProbe);
+  check('被拒后写入 local 兜底（新数据没丢）', quotaProbe.localHasHuge === true, quotaProbe);
+  check('local 兜底带版本号（供 getGroups 判定新旧）', quotaProbe.localRev === true, quotaProbe);
+  check('getGroups() 读回的是最新数据（local 优先于陈旧的 sync）', quotaProbe.readBackHasHuge === true, quotaProbe);
+  check('有用户可见提示（不再静默失败）', /本地/.test(quotaProbe.toast), quotaProbe.toast);
+  const recovered = JSON.parse(await evalJs(`(async () => {
+    const mk = (id, name, cardName) => ({ id, name, sortMode: 'manual', cards: [{ id: id + '_c', name: cardName, url: 'https://x.example.com/', visitCount: 0 }] });
+    groups = [mk('qa','A组','SMALL_A2'), mk('qb','B组','SMALL_B2')];
+    activeGroupIndex = 0; speeddials = groups[0].cards;
+    await saveGroups(groups);
+    await new Promise(r => setTimeout(r, 700));
+    const sync = await new Promise(r => chrome.storage.sync.get(['groups','groups_rev'], r));
+    const back = await getGroups();
+    return JSON.stringify({
+      syncHasSmall: JSON.stringify(sync.groups || []).indexOf('SMALL_A2') !== -1,
+      readBackHasSmall: JSON.stringify(back || []).indexOf('SMALL_A2') !== -1
+    });
+  })()`));
+  check('数据缩回配额内后 sync 写入恢复', recovered.syncHasSmall === true, recovered);
+  check('恢复后 getGroups() 重新以 sync 为准', recovered.readBackHasSmall === true, recovered);
+
+  console.log('\n[25] BUG-037 多标签页设置不再互相覆盖');
+  const tabB = await (async () => {
+    const t = await send('Target.createTarget', { url: `chrome-extension://${EXT_ID}/index.html` });
+    const a = await send('Target.attachToTarget', { targetId: t.targetId, flatten: true });
+    await send('Runtime.enable', {}, a.sessionId);
+    await send('Page.enable', {}, a.sessionId);
+    try { await send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false }, a.sessionId); } catch (e) { /* 忽略 */ }
+    return { targetId: t.targetId, sid: a.sessionId };
+  })();
+  const evalB = async (expr) => {
+    const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, tabB.sid);
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || 'eval error');
+    return r.result.value;
+  };
+  let bReady = false;
+  for (let i = 0; i < 40; i++) {
+    try {
+      if (await evalB('typeof currentSettings === "object" && !!currentSettings && !!document.getElementById("dashboard-grid")')) { bReady = true; break; }
+    } catch (e) { /* 页面还在导航 */ }
+    await sleep(300);
+  }
+  check('第二个标签页已就绪', bReady);
+  // A 页改列数并落盘
+  await evalJs(`(async () => { currentSettings.columns = 4; saveSettings(currentSettings); await flushSyncWrites(); return 'ok'; })()`);
+  await sleep(1400);
+  check('A 页写入后 sync.columns=4', (await evalJs(`new Promise(r => chrome.storage.sync.get('settings', d => r((d.settings || {}).columns)))`)) === 4);
+  check('B 页内存跟随 A 页的改动（跨标签页合并）', (await evalB('currentSettings.columns')) === 4, await evalB('currentSettings.columns'));
+  // B 页改一个无关设置 → 不能把 A 页刚改的列数覆盖回去
+  await evalB(`(async () => { currentSettings.showVisitCount = false; saveSettings(currentSettings); await flushSyncWrites(); return 'ok'; })()`);
+  await sleep(1400);
+  const afterB = JSON.parse(await evalJs(`new Promise(r => chrome.storage.sync.get('settings', d => r(JSON.stringify({ columns: (d.settings || {}).columns, showVisitCount: (d.settings || {}).showVisitCount }))))`));
+  check('B 页改无关设置后 A 页的改动未被回滚', afterB.columns === 4, afterB);
+  check('B 页自己的改动已落盘', afterB.showVisitCount === false, afterB);
+  // 收尾：恢复设置并关闭第二个标签页
+  await evalJs(`(async () => { currentSettings.columns = 5; currentSettings.showVisitCount = true; saveSettings(currentSettings); await flushSyncWrites(); return 'ok'; })()`);
+  await sleep(1000);
+  try { await send('Target.closeTarget', { targetId: tabB.targetId }); } catch (e) { /* 忽略 */ }
+  await sleep(400);
+
+  console.log('\n[26] BUG-039 表单回填必须覆盖表单收集（时钟 / 农历 / 外观）');
+  // 用户复现路径：设 12h / 关秒 / 单行农历 → 刷新 → 改任意无关开关 → 不得回退
+  await evalJs(`(async () => {
+    currentSettings.clockFormat = '12h';
+    currentSettings.clockShowSeconds = false;
+    currentSettings.lunarStyle = 'single';
+    saveSettings(currentSettings);
+    await flushSyncWrites();
+    return 'ok';
+  })()`);
+  await sleep(700);
+  await send('Page.navigate', { url: `chrome-extension://${EXT_ID}/index.html` }, sid);
+  await sleep(1600);
+  await waitForReady();
+  await evalJs('openSettingsPanel()');
+  await sleep(500);
+  check('刷新后「时钟格式」回填为 12h', (await evalJs(`document.getElementById('setting-clock-format').value`)) === '12h', await evalJs(`document.getElementById('setting-clock-format').value`));
+  check('刷新后「显示秒数」回填为关闭', (await evalJs(`document.getElementById('toggle-clock-seconds').checked`)) === false);
+  check('刷新后「农历样式」回填为单行', (await evalJs(`document.getElementById('setting-lunar-style').value`)) === 'single', await evalJs(`document.getElementById('setting-lunar-style').value`));
+  await evalJs(`(() => { const t = document.getElementById('toggle-show-visit-count'); t.checked = !t.checked; t.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; })()`);
+  await sleep(1100);
+  const keepClock = JSON.parse(await evalJs(`JSON.stringify([currentSettings.clockFormat, currentSettings.clockShowSeconds, currentSettings.lunarStyle])`));
+  check('改无关开关后三项偏好未被写回默认值（内存）', JSON.stringify(keepClock) === JSON.stringify(['12h', false, 'single']), keepClock);
+  const storedClock = JSON.parse(await evalJs(`new Promise(r => chrome.storage.sync.get('settings', d => r(JSON.stringify([(d.settings || {}).clockFormat, (d.settings || {}).clockShowSeconds, (d.settings || {}).lunarStyle]))))`));
+  check('改无关开关后三项偏好未被写回默认值（已落盘）', JSON.stringify(storedClock) === JSON.stringify(['12h', false, 'single']), storedClock);
+  // 不变式：先把表单全部改成脏值，再以数据回填 → 收集结果必须与数据完全一致
+  const invariant = JSON.parse(await evalJs(`(() => {
+    const dirty = [];
+    Object.keys(domSettings).forEach(k => {
+      const el = domSettings[k];
+      if (!el || !el.tagName) return;
+      const tag = el.tagName;
+      if (tag !== 'INPUT' && tag !== 'SELECT' && tag !== 'TEXTAREA') return;
+      dirty.push(k);
+      if (el.type === 'checkbox') { el.checked = !el.checked; return; }
+      if (tag === 'SELECT') {
+        const others = [...el.options].map(o => o.value).filter(v => v !== el.value);
+        if (others.length) el.value = others[0];
+        return;
+      }
+      if (el.type === 'color') { el.value = '#010203'; return; }
+      const num = parseFloat(el.value);
+      if (!isNaN(num) && (el.type === 'range' || el.type === 'number')) {
+        const min = el.min !== '' ? parseFloat(el.min) : num - 1;
+        const max = el.max !== '' ? parseFloat(el.max) : num + 1;
+        el.value = String(Math.min(max, Math.max(min, num === min ? min + 1 : min)));
+        return;
+      }
+      el.value = '__dirty__';
+    });
+    populateSettingsForm(currentSettings);
+    if (typeof populateAppearanceForm === 'function') populateAppearanceForm(domSettings, currentSettings);
+    const collected = collectSettingsFromForm();
+    const norm = (k, v) => {
+      if (k === 'bgColor') return (v === '#f0f2f5') ? '' : (v || '');
+      if (k === 'cardBgColor') return (v === '#ffffff') ? '' : (v || '');
+      if (k === 'cardTextColor') return (v === '#202124') ? '' : (v || '');
+      return v;
+    };
+    const mismatches = [];
+    Object.keys(collected).forEach(k => {
+      const exp = norm(k, currentSettings[k]);
+      if (JSON.stringify(exp) !== JSON.stringify(collected[k])) mismatches.push({ key: k, 期望: exp, 实际: collected[k] });
+    });
+    return JSON.stringify({ dirtyCount: dirty.length, collectedCount: Object.keys(collected).length, mismatches: mismatches });
+  })()`));
+  check('表单脏化后回填：收集结果与数据完全一致（populate ⊇ collect）', invariant.mismatches.length === 0, invariant.mismatches.slice(0, 6));
+  check('不变式覆盖全部表单收集字段（≥60）', invariant.collectedCount >= 60 && invariant.dirtyCount >= 40, invariant);
+  await evalJs('closeSettingsPanel()');
+  await sleep(400);
+
+  console.log('\n[27] 页面无 JS 报错');
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);
