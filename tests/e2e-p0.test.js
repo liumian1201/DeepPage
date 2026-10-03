@@ -1772,7 +1772,293 @@ function send(method, params, sessionId) {
   check('BUG-062 当前分组未被强行切回', batchRes.active === 1, batchRes);
   await evalJs(`chrome.runtime.sendMessage = window.__origSendMessage; delete window.__origSendMessage; 'restored'`);
 
-  console.log('\n[30] 页面无 JS 报错');
+  console.log('\n[30] v1.5.12 交互与死代码：BUG-060 / 074 / 075 / 076 / 065 / 066 / 053');
+  // BUG-058 要求这三条已发布交互有「行为断言」而非存在性断言：
+  //   R4 重置看板布局（BUG-060）、R6 WebDAV 自动备份字段（BUG-075）、R7 刷新网站图标（BUG-076）
+
+  // ---- BUG-060：设置面板「↺ 重置看板布局」必须真的恢复默认并落盘 ----
+  await evalJs(`(async () => {
+    ensureSettingsPanelReady();
+    var layout = _dashCurrentLayout();
+    layout.clock.span = 6; layout.clock.order = 3; layout.lunar.order = 0; layout.todo.span = 1;
+    _saveLayout(layout); _flushLayout();
+    await flushSyncWrites();
+    return 'ok';
+  })()`);
+  await sleep(400);
+  const dashBefore = JSON.parse(await evalJs('JSON.stringify(currentSettings.dashboardWidgetLayout)'));
+  check('BUG-060 复现前提：布局已被改成非默认（时钟 6 列 / 农历排首位）', dashBefore.clock.span === 6 && dashBefore.lunar.order === 0, dashBefore);
+  await evalJs(`(async () => {
+    openSettingsPanel();
+    document.getElementById('tab-btn-dashboard').click();
+    await new Promise(function (r) { setTimeout(r, 300); });
+    document.getElementById('btn-reset-dash-grid').click();
+    await new Promise(function (r) { setTimeout(r, 400); });
+    await flushSyncWrites();
+    return 'ok';
+  })()`);
+  await sleep(400);
+  const dashAfter = JSON.parse(await evalJs(`JSON.stringify({
+    layout: currentSettings.dashboardWidgetLayout,
+    spans: [].map.call(document.querySelectorAll('#dashboard-grid .dashboard-item'), function (e) { return e.dataset.widget + ':' + e.dataset.span; }).join(','),
+    domOrder: [].map.call(document.querySelectorAll('#dashboard-grid .dashboard-item'), function (e) { return e.dataset.widget; }).join(','),
+    toast: !!document.querySelector('.toast')
+  })`));
+  check('BUG-060 点击后布局回到注册表默认值（span/order 双恢复）',
+    JSON.stringify(dashAfter.layout) === JSON.stringify({ clock: { order: 0, span: 3 }, weather: { order: 1, span: 4 }, todo: { order: 2, span: 3 }, lunar: { order: 3, span: 2 } }),
+    dashAfter.layout);
+  check('BUG-060 DOM 跨列与顺序同步（不是只改数据）', dashAfter.spans === 'clock:3,weather:4,todo:3,lunar:2' && dashAfter.domOrder === 'clock,weather,todo,lunar', dashAfter);
+  const dashPersisted = JSON.parse(await evalJs(`(async () => JSON.stringify(await new Promise(function (r) {
+    chrome.storage.sync.get(['settings'], function (x) { r((x.settings || {}).dashboardWidgetLayout || null); });
+  })))()`));
+  check('BUG-060 重置结果已落盘（刷新后不回到改乱的布局）',
+    !!dashPersisted && dashPersisted.clock.span === 3 && dashPersisted.lunar.order === 3, dashPersisted);
+  const dashLocked = JSON.parse(await evalJs(`(async () => {
+    var layout = _dashCurrentLayout();
+    layout.clock.span = 5; _saveLayout(layout); _flushLayout();
+    await flushSyncWrites();
+    setLocked(true, false);
+    var before = JSON.stringify(currentSettings.dashboardWidgetLayout);
+    document.getElementById('btn-reset-dash-grid').click();
+    await new Promise(function (r) { setTimeout(r, 400); });
+    var after = JSON.stringify(currentSettings.dashboardWidgetLayout);
+    setLocked(false, false);
+    // 还原为默认，避免影响后续断言
+    document.getElementById('btn-reset-dash-grid').click();
+    await new Promise(function (r) { setTimeout(r, 400); });
+    await flushSyncWrites();
+    return JSON.stringify({ before: before, after: after });
+  })()`));
+  check('BUG-060 锁定态不允许重置（与「锁定禁用看板编辑」一致）',
+    dashLocked.before === dashLocked.after && JSON.parse(dashLocked.after).clock.span === 5, dashLocked);
+
+  // ---- BUG-074：搜索栏位置必须有一键恢复（按钮原先在 HTML 里根本不存在）----
+  const searchReset = JSON.parse(await evalJs(`(async () => {
+    openSettingsPanel();
+    document.getElementById('tab-btn-appearance').click();
+    await new Promise(function (r) { setTimeout(r, 250); });
+    var advToggle = document.getElementById('advanced-options-toggle');
+    var advGroup = document.getElementById('advanced-options-group');
+    if (advGroup && advGroup.classList.contains('hidden') && advToggle) advToggle.click();
+    await new Promise(function (r) { setTimeout(r, 200); });
+    var btn = document.getElementById('btn-reset-search-pos');
+    var visible = !!btn && btn.offsetParent !== null;
+    var st = document.getElementById('setting-search-top');
+    var sg = document.getElementById('setting-search-gap');
+    st.value = 200; sg.value = 10;
+    document.documentElement.style.setProperty('--search-top', '200px');
+    document.documentElement.style.setProperty('--search-gap', '10px');
+    currentSettings.searchMarginTop = 200; currentSettings.searchMarginBottom = 10;
+    await saveSettings(currentSettings); await flushSyncWrites();
+    if (btn) btn.click();
+    await new Promise(function (r) { setTimeout(r, 400); });
+    await flushSyncWrites();
+    var stored = await new Promise(function (r) { chrome.storage.sync.get(['settings'], function (x) { r(x.settings || {}); }); });
+    return JSON.stringify({
+      exists: !!btn, visible: visible,
+      sliderTop: st.value, sliderGap: sg.value,
+      labelTop: document.getElementById('search-top-val').textContent,
+      labelGap: document.getElementById('search-gap-val').textContent,
+      cssTop: getComputedStyle(document.documentElement).getPropertyValue('--search-top').trim(),
+      cssGap: getComputedStyle(document.documentElement).getPropertyValue('--search-gap').trim(),
+      storedTop: stored.searchMarginTop, storedGap: stored.searchMarginBottom
+    });
+  })()`));
+  check('BUG-074 外观页存在且可见「↺ 重置搜索栏位置」（原先 id 悬空 → 死分支）',
+    searchReset.exists === true && searchReset.visible === true, searchReset);
+  check('BUG-074 点击后滑块 / 数值 / CSS 变量全部回到 60 与 48',
+    searchReset.sliderTop === '60' && searchReset.sliderGap === '48' &&
+    searchReset.labelTop === '60px' && searchReset.labelGap === '48px' &&
+    searchReset.cssTop === '60px' && searchReset.cssGap === '48px', searchReset);
+  check('BUG-074 重置结果已落盘（BUG-049 同款约定）',
+    searchReset.storedTop === 60 && searchReset.storedGap === 48, searchReset);
+
+  // ---- BUG-075：toggle-webdav-auto 不存在却恒写 webdav_auto_backup=false + 4 个死字段 ----
+  const deadFields = JSON.parse(await evalJs(`(async () => {
+    openSettingsPanel();
+    document.getElementById('tab-btn-data').click();
+    await new Promise(function (r) { setTimeout(r, 250); });
+    await new Promise(function (r) { chrome.storage.local.remove(['webdav_auto_backup'], r); });
+    document.getElementById('webdav-url').value = 'https://example.com/dav/';
+    document.getElementById('webdav-user').value = 'probe-user';
+    document.getElementById('webdav-pass').value = 'probe-pass';
+    document.getElementById('btn-webdav-save').click();
+    await new Promise(function (r) { setTimeout(r, 600); });
+    var local = await new Promise(function (r) { chrome.storage.local.get(null, r); });
+    // 老数据里残留的死字段必须被 getSettings 剔除，否则会被整份回写一直带下去
+    var stored = await new Promise(function (r) { chrome.storage.sync.get(['settings'], function (x) { r(x.settings || {}); }); });
+    stored.presetSize = 'large'; stored.backupRemind = false; stored.webdavAutoBackup = true; stored.bingIdx = 42;
+    await new Promise(function (r) { chrome.storage.sync.set({ settings: stored }, r); });
+    var fresh = await getSettings();
+    var dead = ['presetSize', 'backupRemind', 'webdavAutoBackup', 'bingIdx'];
+    return JSON.stringify({
+      localHasAutoBackupKey: Object.prototype.hasOwnProperty.call(local, 'webdav_auto_backup'),
+      localUrl: local.webdav_url,
+      deadInDefaults: dead.filter(function (k) { return k in DEFAULT_SETTINGS; }),
+      deadAfterGetSettings: dead.filter(function (k) { return k in fresh; }),
+      toggleEl: !!document.getElementById('toggle-webdav-auto')
+    });
+  })()`));
+  check('BUG-075 保存 WebDAV 配置不再写入 webdav_auto_backup（原先每次恒写 false）',
+    deadFields.localHasAutoBackupKey === false && deadFields.localUrl === 'https://example.com/dav/', deadFields);
+  check('BUG-075 4 个死设置字段已从 DEFAULT_SETTINGS 移除', deadFields.deadInDefaults.length === 0, deadFields.deadInDefaults);
+  check('BUG-075 老数据里的死字段被 getSettings 剔除（不再随整份回写扩散）',
+    deadFields.deadAfterGetSettings.length === 0, deadFields.deadAfterGetSettings);
+
+  // ---- BUG-076：刷新网站图标必须有入口且真的调到函数 ----
+  const favEntry = JSON.parse(await evalJs(`(async () => {
+    isLocked = false;
+    var mk = function (id, name, image) { return { id: id, name: name, url: 'https://' + id + '.example.com/', visitCount: 0, image: image || '' }; };
+    groups = [{ id: 'gf', name: '图标组', sortMode: 'manual', cards: [mk('f1', 'F1'), mk('f2', 'F2', 'idx:card_1700000000000_abcd')] }];
+    activeGroupIndex = 0; speeddials = groups[0].cards;
+    await saveGroups(groups); renderSpeeddials(); renderGroupDots();
+    var itemOf = function (a) { return document.querySelector('#context-menu [data-action="' + a + '"]'); };
+    var visible = function (a) { var el = itemOf(a); return !!el && !el.classList.contains('hidden'); };
+
+    contextCardId = 'f1';
+    showContextMenu(100, 100, 'card');
+    var normal = { visible: visible('refreshFavicon'), label: itemOf('refreshFavicon') ? itemOf('refreshFavicon').textContent.trim() : null };
+    hideContextMenu();
+
+    contextCardId = 'f2';
+    showContextMenu(100, 100, 'card');
+    var customImg = visible('refreshFavicon');
+    hideContextMenu();
+
+    contextCardId = 'f1';
+    isLocked = true;
+    showContextMenu(100, 100, 'card');
+    var locked = visible('refreshFavicon');
+    hideContextMenu();
+    isLocked = false;
+
+    var calledWith = null;
+    var orig = window.refreshCardFavicon;
+    window.refreshCardFavicon = function (id) { calledWith = id; return Promise.resolve(true); };
+    contextCardId = 'f1';
+    handleContextAction('refreshFavicon', {});
+    window.refreshCardFavicon = orig;
+    contextCardId = null;
+    return JSON.stringify({ normal: normal, customImg: customImg, locked: locked, calledWith: calledWith });
+  })()`));
+  check('BUG-076 卡片右键菜单有「🔄 刷新网站图标」且默认可见',
+    favEntry.normal.visible === true && /刷新网站图标/.test(favEntry.normal.label || ''), favEntry.normal);
+  check('BUG-076 自定义上传图的卡片不提供该入口（不会静默覆盖用户上传的图）', favEntry.customImg === false, favEntry);
+  check('BUG-076 锁定时隐藏（与编辑 / 删除 / 移动一致）', favEntry.locked === false, favEntry);
+  check('BUG-076 点击路径真的调用 refreshCardFavicon（不只是「函数存在」）', favEntry.calledWith === 'f1', favEntry);
+
+  const favAdd = JSON.parse(await evalJs(`(async () => {
+    var calls = [];
+    var orig = window.enrichCardFavicons;
+    window.enrichCardFavicons = function (o) { calls.push(o || null); return Promise.resolve({ fetched: 0, failed: 0 }); };
+    currentSettings.useFavicon = true;
+    await addSpeeddial('新卡图标探测', 'https://newcard.example.com/', '');
+    await new Promise(function (r) { setTimeout(r, 300); });
+    currentSettings.useFavicon = false;
+    window.enrichCardFavicons = orig;
+    var added = groups[0].cards.filter(function (c) { return c.name === '新卡图标探测'; });
+    var opts = calls.length ? calls[0] : null;
+    return JSON.stringify({ calls: calls.length, cardIds: opts && opts.cardIds ? opts.cardIds : null, addedIds: added.map(function (c) { return c.id; }) });
+  })()`));
+  check('BUG-076 新增卡片后立刻按 id 补图标（原先要等下次打开新标签页）',
+    favAdd.calls === 1 && Array.isArray(favAdd.cardIds) && favAdd.cardIds.length === 1 &&
+    favAdd.addedIds.indexOf(favAdd.cardIds[0]) !== -1, favAdd);
+  const favAddOff = JSON.parse(await evalJs(`(async () => {
+    var calls = 0;
+    var orig = window.enrichCardFavicons;
+    window.enrichCardFavicons = function () { calls++; return Promise.resolve({ fetched: 0, failed: 0 }); };
+    currentSettings.useFavicon = false;
+    await addSpeeddial('开关关闭探测', 'https://offcard.example.com/', '');
+    await new Promise(function (r) { setTimeout(r, 250); });
+    window.enrichCardFavicons = orig;
+    return JSON.stringify({ calls: calls });
+  })()`));
+  check('BUG-076 对照：favicon 开关关闭时不发起取图', favAddOff.calls === 0, favAddOff);
+
+  // ---- BUG-065 / BUG-066：设置面板死 CSS 与深色危险按钮 ----
+  const cssProbe = JSON.parse(await evalJs(`(async () => {
+    var sels = [];
+    var walk = function (rules) {
+      for (var i = 0; i < rules.length; i++) {
+        var r = rules[i];
+        if (r.selectorText) sels.push(r.selectorText);
+        if (r.cssRules) walk(r.cssRules);
+      }
+    };
+    for (var s = 0; s < document.styleSheets.length; s++) {
+      try { walk(document.styleSheets[s].cssRules); } catch (e) { /* 跨源表跳过 */ }
+    }
+    openSettingsPanel();
+    document.getElementById('tab-btn-dashboard').click();
+    await new Promise(function (r) { setTimeout(r, 300); });
+    var panel = document.querySelector('.settings-panel');
+    var shownDur = getComputedStyle(panel).transitionDuration;
+    closeSettingsPanel();
+    await new Promise(function (r) { setTimeout(r, 300); });
+    var hidden = { display: getComputedStyle(panel).display, duration: getComputedStyle(panel).transitionDuration };
+
+    openSettingsPanel();
+    document.getElementById('tab-btn-dashboard').click();
+    await new Promise(function (r) { setTimeout(r, 300); });
+    var read = function (id) { var c = getComputedStyle(document.getElementById(id)); return { bg: c.backgroundColor, fg: c.color, border: c.borderTopColor }; };
+    document.documentElement.setAttribute('data-theme', 'dark');
+    await new Promise(function (r) { setTimeout(r, 500); });
+    var darkDanger = read('btn-reset-dash-grid');
+    var darkSmall = read('btn-reset-card-size');
+    document.documentElement.setAttribute('data-theme', 'light');
+    await new Promise(function (r) { setTimeout(r, 500); });
+    var lightDanger = read('btn-reset-dash-grid');
+    closeSettingsPanel();
+    return JSON.stringify({
+      deadSelectors: sels.filter(function (x) { return x.indexOf('.settings-panel.hidden') !== -1; }),
+      shownDur: shownDur, hidden: hidden,
+      darkDanger: darkDanger, darkSmall: darkSmall, lightDanger: lightDanger
+    });
+  })()`));
+  check('BUG-065 死 CSS 已删除（全页面不再有 .settings-panel.hidden 规则，含窄屏重复那份）',
+    cssProbe.deadSelectors.length === 0, cssProbe.deadSelectors);
+  check('BUG-065 面板隐藏仍由 .hidden 的 display:none 负责，且不再声明永不播放的过渡',
+    cssProbe.hidden.display === 'none' && cssProbe.shownDur === '0s' && cssProbe.hidden.duration === '0s', cssProbe.hidden);
+  check('BUG-066 深色模式下危险按钮与「重置小按钮」配色一致（不再是浅粉亮块）',
+    cssProbe.darkDanger.bg === 'rgba(231, 76, 60, 0.2)' && cssProbe.darkDanger.bg === cssProbe.darkSmall.bg &&
+    cssProbe.darkDanger.fg === 'rgb(231, 76, 60)' && cssProbe.darkDanger.border === 'rgb(192, 57, 43)', cssProbe.darkDanger);
+  check('BUG-066 对照：浅色模式外观未变（仍是原浅粉底 + 深红字）',
+    cssProbe.lightDanger.bg === 'rgb(252, 232, 230)' && cssProbe.lightDanger.fg === 'rgb(217, 48, 37)', cssProbe.lightDanger);
+
+  // ---- BUG-053：本地搜索下拉的卡片名必须走文本节点（innerHTML 注入）----
+  const xssProbe = JSON.parse(await evalJs(`(async () => {
+    var g = groups[activeGroupIndex];
+    var payload = '<img src=x onerror="window.__xssP0=1"> hi';
+    g.cards.push({ id: 'xss1', name: payload, url: 'https://xss.example.com/hi', image: '', color: '#888', visitCount: 0, createdAt: Date.now(), lastOpened: 0 });
+    g.cards.push({ id: 'xss2', name: '普通卡片 hi', url: 'https://plain.example.com/hi', image: '', color: '#888', visitCount: 0, createdAt: Date.now(), lastOpened: 0 });
+    speeddials = g.cards;
+    renderSpeeddials();
+    performLocalSearch('hi');
+    await new Promise(function (r) { setTimeout(r, 300); });
+    var list = document.getElementById('local-search-list');
+    var names = [].map.call(list.querySelectorAll('.ls-name'), function (e) { return e.textContent; });
+    var out = {
+      injected: list.querySelectorAll('img, iframe, script, style, svg').length,
+      execd: !!window.__xssP0,
+      names: names,
+      marks: list.querySelectorAll('.ls-name mark').length,
+      markTexts: [].map.call(list.querySelectorAll('.ls-name mark'), function (e) { return e.textContent; })
+    };
+    hideLocalSearchDropdown();
+    g.cards = g.cards.filter(function (c) { return c.id !== 'xss1' && c.id !== 'xss2'; });
+    speeddials = g.cards;
+    renderSpeeddials();
+    delete window.__xssP0;
+    return JSON.stringify(out);
+  })()`));
+  check('BUG-053 卡片名里的标签不再被解析成元素（HTML 注入被堵死）',
+    xssProbe.injected === 0 && xssProbe.execd === false, xssProbe);
+  check('BUG-053 名称按原文显示且关键词高亮仍生效（正对照）',
+    xssProbe.names.indexOf('<img src=x onerror="window.__xssP0=1"> hi') !== -1 &&
+    xssProbe.names.indexOf('普通卡片 hi') !== -1 &&
+    xssProbe.marks === 2 && xssProbe.markTexts.every(function (t) { return t === 'hi'; }), xssProbe);
+
+  console.log('\n[31] 页面无 JS 报错');
   consoleLog.report();
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 

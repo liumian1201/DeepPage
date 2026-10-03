@@ -59,7 +59,6 @@ var DEFAULT_SETTINGS = {
   wallpaperUrl: '',
   wallpaperColor: '#1a1a2e',
   wallpaperOpacity: 30,
-  bingIdx: 0,
   bingUHD: false,
   bingRegion: 'zh-CN',
   bingAutoRefresh: true,
@@ -87,7 +86,6 @@ var DEFAULT_SETTINGS = {
   cardBgColor: '',
   cardTextColor: '',
   cardFontSize: 13,
-  presetSize: 'medium',
   cardWidth: 270,
   cardHeight: 270,
   cardBorderRadius: 14,
@@ -97,13 +95,18 @@ var DEFAULT_SETTINGS = {
   cardsMarginTop: 0,
   groupDotSize: 10,
   groupTabSize: 13,
-  webdavAutoBackup: false,
-  backupRemind: true,
   backupMode: 'off',
   backupRemindDays: 7,
   backupIncludeImages: true,   // v1.3.3: 关闭则云端只同步配置（不含图片）
   cardThemeColor: true
 };
+
+/** BUG-075: 已下线的设置字段 —— 历次迁移的残留，全仓库无任何读取方：
+ *  presetSize（卡片尺寸预设，已下线）、backupRemind / webdavAutoBackup（被 backupMode 取代）、
+ *  bingIdx（Bing 序号实际存在 local 的 bing_wallpapers_cache.idx）。
+ *  getSettings 时从内存副本剔除：老数据里若还留着，下一次整份回写就自然从 storage 消失，
+ *  不需要额外写一次盘（也不占 sync 配额）。 */
+var DEAD_SETTINGS_KEYS = ['presetSize', 'backupRemind', 'webdavAutoBackup', 'bingIdx'];
 
 function loadFromStorage(key, defaultValue) {
   return new Promise(function (resolve) {
@@ -407,6 +410,8 @@ async function getSettings() {
     stored = await loadFromLocal(STORAGE_KEYS.SETTINGS, {});
   }
   var merged = { ...DEFAULT_SETTINGS, ...stored };
+  // BUG-075: 剔除已下线字段（见 DEAD_SETTINGS_KEYS），避免迁移残留被一直回写下去
+  DEAD_SETTINGS_KEYS.forEach(function (k) { delete merged[k]; });
   // 迁移旧版 searchEngine
   if (merged.searchEngine && !merged.activeSearchEngine) {
     merged.activeSearchEngine = merged.searchEngine;

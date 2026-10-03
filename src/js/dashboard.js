@@ -96,6 +96,25 @@ function resetDashWorkingLayout() {
   _dashWorkingLayout = null;
 }
 
+/** BUG-060: 把布局恢复为注册表默认值（设置面板「↺ 重置看板布局」）
+ *  默认值只有一处来源 —— DASHBOARD_WIDGETS 的注册顺序与 defaultSpan，
+ *  因此新增组件后这个按钮自动覆盖到它，不需要再维护一份默认布局副本。
+ *  锁定态与看板编辑一致：锁定时不允许改动布局。 */
+function resetDashboardWidgetLayout() {
+  if (_dashIsLocked()) {
+    if (typeof showToast === 'function') showToast('🔒 界面已锁定，无法重置看板布局', 'info');
+    return false;
+  }
+  var layout = {};
+  DASHBOARD_WIDGETS.forEach(function (w, i) {
+    layout[w.id] = { order: i, span: w.defaultSpan };
+  });
+  _saveLayout(layout);      // 应用到 DOM + 起防抖计时
+  _flushLayout();           // 显式动作立即落盘（不等防抖，避免用户随即关页丢改动）
+  if (typeof showToast === 'function') showToast('↺ 看板布局已恢复默认', 'success');
+  return true;
+}
+
 /**
  * 把布局应用到 DOM：跨列写 grid-column，顺序**物理重排 DOM**（不用 CSS order）。
  * 用 CSS order 会让 DOM 顺序与视觉顺序不一致 —— 屏幕阅读器与键盘 Tab 会按 DOM 顺序走，
@@ -170,6 +189,15 @@ function initDashboardGrid() {
     editBtn.addEventListener('click', function (e) {
       e.stopPropagation();
       toggleDashEdit();
+    });
+  }
+
+  // BUG-060: 设置面板「↺ 重置看板布局」—— 原先按钮只有 HTML 与样式，
+  // 全仓库无任何 JS 绑定，点了没反应也没有提示（resetDashWorkingLayout 也无调用方）
+  var resetGridBtn = document.getElementById('btn-reset-dash-grid');
+  if (resetGridBtn) {
+    resetGridBtn.addEventListener('click', function () {
+      resetDashboardWidgetLayout();
     });
   }
 

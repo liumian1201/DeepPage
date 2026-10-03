@@ -48,6 +48,15 @@
   --transition-normal: 0.25s ease;
   --transition-slow: 0.35s ease;
 
+  /* BUG-066: 危险操作按钮配色（.btn-reset-danger）。抽成变量是为了让深浅两套主题
+     都有明确取值 —— 原先浅色值写死在 settings.css 里，深色模式只能靠 base.css 的
+     [data-theme="dark"] 覆盖，而那条覆盖只写了另一个类名 .btn-reset-small，
+     于是深色面板上三个危险按钮是刺眼的浅粉块。 */
+  --danger-bg: #fce8e6;
+  --danger-bg-hover: #f8d7da;
+  --danger-border: #d93025;
+  --danger-fg: #d93025;
+
   --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
 }
@@ -82,6 +91,12 @@
   --accent: #5b8def;
   --accent-light: #1e2d50;
   --accent-hover: #7aa3f4;
+
+  /* BUG-066: 深色下的危险操作按钮 —— 与 .btn-reset-small 的深色取值保持一致 */
+  --danger-bg: rgba(231, 76, 60, 0.2);
+  --danger-bg-hover: rgba(231, 76, 60, 0.32);
+  --danger-border: #c0392b;
+  --danger-fg: #e74c3c;
 }
 
 /* --------------------- 全局重置 --------------------- */
@@ -254,10 +269,6 @@ body.has-wallpaper::before {
     top: 0;
     transform: none;
     max-height: 100vh;
-  }
-
-  .settings-panel.hidden {
-    transform: scale(0.95);
   }
 
   .container {

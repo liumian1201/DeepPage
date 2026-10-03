@@ -19,15 +19,12 @@
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  opacity: 1;
-  transition: opacity var(--transition-fast), transform var(--transition-fast);
 }
 
-.settings-panel.hidden {
-  opacity: 0;
-  transform: translateX(-50%) scale(0.95);
-  pointer-events: none;
-}
+/* BUG-065: 这里原先声明了 opacity/transform 过渡与 .settings-panel.hidden 的淡出终态，
+   但 base.css 的 `.hidden { display: none !important }` 在 display 上必胜，元素直接离开
+   渲染树 —— display 不可过渡，那段动画从未播放过（纯死 CSS，已删）。
+   面板的显示/隐藏统一由 .hidden 的 display 切换负责。 */
 
 .settings-panel-header {
   display: flex;
@@ -382,10 +379,10 @@
 
 .btn-reset-danger {
   padding: 10px 14px;
-  border: 1px solid #d93025;
+  border: 1px solid var(--danger-border);
   border-radius: var(--btn-radius);
-  background: #fce8e6;
-  color: #d93025;
+  background: var(--danger-bg);
+  color: var(--danger-fg);
   font-size: 14px;
   font-weight: 600;
   font-family: var(--font-family);
@@ -395,7 +392,7 @@
 }
 
 .btn-reset-danger:hover {
-  background: #f8d7da;
+  background: var(--danger-bg-hover);
 }
 
 /* --------------------- 导入 loading 遮罩 --------------------- */

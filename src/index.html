@@ -390,9 +390,12 @@
             <div class="setting-group">
               <div class="setting-inline-row">
                 <label for="setting-search-gap" class="setting-inline-label">搜索框与卡片间距</label>
-                <span id="search-gap-val" class="slider-val">24px</span>
-                <input type="range" id="setting-search-gap" min="0" max="120" value="24" step="1">
+                <span id="search-gap-val" class="slider-val">48px</span>
+                <input type="range" id="setting-search-gap" min="0" max="120" value="48" step="1">
               </div>
+            </div>
+            <div class="setting-group">
+              <button id="btn-reset-search-pos" class="btn-reset-small">↺ 重置搜索栏位置</button>
             </div>
             <div class="setting-group">
               <button id="btn-reset-topbar" class="btn-reset-small">↺ 重置信息栏</button>
@@ -593,6 +596,7 @@
       <div role="menuitem" tabindex="-1" class="context-menu-item" data-action="copyurl">📋 复制 URL</div>
       <div role="menuitem" tabindex="-1" class="context-menu-item" data-action="edit">✏️ 编辑</div>
       <div role="menuitem" tabindex="-1" class="context-menu-item" data-action="capture">📸 刷新截图</div>
+      <div role="menuitem" tabindex="-1" class="context-menu-item" data-action="refreshFavicon">🔄 刷新网站图标</div>
       <div role="menuitem" tabindex="-1" class="context-menu-item has-sub" data-action="moveToGroup">📂 移动到分组 ▸</div>
       <div role="menuitem" tabindex="-1" class="context-menu-item danger" data-action="delete">🗑️ 删除</div>
       <div class="context-menu-separator"></div>

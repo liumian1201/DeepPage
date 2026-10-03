@@ -171,6 +171,9 @@ function bindAppearancePreview(dom, onChanged) {
     if (sgv) sgv.textContent = '48px';
     document.documentElement.style.setProperty('--search-top', '60px');
     document.documentElement.style.setProperty('--search-gap', '48px');
+    // BUG-074: 按钮此前在 HTML 里不存在（死分支），补上入口的同时按 BUG-049 的约定落盘 ——
+    // 程序化赋值不触发 change，不显式保存的话刷新后重置意图丢失
+    if (onChanged) onChanged();
   });
 
   if (onChanged) {

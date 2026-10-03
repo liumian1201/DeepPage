@@ -11,7 +11,6 @@ function initWebdavSection() {
   var webdavPassEl  = document.getElementById('webdav-pass');
   var webdavStatus  = document.getElementById('webdav-status');
   var webdavCfgStatus = document.getElementById('webdav-config-status');
-  var toggleWebdavAuto = document.getElementById('toggle-webdav-auto');
 
   // ---- 状态提示（webdav-status 用于临时消息，webdav-config-status 用于持久状态） ----
   function _showWStatus(msg, ok) {
@@ -64,8 +63,7 @@ function initWebdavSection() {
     chrome.storage.local.set({
       webdav_url: webdavUrlEl.value.trim(),
       webdav_user: webdavUserEl.value.trim(),
-      webdav_pass: passEncoded,
-      webdav_auto_backup: toggleWebdavAuto ? toggleWebdavAuto.checked : false
+      webdav_pass: passEncoded
     }, function () {
       if (chrome.runtime.lastError) {
         _showConfigStatus('❌ 保存失败: ' + chrome.runtime.lastError.message, false);
@@ -225,7 +223,7 @@ function initWebdavSection() {
   }
 
   // ---- 加载已保存的 WebDAV 配置 ----
-  chrome.storage.local.get(['webdav_url','webdav_user','webdav_pass','webdav_auto_backup'], function (r) {
+  chrome.storage.local.get(['webdav_url','webdav_user','webdav_pass'], function (r) {
     if (webdavUrlEl) webdavUrlEl.value = r.webdav_url || '';
     if (webdavUserEl) webdavUserEl.value = r.webdav_user || '';
     // BUG-054：损坏/非 base64 的值不能让回调整个中断（否则下面的 _updateBackupModeUI 不再执行）

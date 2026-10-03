@@ -1106,7 +1106,7 @@ var IMPORT_RANGES = {
   dashLeft: [0, 2000], dashBottom: [0, 2000], dashItemW: [40, 600], dashItemH: [0, 600], dashGap: [0, 200],
   cardWidth: [50, 2000], cardHeight: [0, 2000], cardBorderRadius: [0, 200], cardOpacity: [0, 100],
   cardFontSize: [8, 48], cardsMarginTop: [0, 2000],
-  wallpaperOpacity: [0, 100], wallpaperRotateMin: [1, 1440], bingIdx: [0, 500],
+  wallpaperOpacity: [0, 100], wallpaperRotateMin: [1, 1440],
   bingRefreshMin: [1, 1440], weatherRefreshMin: [1, 1440], backupRemindDays: [1, 365]
 };
 

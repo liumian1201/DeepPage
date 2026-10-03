@@ -59,17 +59,21 @@ function _faviconUrlFor(cardUrl) {
   } catch (e) { return null; }
 }
 
-/** 为缺图卡片补 favicon；返回 { fetched, failed } */
+/** 为缺图卡片补 favicon；返回 { fetched, failed }
+ *  BUG-076: 可传 { cardIds: [...] } 只处理指定卡片（新增卡片后立即补图用） */
 async function enrichCardFavicons(options) {
   options = options || {};
   if (!(currentSettings && currentSettings.useFavicon)) return { fetched: 0, failed: 0 };
   if (typeof cacheCardIcon !== 'function') return { fetched: 0, failed: 0 };
+
+  var onlyIds = Array.isArray(options.cardIds) && options.cardIds.length ? options.cardIds : null;
 
   var candidates = [];
   (groups || []).forEach(function (g) {
     (g.cards || []).forEach(function (c) {
       if (!c || c.image) return;                 // 已有图（自定义或 favicon）不动
       if (c.faviconFailed) return;               // 失败过的不再重试
+      if (onlyIds && onlyIds.indexOf(c.id) === -1) return;
       if (!_faviconUrlFor(c.url)) return;
       candidates.push(c);
     });
@@ -819,6 +823,14 @@ async function addSpeeddial(name, url, image) {
   speeddials.push({ id, name, url, image: image || '', color: stringToColor(url), visitCount: 0, createdAt: Date.now(), lastOpened: 0 });
   await saveSpeeddials(speeddials);
   renderSpeeddials();
+  // BUG-076: 新增卡片后立刻补一次网站图标 —— 原先只有 main.js 的首屏 idle 回调会补，
+  // 于是新加的卡片要等下次打开新标签页才出图标（期间一直是首字符色块）。
+  // 只针对这一张，且不 await：图标是装饰性数据，不挡保存流程。
+  if (!image && currentSettings && currentSettings.useFavicon && typeof enrichCardFavicons === 'function') {
+    enrichCardFavicons({ cardIds: [id] }).then(function (r) {
+      if (r && r.fetched > 0 && typeof renderSpeeddials === 'function') renderSpeeddials();
+    }).catch(function () {});
+  }
 }
 
 async function editSpeeddial(id, name, url, image) {

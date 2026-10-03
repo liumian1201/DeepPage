@@ -194,9 +194,6 @@ function _nameToPinyin(name) {
   }
   return result.toLowerCase();
 }
-function escapeRegExp(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 
 /** 从所有分组打平卡片，按名称+URL 模糊匹配（大小写不敏感），智能排序截断 8 条 */
 function performLocalSearch(query) {
@@ -247,6 +244,45 @@ function performLocalSearch(query) {
   renderLocalSearchDropdown(query, total);
 }
 
+/** BUG-053: 把卡片名按关键词切成「文本 + <mark>」节点写进容器。
+ *  卡片名可能含任意字符（导入的备份、网页 <title> 自动入库），拼字符串再 innerHTML
+ *  会形成 HTML 注入 —— 这里一律用 createTextNode，标签不可能被创建出来。 */
+function _appendHighlightedName(container, rawName, keywords) {
+  var name = String(rawName == null ? '' : rawName);
+  if (!name) return;
+
+  // 收集所有命中区间（大小写不敏感，关键词之间可能重叠）
+  var lower = name.toLowerCase();
+  var ranges = [];
+  (keywords || []).forEach(function (kw) {
+    if (!kw) return;
+    var from = 0, at;
+    while ((at = lower.indexOf(kw, from)) !== -1) {
+      ranges.push([at, at + kw.length]);
+      from = at + kw.length;
+    }
+  });
+  if (!ranges.length) { container.appendChild(document.createTextNode(name)); return; }
+
+  ranges.sort(function (a, b) { return a[0] - b[0] || b[1] - a[1]; });
+  var merged = [];
+  ranges.forEach(function (r) {
+    var last = merged[merged.length - 1];
+    if (last && r[0] <= last[1]) { if (r[1] > last[1]) last[1] = r[1]; return; }
+    merged.push([r[0], r[1]]);
+  });
+
+  var pos = 0;
+  merged.forEach(function (r) {
+    if (r[0] > pos) container.appendChild(document.createTextNode(name.slice(pos, r[0])));
+    var mark = document.createElement('mark');
+    mark.textContent = name.slice(r[0], r[1]);
+    container.appendChild(mark);
+    pos = r[1];
+  });
+  if (pos < name.length) container.appendChild(document.createTextNode(name.slice(pos)));
+}
+
 function renderLocalSearchDropdown(originalQuery, total) {
   var dd = document.getElementById('local-search-dropdown');
   var list = document.getElementById('local-search-list');
@@ -258,20 +294,31 @@ function renderLocalSearchDropdown(originalQuery, total) {
     return;
   }
 
-  var html = '';
   // BUG-026: 多关键词时对每个关键词分别高亮
   var keywords = originalQuery.toLowerCase().split(/\s+/).filter(function (k) { return k.length > 0; });
+  // BUG-053: 整个下拉改为 DOM 构建（原先是拼 HTML 字符串后 list.innerHTML = html，
+  // 未转义的卡片名会被当标签解析）；groupName 同样走 textContent
+  list.innerHTML = '';
   _localSearchResults.forEach(function (item, i) {
-    var name = item.card.name || '';
-    keywords.forEach(function (kw) {
-      name = name.replace(new RegExp('(' + escapeRegExp(kw) + ')', 'gi'), '<mark>$1</mark>');
-    });
-    html += '<div class="local-search-item" role="option" id="ls-opt-' + i + '" aria-selected="false" data-index="' + i + '">' +
-      '<span class="ls-name">' + name + '</span>' +
-      '<span class="ls-badge">📁 ' + escapeHtml(item.groupName) + '</span>' +
-      '</div>';
+    var row = document.createElement('div');
+    row.className = 'local-search-item';
+    row.setAttribute('role', 'option');
+    row.id = 'ls-opt-' + i;
+    row.setAttribute('aria-selected', 'false');
+    row.dataset.index = String(i);
+
+    var nameEl = document.createElement('span');
+    nameEl.className = 'ls-name';
+    _appendHighlightedName(nameEl, item.card.name || '', keywords);
+
+    var badgeEl = document.createElement('span');
+    badgeEl.className = 'ls-badge';
+    badgeEl.textContent = '📁 ' + (item.groupName || '');
+
+    row.appendChild(nameEl);
+    row.appendChild(badgeEl);
+    list.appendChild(row);
   });
-  list.innerHTML = html;
 
   // 底部计数 + 过多提示
   if (footer) {

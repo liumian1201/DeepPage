@@ -70,13 +70,21 @@ function showContextMenu(x, y, source) {
   items.forEach((item) => {
     const action = item.dataset.action;
     if (source === 'card') {
-      var allowed = ['openForeground', 'openBackground', 'copyurl', 'edit', 'capture', 'moveToGroup', 'delete'];
+      var allowed = ['openForeground', 'openBackground', 'copyurl', 'edit', 'capture', 'refreshFavicon', 'moveToGroup', 'delete'];
       if (action === 'lock' || action === 'unlock') {
         item.classList.toggle('hidden', true);
       } else {
         item.classList.toggle('hidden', !allowed.includes(action));
-        if (isLocked && (action === 'edit' || action === 'delete' || action === 'moveToGroup')) {
+        if (isLocked && (action === 'edit' || action === 'delete' || action === 'moveToGroup' || action === 'refreshFavicon')) {
           item.classList.add('hidden');
+        }
+        // BUG-076: 自定义上传图（idx:card_*）不提供「刷新网站图标」入口 ——
+        // 刷新会把它覆盖成站点图标，用户上传的图等于被静默换掉
+        if (action === 'refreshFavicon' && !item.classList.contains('hidden')) {
+          var favCard = speeddials.find(function (c) { return c.id === contextCardId; });
+          if (favCard && favCard.image && favCard.image.indexOf('idx:card_') === 0) {
+            item.classList.add('hidden');
+          }
         }
         // 移动到分组：仅多分组时显示
         if (action === 'moveToGroup' && (!groups || groups.length <= 1)) {
@@ -231,6 +239,10 @@ function handleContextAction(action, ds) {
       break;
     case 'capture':
       if (contextCardId) refreshCardCapture(contextCardId);
+      break;
+    case 'refreshFavicon':
+      // BUG-076: 手动重取网站图标（此前 refreshCardFavicon 无任何调用方）
+      if (contextCardId && typeof refreshCardFavicon === 'function') refreshCardFavicon(contextCardId);
       break;
     case 'delete':
       if (contextCardId) handleDeleteClick(contextCardId);
