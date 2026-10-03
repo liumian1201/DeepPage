@@ -92,9 +92,13 @@ function clearDoneTodoItems() {
   if (typeof showToast === 'function') showToast('已清理 ' + (items.length - left.length) + ' 条已完成', 'info');
 }
 
+/** 初始化待办组件。幂等（BUG-056）：重复调用只重新渲染，不重复绑定监听器 ——
+ *  组件开关由 applyComponentVisibility 在「隐藏 → 可见」时补调本函数。 */
 function initTodo() {
   var root = document.getElementById('dash-todo');
   if (!root) return;
+  if (root.dataset.todoInited === '1') { renderTodo(); return; }
+  root.dataset.todoInited = '1';
 
   renderTodo();
 

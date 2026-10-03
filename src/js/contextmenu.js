@@ -185,6 +185,9 @@ async function handleMoveToGroup(targetIdx) {
   if (!groups[targetIdx].cards) groups[targetIdx].cards = [];
   groups[targetIdx].cards.push(card);
   await saveGroups(groups);
+  // BUG-052: 目标分组不是活动组 → renderSpeeddials 只重建活动组的容器，
+  // 目标组的 DOM 池容器仍是移动前的旧内容（切过去看不到刚移入的卡片）
+  if (typeof _invalidateGroupContainer === 'function') _invalidateGroupContainer(targetIdx);
   renderSpeeddials();
   hideContextMenu();
   if (typeof showToast === 'function') showToast('已移动到「' + groups[targetIdx].name + '」', 'success');

@@ -7,14 +7,16 @@
 
 /* ---------- 组件注册表 ----------
    新增看板组件只需：① 在 index.html 加一个 data-widget="<id>" 的 .dashboard-item
-   ② 在此登记 id/label/默认与最小跨列数。
+   ② 在此登记 id/label/默认与最小跨列数（需要初始化的再加 init：初始化函数名）。
    布局、开关、编辑态、尺寸控制都由注册表驱动，不再有「HTML 改了 ID 忘了同步」的问题。
+   init 钩子（BUG-056）：组件由「隐藏」变「可见」时补调一次，否则启动时被关掉的组件
+   重新打开后没有任何监听器/渲染（init 函数必须是幂等的）。
 */
 var DASHBOARD_WIDGETS = [
   // minSpan 统一为 1：12 列栅格下让用户自己决定多窄（默认值合计仍为 12，正好一行）
   { id: 'clock',   label: '时间',  elementId: 'dash-clock',   defaultSpan: 3, minSpan: 1, settingKey: 'showClock' },
   { id: 'weather', label: '天气',  elementId: 'dash-weather', defaultSpan: 4, minSpan: 1, settingKey: 'showWeather' },
-  { id: 'todo',    label: '待办',  elementId: 'dash-todo',    defaultSpan: 3, minSpan: 1, settingKey: 'showTodo' },
+  { id: 'todo',    label: '待办',  elementId: 'dash-todo',    defaultSpan: 3, minSpan: 1, settingKey: 'showTodo', init: 'initTodo' },
   { id: 'lunar',   label: '农历',  elementId: 'dash-lunar',   defaultSpan: 2, minSpan: 1, settingKey: 'showLunar' }
 ];
 

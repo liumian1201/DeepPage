@@ -445,7 +445,15 @@ function applyComponentVisibility(settings) {
     if (!el) return;
     var key = w.settingKey;
     var visible = !key || settings[key] !== false;   // 未配置时默认显示
+    var wasVisible = el.style.display !== 'none';
     el.style.display = visible ? '' : 'none';
+    // BUG-056: 由「隐藏」变「可见」时补调组件初始化 ——
+    // 启动时被关掉的组件（如 showTodo=false）在启动流程里不会 init，
+    // 之后重新打开只有 display 变化 → 列表空白、所有交互失效，必须刷新页面才能恢复
+    if (visible && !wasVisible && w.init) {
+      var fn = window[w.init];
+      if (typeof fn === 'function') fn();
+    }
   });
 }
 

@@ -124,7 +124,6 @@ function loadFromStorage(key, defaultValue) {
 var SYNC_WRITE_COALESCE_MS = 500;
 var _pendingSyncWrites = {};   // key → { value, afterFlush }
 var _pendingWriteTimers = {};  // key → timerId
-var _selfWriteAt = {};         // key → 本页写入时间戳（用于忽略 onChanged 回声）
 var _selfWriteJson = {};       // key → 本页最后写出的值（稳定序列化；回声判定按「值」而非「时间」）
 
 /** 稳定序列化：对象键名递归排序后再 stringify。
@@ -155,9 +154,8 @@ function _writeSyncKey(key, value, extra) {
       try { extra = extra(); } catch (e) { extra = null; }
     }
     if (extra) Object.keys(extra).forEach(function (k) { items[k] = extra[k]; });
-    // BUG-037: onChanged 可能先于 set 回调触发（实测：回调里读到的 _selfWriteAt 还是上一次
-    // 写入的时间），因此回声标记必须在调用 set 之前打上，并且按「值」比对（isSelfSyncValue）
-    _selfWriteAt[key] = Date.now();
+    // BUG-037 / BUG-055: onChanged 可能先于 set 回调触发（实测：回调里读到的状态还是上一次写入的），
+    // 因此回声标记必须在调用 set 之前打上，并且按「值」比对（isSelfSyncValue）
     _selfWriteJson[key] = _stableJson(value);
     if (_selfWriteJson[key] === null) delete _selfWriteJson[key];
     try {
@@ -209,16 +207,10 @@ function flushSyncWrites(keys) {
   return Promise.all(jobs);
 }
 
-/** 某 key 最近是否由本页写入（onChanged 回声判定，避免合并写晚到触发自刷新） */
-function isSelfSyncWrite(key, withinMs) {
-  var t = _selfWriteAt[key];
-  return !!t && (Date.now() - t) < (withinMs || 1500);
-}
-
-/** BUG-037: 本次 onChanged 携带的值是否就是本页刚写出去的那一份。
+/** BUG-037 / BUG-055: 本次 onChanged 携带的值是否就是本页刚写出去的那一份。
  *  按「值」判定（键序无关），不受 onChanged / set 回调的先后顺序影响；
- *  别的标签页改了别的字段 → 值不同 → 判定为外部变更（需要合并）。
- *  注意：仅在 settings 这类小对象上使用，groups 大数组的序列化开销不划算（见 BUG-055）。 */
+ *  别的标签页的真实改动 → 值不同 → 判定为外部变更（必须合并，否则本页随后整份回写会把它回滚）。
+ *  注意：早期版本按「key + 时间戳」判定，会把另一个标签页在 1.5s 内的改动整段丢弃（BUG-055）。 */
 function isSelfSyncValue(key, value) {
   var j = _selfWriteJson[key];
   if (!j) return false;

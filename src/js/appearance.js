@@ -27,8 +27,9 @@ function updateGridColumns(cols) {
     var grid = document.getElementById('speeddial-grid');
     if (!grid) return;
     if (cols === undefined) {
-      var s = document.getElementById('setting-columns-slider');
-      cols = s ? parseInt(s.value, 10) : 5;
+      // BUG-048: 回退源必须是「设置数据」，不能读 #setting-columns-slider ——
+      // 面板懒初始化，未打开过面板时滑块只有 HTML 默认值 5，resize 会把已保存的列数改掉
+      cols = (typeof currentSettings !== 'undefined' && currentSettings && currentSettings.columns) || 5;
     }
     // v1.3.3: 卡片宽度改从 CSS 变量读取，不再读设置面板的滑块 ——
     // 面板已改为「首次打开才初始化」，此时滑块可能仍是 HTML 默认值（270）
@@ -130,15 +131,23 @@ function bindAppearancePreview(dom, onChanged) {
     document.documentElement.style.setProperty('--card-height', '270px');
     document.documentElement.style.setProperty('--card-radius', '14px');
     document.documentElement.style.setProperty('--card-opacity', '1');
+    // BUG-049: 高度滑块在 input 时给每张卡片写了内联 height，内联优先级高于
+    // `height: var(--card-height)`，只改 CSS 变量的话高度看起来"重置无效" → 必须清掉
+    document.querySelectorAll('.speeddial-card').forEach(function (c) { c.style.height = ''; });
     updateGridColumns();
+    // BUG-049: 重置只改 DOM 不落盘（程序化赋值不触发 change）→ 显式保存，
+    // 否则刷新后重置意图丢失（与「↺ 重置看板大小」的 onSettingChanged() 一致）
+    if (onChanged) onChanged();
   });
 
   var resetTopbar = document.getElementById('btn-reset-topbar');
   if (resetTopbar) resetTopbar.addEventListener('click', function () {
     var bc = document.getElementById('setting-bg-color');
     var tc = document.getElementById('setting-card-text-color');
-    if (bc) bc.value = '';
-    if (tc) tc.value = '';
+    // 颜色控件不能赋 ''（input[type=color] 会回落成 #000000，落盘后变成「自定义黑色」）
+    // → 赋主题默认值，collectAppearanceForm 的 val() 会把它映射回 ''（= 未自定义）
+    if (bc) bc.value = '#f0f2f5';
+    if (tc) tc.value = '#202124';
     if (fs) fs.value = 13;
     if (fsv) fsv.textContent = '13px';
     document.documentElement.style.removeProperty('--topbar-bg');
@@ -146,6 +155,8 @@ function bindAppearancePreview(dom, onChanged) {
     document.documentElement.style.removeProperty('--topbar-text');
     document.documentElement.style.removeProperty('--text-on-card');
     document.documentElement.style.setProperty('--card-font-size', '13px');
+    // BUG-049: 同上，重置信息栏也必须落盘
+    if (onChanged) onChanged();
   });
 
   var resetSearch = document.getElementById('btn-reset-search-pos');

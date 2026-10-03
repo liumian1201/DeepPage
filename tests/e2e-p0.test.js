@@ -1284,7 +1284,165 @@ function send(method, params, sessionId) {
   await evalJs('closeSettingsPanel()');
   await sleep(400);
 
-  console.log('\n[27] 页面无 JS 报错');
+  console.log('\n[27] v1.5.7 审计第二批：BUG-048 / 049 / 052 / 055 / 056');
+
+  // ---- BUG-055：groups 的 onChanged 回声必须按「值」判定，不能按时间窗 ----
+  const echoGroups = JSON.parse(await evalJs(`(async () => {
+    const mk = (id, name, card) => ({ id, name, sortMode: 'manual', cards: [{ id: id + '_c', name: card, url: 'https://x.example.com/', visitCount: 0 }] });
+    groups = [mk('ea','E组A','ECHO_A')];
+    activeGroupIndex = 0; speeddials = groups[0].cards;
+    await saveGroups(groups);                       // 刷新本页「刚写入」状态
+    await new Promise(r => setTimeout(r, 100));
+    // 立即写入一份不同的 groups（等价于另一个标签页在 1.5s 窗口内的真实改动）
+    const other = [mk('ea','E组A','ECHO_A'), mk('eb','E组B','ECHO_B_XTAB')];
+    await new Promise(r => chrome.storage.sync.set({ groups: other, groups_rev: Date.now() }, r));
+    await new Promise(r => setTimeout(r, 500));
+    const received = groups.map(g => g.name).join(',');
+    await saveGroups(groups);                       // 本页随后再写一次（旧行为会把对方改动回滚）
+    await new Promise(r => setTimeout(r, 500));
+    const stored = await new Promise(r => chrome.storage.sync.get('groups', d => r(d.groups || [])));
+    return JSON.stringify({ received, stored: stored.map(g => g.name).join(',') });
+  })()`));
+  check('BUG-055 窗口内的外部 groups 改动被接收（不再整段忽略）', echoGroups.received === 'E组A,E组B', echoGroups);
+  check('BUG-055 本页随后的写入未回滚外部改动', echoGroups.stored === 'E组A,E组B', echoGroups);
+
+  // 真实双标签页：B 的结构性改动必须留在 sync（不被 A 的陈旧副本覆盖）
+  const tabC = await (async () => {
+    const t = await send('Target.createTarget', { url: `chrome-extension://${EXT_ID}/index.html` });
+    const a = await send('Target.attachToTarget', { targetId: t.targetId, flatten: true });
+    await send('Runtime.enable', {}, a.sessionId);
+    await send('Page.enable', {}, a.sessionId);
+    return { targetId: t.targetId, sid: a.sessionId };
+  })();
+  const evalC = async (expr) => {
+    const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, tabC.sid);
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || 'eval error');
+    return r.result.value;
+  };
+  let cReady = false;
+  for (let i = 0; i < 40; i++) {
+    try { if (await evalC('typeof currentSettings === "object" && !!currentSettings && !!document.getElementById("dashboard-grid")')) { cReady = true; break; } } catch (e) { /* 导航中 */ }
+    await sleep(300);
+  }
+  check('BUG-055 第三个标签页已就绪（真实双标签页场景）', cReady);
+  await evalJs(`(async () => { await saveGroups(groups); return 'ok'; })()`);
+  await evalC(`(async () => {
+    const g = groups[activeGroupIndex];
+    g.cards.push({ id: 'xtab_' + Date.now(), name: 'XTAB_CARD', url: 'https://xtab.example.com/', visitCount: 0 });
+    await saveGroups(groups);
+    return 'ok';
+  })()`);
+  await sleep(1200);
+  check('BUG-055 B 页新增的卡片已进入 A 页内存', (await evalJs(`(groups[activeGroupIndex].cards || []).some(c => c.name === 'XTAB_CARD')`)) === true);
+  await evalJs(`(async () => { await saveGroups(groups); return 'ok'; })()`);
+  await sleep(700);
+  check('BUG-055 A 页回写后 B 的卡片仍在 sync（未被回滚）', (await evalJs(`new Promise(r => chrome.storage.sync.get('groups', d => r(JSON.stringify(d.groups || []) .indexOf('XTAB_CARD') !== -1)))`)) === true);
+  try { await send('Target.closeTarget', { targetId: tabC.targetId }); } catch (e) { /* 忽略 */ }
+  await sleep(300);
+
+  // ---- BUG-048：未打开过设置面板时 resize 不得改掉已保存的列数 ----
+  await evalJs(`(async () => { currentSettings.columns = 3; saveSettings(currentSettings); await flushSyncWrites(); return 'ok'; })()`);
+  await sleep(600);
+  await send('Page.navigate', { url: `chrome-extension://${EXT_ID}/index.html` }, sid);
+  await sleep(1600);
+  await waitForReady();
+  check('BUG-048 刷新后面板仍未初始化（复现前提）', (await evalJs('_settingsPanelReady')) === false);
+  check('BUG-048 列数滑块仍是 HTML 默认值 5（陷阱存在）', (await evalJs(`document.getElementById('setting-columns-slider').value`)) === '5');
+  const beforeResize = await evalJs(`document.getElementById('speeddial-grid').style.width`);
+  await evalJs(`window.dispatchEvent(new Event('resize'));`);
+  await sleep(600);
+  const afterResize = await evalJs(`document.getElementById('speeddial-grid').style.width`);
+  check('BUG-048 resize 后网格宽度不变（未按 HTML 默认 5 列重算）', beforeResize === afterResize, { beforeResize, afterResize });
+  check('BUG-048 内存列数仍是 3', (await evalJs('currentSettings.columns')) === 3);
+
+  // ---- BUG-049：两个「↺ 重置」按钮必须落盘 + 清卡片内联 height ----
+  await evalJs('openSettingsPanel()');
+  await sleep(400);
+  await evalJs(`(() => { const t = document.getElementById('tab-btn-appearance'); if (t) t.click(); return 'ok'; })()`);
+  await sleep(300);
+  await evalJs(`(() => {
+    const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); };
+    set('setting-card-width', 333);
+    set('setting-card-height', 400);
+    const bc = document.getElementById('setting-bg-color');
+    bc.value = '#123456'; bc.dispatchEvent(new Event('input', { bubbles: true })); bc.dispatchEvent(new Event('change', { bubbles: true }));
+    set('setting-card-font-size', 20);
+    return 'ok';
+  })()`);
+  await sleep(1100);
+  check('BUG-049 重置前已落盘（333/400）', (await evalJs(`new Promise(r => chrome.storage.sync.get('settings', d => r((d.settings || {}).cardWidth + '/' + (d.settings || {}).cardHeight)))`)) === '333/400');
+  await evalJs(`document.getElementById('btn-reset-card-size').click()`);
+  await sleep(1100);
+  const resetSize = JSON.parse(await evalJs(`(async () => {
+    const s = await new Promise(r => chrome.storage.sync.get('settings', d => r(d.settings || {})));
+    const card = document.querySelector('.speeddial-card');
+    return JSON.stringify({ stored: s.cardWidth + '/' + s.cardHeight, mem: currentSettings.cardWidth + '/' + currentSettings.cardHeight, inline: card ? card.style.height : '' });
+  })()`));
+  check('BUG-049 「重置卡片大小」已落盘（270/270）', resetSize.stored === '270/270', resetSize);
+  check('BUG-049 卡片内联 height 已清掉（高度真正重置）', resetSize.inline === '' || resetSize.inline === '270px', resetSize);
+  await evalJs(`document.getElementById('btn-reset-topbar').click()`);
+  await sleep(1100);
+  const resetTop = JSON.parse(await evalJs(`(async () => {
+    const s = await new Promise(r => chrome.storage.sync.get('settings', d => r(d.settings || {})));
+    return JSON.stringify({ bg: s.bgColor, fs: s.cardFontSize, topbarVar: document.documentElement.style.getPropertyValue('--topbar-bg') });
+  })()`));
+  check('BUG-049 「重置信息栏」已落盘（bgColor 清空 / 字号 13）', resetTop.bg === '' && resetTop.fs === 13, resetTop);
+  await evalJs('closeSettingsPanel()');
+  await sleep(400);
+
+  // ---- BUG-052：右键「移动到分组」后目标分组容器必须失效 ----
+  await evalJs(`(async () => {
+    const mk = (id, name, card) => ({ id, name, sortMode: 'manual', cards: [{ id: id + '_c', name: card, url: 'https://' + card.toLowerCase() + '.example.com/', visitCount: 0 }] });
+    groups = [mk('na','N组A','NOVA'), mk('nb','N组B','NEBULA')];
+    activeGroupIndex = 0; speeddials = groups[0].cards;
+    await saveGroups(groups);
+    renderSpeeddials(); renderGroupDots();
+    switchGroup(1);                       // 让目标分组容器先进 DOM 池
+    await new Promise(r => setTimeout(r, 250));
+    switchGroup(0);
+    await new Promise(r => setTimeout(r, 250));
+    contextCardId = groups[0].cards[0].id;
+    await handleMoveToGroup(1);           // 等价于右键菜单「移动到分组 → N组B」
+    await new Promise(r => setTimeout(r, 400));
+    switchGroup(1);
+    await new Promise(r => setTimeout(r, 400));
+    return 'ok';
+  })()`);
+  const movedVisible = await evalJs(`JSON.stringify([...document.querySelectorAll('.speeddial-group')].filter(c => c.style.display !== 'none').map(c => (c.innerText || '').replace(/\\s+/g, ' ')).join(' | '))`);
+  check('BUG-052 切到目标分组能看到刚移入的卡片', movedVisible.indexOf('NOVA') !== -1, movedVisible);
+  check('BUG-052 源分组已不含该卡片', (await evalJs(`groups[0].cards.some(c => c.name === 'NOVA')`)) === false);
+
+  // ---- BUG-056：启动时关闭的组件重新开启后必须可用（真实刷新路径） ----
+  await evalJs(`(async () => { currentSettings.showTodo = false; saveSettings(currentSettings); await flushSyncWrites(); return 'ok'; })()`);
+  await sleep(700);
+  await send('Page.navigate', { url: `chrome-extension://${EXT_ID}/index.html` }, sid);
+  await sleep(1600);
+  await waitForReady();
+  check('BUG-056 刷新后待办组件未初始化（复现前提）', (await evalJs(`!document.getElementById('dash-todo').dataset.todoInited`)) === true);
+  check('BUG-056 刷新后待办组件隐藏', (await evalJs(`getComputedStyle(document.getElementById('dash-todo')).display`)) === 'none');
+  await evalJs('openSettingsPanel()');
+  await sleep(500);
+  await evalJs(`(() => { const t = document.getElementById('toggle-todo'); t.checked = true; t.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; })()`);
+  await sleep(900);
+  await evalJs('closeSettingsPanel()');
+  await sleep(300);
+  check('BUG-056 重新开启后组件已初始化', (await evalJs(`document.getElementById('dash-todo').dataset.todoInited`)) === '1');
+  const todoWorks = JSON.parse(await evalJs(`(async () => {
+    const before = getTodoItems().length;
+    const input = document.getElementById('todo-input');
+    input.value = 'E2E 待办';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await new Promise(r => setTimeout(r, 400));
+    const items = getTodoItems();
+    return JSON.stringify({ before, count: items.length, rendered: document.querySelectorAll('#todo-list .todo-item').length, hasNew: items.some(i => i.text === 'E2E 待办') });
+  })()`));
+  check('BUG-056 重新开启后回车可添加并渲染', todoWorks.count === todoWorks.before + 1 && todoWorks.rendered === todoWorks.count && todoWorks.hasNew, todoWorks);
+  check('BUG-056 initTodo 幂等（重复调用不重复绑定）', (await evalJs(`(() => { const before = getTodoItems().length; initTodo(); initTodo(); const input = document.getElementById('todo-input'); input.value = 'E2E 待办2'; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return getTodoItems().length - before; })()`)) === 1);
+  // 收尾：清掉待办并恢复列数
+  await evalJs(`(async () => { currentSettings.todoItems = []; currentSettings.columns = 5; saveSettings(currentSettings); await flushSyncWrites(); return 'ok'; })()`);
+  await sleep(600);
+
+  console.log('\n[28] 页面无 JS 报错');
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);

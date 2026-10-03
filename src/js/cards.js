@@ -463,14 +463,29 @@ function _ensureGroupContainer(groupIndex) {
   return div;
 }
 
-/** BUG-035 / BUG-038: 分组增删 / 重排后统一失效 DOM 池（清空缓存并移除容器节点） */
-function _invalidateGroupDOMCache() {
+/** BUG-052: 失效单个分组的容器（该组数据被改动但当前不是活动组时用，如「移动到分组」） */
+function _invalidateGroupContainer(groupIndex) {
+  var key = _groupKey(groupIndex);
+  var el = _groupContainers[key];
+  if (el && typeof el.remove === 'function') el.remove();
+  delete _groupContainers[key];
+  var pos = _groupLru.indexOf(key);
+  if (pos >= 0) _groupLru.splice(pos, 1);
+}
+
+/** BUG-035 / BUG-038 / BUG-055: 分组增删 / 重排 / 外部数据变更后失效 DOM 池（移除容器节点）。
+ *  keepIndex 指定要保留的容器（通常是当前活动分组）：它的内容会由紧随其后的
+ *  renderSpeeddials() 重建，保留它可以避免「先清空再渲染」之间的一帧闪白。 */
+function _invalidateGroupDOMCache(keepIndex) {
+  var keepKey = (typeof keepIndex === 'number') ? _groupKey(keepIndex) : null;
   Object.keys(_groupContainers).forEach(function (key) {
+    if (keepKey !== null && key === keepKey) return;
     var el = _groupContainers[key];
     if (el && typeof el.remove === 'function') el.remove();
+    delete _groupContainers[key];
+    var pos = _groupLru.indexOf(key);
+    if (pos >= 0) _groupLru.splice(pos, 1);
   });
-  _groupContainers = {};
-  _groupLru = [];
 }
 
 /** 当前活动分组的容器（不存在或不归属则为 null）——供拖拽等模块使用，避免外部按下标取缓存 */

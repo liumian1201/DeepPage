@@ -320,15 +320,19 @@ function _debounceCollisionCheck() {
 
 chrome.storage.onChanged.addListener(function (changes, areaName) {
   if (areaName !== 'sync') return;
-  // v1.3.3: 合并写可能在本页写入后 ≤500ms 才落地，onChanged 回声需按「本页写入」判定，
-  // 只靠 _savingGroups 的时间窗会漏判 → 自触发一次多余渲染
-  var _selfGroupsWrite = typeof isSelfSyncWrite === 'function' && isSelfSyncWrite('groups');
-  if (changes.groups && !_savingGroups && !_selfGroupsWrite) {
+  // BUG-055: 回声判定必须按「值」—— 原实现按「key + 1.5s 时间窗」判定，
+  // 本页任意一次 groups 写入（点卡片计数、切组、favicon 批量）都会让窗口内的
+  // 「另一个标签页的真实改动」被整段丢弃，本页随后用陈旧数组整份回写把它回滚
+  if (changes.groups && !_savingGroups) {
     var newGroups = changes.groups.newValue;
-    if (newGroups && Array.isArray(newGroups)) {
+    var _selfGroupsWrite = typeof isSelfSyncValue === 'function' && isSelfSyncValue('groups', newGroups);
+    if (newGroups && Array.isArray(newGroups) && !_selfGroupsWrite) {
       groups = newGroups;
       speeddials = (groups[activeGroupIndex] && groups[activeGroupIndex].cards)
         ? groups[activeGroupIndex].cards : [];
+      // 外部改动可能涉及任意分组 → 除当前分组外整体失效 DOM 池，
+      // 否则切到某个分组会看到改动前的陈旧卡片（同 BUG-052）
+      if (typeof _invalidateGroupDOMCache === 'function') _invalidateGroupDOMCache(activeGroupIndex);
       _debouncedRefresh();
     }
   }
