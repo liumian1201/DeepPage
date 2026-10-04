@@ -658,7 +658,12 @@ function bindSettingsEvents() {
         if (typeof showToast === 'function') {
           showToast(r && r.fetched > 0 ? ('已为 ' + r.fetched + ' 张卡片补上网站图标') : '未取到网站图标，继续用首字符', r && r.fetched > 0 ? 'success' : 'info');
         }
-      }).catch(function () {});
+      }).catch(function (e) {
+        // DEBT-02: 这条**不能降级** —— 用户刚打开开关，界面上一点反馈都没有会让人以为开关坏了。
+        // 补用户提示（Toast）；诊断仍走 warn（绝不能是 console.error：E2E 的「无 console error」门会判红）
+        _warnDegraded('开关打开后补网站图标', e);
+        if (typeof showToast === 'function') showToast('获取网站图标失败，继续用首字符', 'info');
+      });
     });
   }
 

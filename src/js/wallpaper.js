@@ -55,7 +55,11 @@ async function deleteImage(key) {
       tx.objectStore('images').delete(key);
       tx.oncomplete = function () { resolve(); };
     });
-  } catch (e) {}
+  } catch (e) {
+    // DEBT-02: 图片缓存删除失败 = Blob 永久留在 IndexedDB（调用方以为已删）。
+    // 删不掉不影响当前界面（可降级），但静默会变成「图片库莫名变大」，必须留痕。
+    _warnDegraded('删除图片缓存 ' + key, e);
+  }
 }
 
 async function uploadImage(file, prefix) {

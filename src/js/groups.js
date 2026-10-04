@@ -140,14 +140,8 @@ async function doDeleteGroup() {
   var g = groups[index];
 
   // v1.2.1: 删组前先保存 bak（含 IndexedDB 图片引用），避免恢复后破图
-  if (typeof getGroups === 'function') {
-    try {
-      var prev = await getGroups();
-      if (prev && Array.isArray(prev) && prev.length > 0) {
-        await new Promise(function (r) { chrome.storage.local.set({ groups_local_bak: prev, bak_timestamp: Date.now() }, r); });
-      }
-    } catch (e) {}
-  }
+  // v1.5.15: 抽到 storage.js 的 _snapshotGroupsForUndo()（失败只 warn，不阻断删除）
+  await _snapshotGroupsForUndo();
 
   // v1.2.1: 不在此处删除 IndexedDB 图片（保留给 bak 恢复用，GC 后续清理）
   // 原 deleteCardIcon 调用已移除
@@ -372,7 +366,7 @@ function renderGroupManagerList() {
     handle.addEventListener('dragstart', function (e) {
       dragFrom = parseInt(this.dataset.index, 10);
       e.dataTransfer.effectAllowed = 'move';
-      try { e.dataTransfer.setData('text/plain', String(dragFrom)); } catch (err) {}
+      try { e.dataTransfer.setData('text/plain', String(dragFrom)); } catch (err) { /* best-effort: 排序用的是上面的 dragFrom 变量，dataTransfer 只是给外部拖放留的标记 */ }
       this.closest('.group-mgr-item').classList.add('dragging');
     });
     handle.addEventListener('dragend', function () {

@@ -178,7 +178,7 @@ async function getOpenMeteoCoords(settings) {
         chrome.storage.local.set({ [OM_GEO_CACHE_KEY]: coords });
         return coords;
       }
-    } catch (e) {}
+    } catch (e) { _warnDegraded('按城市名查询经纬度（改用缓存/默认坐标）', e); }
   }
   if (cached && cached.lat) return cached;
   coords = { lat: 39.9042, lon: 116.4074, city: city || '北京', source: 'default' };
@@ -232,7 +232,7 @@ async function detectCityByIP(key) {
     var res = await swFetch('https://geoapi.qweather.com/v2/city/lookup?location=auto_ip&key=' + key);
     var data = await res.json();
     if (data.code === '200' && data.location && data.location.length > 0) { return data.location[0].name; }
-  } catch (e) {}
+  } catch (e) { _warnDegraded('按 IP 定位城市（改用默认城市）', e); }
   return '北京';
 }
 

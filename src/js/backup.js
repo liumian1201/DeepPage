@@ -574,7 +574,7 @@ async function _doFirstMigration() {
       // 清理旧 ZIP 文件
       webdavListBackups().then(function (files) {
         if (Array.isArray(files)) {
-          var delTasks = files.map(function (f) { return webdavDeleteBackup(f.name).catch(function () {}); });
+          var delTasks = files.map(function (f) { return webdavDeleteBackup(f.name).catch(function (e) { _warnDegraded('清理旧全量备份 ' + f.name, e); }); });
           return Promise.all(delTasks);
         }
       }).then(function () {
@@ -753,7 +753,7 @@ async function _incrementalBackup(data, isSilent) {
 
     // 5.3 删除过期 config 文件
     for (var oc = 0; oc < oldConfigs.length; oc++) {
-      try { await webdavDeleteConfig(oldConfigs[oc].name); } catch (e) {}
+      try { await webdavDeleteConfig(oldConfigs[oc].name); } catch (e) { _warnDegraded('删除过期配置快照 ' + oldConfigs[oc].name, e); }
     }
 
     // 5.4 列出云端 img 目录，删除无引用的图片
@@ -763,7 +763,7 @@ async function _incrementalBackup(data, isSilent) {
         for (var fi = 0; fi < imgFiles.length; fi++) {
           var md5InCloud = imgFiles[fi].name.replace(/\.bin$/i, '');
           if (md5InCloud && !referencedMd5s.has(md5InCloud)) {
-            try { await webdavDeleteImage(imgFiles[fi].name); } catch (e) {}
+            try { await webdavDeleteImage(imgFiles[fi].name); } catch (e) { _warnDegraded('删除云端孤儿图片 ' + imgFiles[fi].name, e); }
           }
         }
       }
@@ -825,10 +825,14 @@ async function webdavIncrementalBackup() {
     // 提示导出本地 ZIP
     setTimeout(function () {
       var msg = '增量备份完成！建议同时导出一份本地全量备份：';
-      showImportConfirmAsync(msg, { title: '☁️ 备份完成', okLabel: '📥 导出本地备份', cancelLabel: '以后再说', wider: true }).then(function () { exportAll(); }).catch(function () {});
+      showImportConfirmAsync(msg, { title: '☁️ 备份完成', okLabel: '📥 导出本地备份', cancelLabel: '以后再说', wider: true }).then(function () { exportAll(); }).catch(function (e) {
+        // DEBT-02: 用户点「以后再说」时该弹窗以 CANCELLED 拒绝 —— 那是正常选择，不算失败；
+        // 其它错误（弹窗链路真坏了）必须留下痕迹，否则「备份完成后建议导出」这条提示会静默消失。
+        if (!e || e.message !== 'CANCELLED') _warnDegraded('备份完成后的导出提示', e);
+      });
     }, 1200);
     // 清理旧 ZIP（如果还有残留）
-    webdavCleanupBackups(1).catch(function () {});
+    webdavCleanupBackups(1).catch(function (e) { _warnDegraded('清理旧 ZIP 备份', e); });
   }
 }
 
@@ -1623,7 +1627,7 @@ function bindBackupEvents() {
               m.configs = m.configs.filter(function (c) { return c.name !== name; });
               await webdavPutManifest(m);
             }
-          } catch (e) {}
+          } catch (e) { _warnDegraded('从云端 manifest 移除已删配置 ' + name, e); }
         }
         // 从 DOM 移除该行
         var label = delBtn.closest('.webdav-version-item');

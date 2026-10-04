@@ -95,7 +95,10 @@ function initWebdavSection() {
             setTimeout(function () { window.location.reload(); }, 1000);
           });
         });
-      }).catch(function () {});
+      }).catch(function (e) {
+        // DEBT-02: 用户点「取消」时该弹窗以 CANCELLED 拒绝 —— 正常选择，不算失败；其它错误必须留痕
+        if (!e || e.message !== 'CANCELLED') _warnDegraded('恢复上一次改动的确认弹窗', e);
+      });
     });
   });
 
@@ -116,7 +119,7 @@ function initWebdavSection() {
         setWebdavLastBackupFilename(fname);
         setWebdavLastBackup(new Date().toISOString());
         _showWStatus('备份成功 ✅', true);
-        webdavCleanupBackups(5).catch(function () {});
+        webdavCleanupBackups(5).catch(function (e) { _warnDegraded('手动备份后清理旧 ZIP', e); });
       } catch (e) { _showWStatus('备份失败: ' + e.message, false); }
     }
   });

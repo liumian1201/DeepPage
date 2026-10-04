@@ -673,10 +673,13 @@ function findDuplicate(url) {
           if (cu.hostname.replace('www.', '') + cu.pathname + cu.search === normalized) {
             return { groupName: groups[gi].name, cardName: cards[ci].name };
           }
-        } catch (e) {}
+        } catch (e) { /* best-effort: 单张卡片的 URL 非法就跳过它，继续比对其余卡片（不是失败） */ }
       }
     }
-  } catch (e) {}
+  } catch (e) {
+    // DEBT-02: 传入的 URL 自己就解析不了 → 查重只能放弃（返回 null）。降级可用，但必须留痕。
+    _warnDegraded('重复卡片检查（URL 无法解析）', e);
+  }
   return null;
 }
 
@@ -856,7 +859,7 @@ async function addSpeeddial(name, url, image) {
   if (!image && currentSettings && currentSettings.useFavicon && typeof enrichCardFavicons === 'function') {
     enrichCardFavicons({ cardIds: [id] }).then(function (r) {
       if (r && r.fetched > 0 && typeof renderSpeeddials === 'function') renderSpeeddials();
-    }).catch(function () {});
+    }).catch(function (e) { _warnDegraded('新卡片补网站图标', e); });
   }
 }
 

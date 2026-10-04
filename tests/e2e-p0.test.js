@@ -2653,7 +2653,350 @@ function send(method, params, sessionId) {
     backupChain.captured === true && backupChain.hasConfig === true && backupChain.hasManifest === true
       && backupChain.groups > 0 && backupChain.cards > 0, backupChain);
 
-  console.log('\n[32] 页面无 JS 报错');
+  console.log('\n[32] v1.5.15 DEBT-02 静默吞异常分级（能降级 → warn；不能降级 → 用户提示）');
+
+  // 诊断捕获器：本段「诊断真的被打印出来 / 有意静默」的断言都基于它。
+  // 注意拦的是 console.warn —— 降级路径绝不能用 console.error（三个套件都断言无 console error）。
+  await evalJs(`(function () {
+    if (!window.__dpWarnInstalled) {
+      var orig = console.warn;
+      window.__dpWarnBuf = [];
+      console.warn = function () { window.__dpWarnBuf.push([].slice.call(arguments).map(String).join(' ')); };
+      window.__dpWarnRestore = function () { console.warn = orig; };
+      window.__dpWarnInstalled = true;
+    }
+    window.__dpWarnBuf.length = 0;
+    return 'ok';
+  })()`);
+  const takeWarns = async () => JSON.parse(await evalJs('JSON.stringify(window.__dpWarnBuf.splice(0))'));
+  const warnHas = (list, needle) => Array.isArray(list) && list.some((w) => String(w).indexOf(needle) !== -1);
+
+  /** 统一的「打桩 → 跑用例 → 还原」包装：任何一条用例失败都不会把 stub 泄漏给后续断言，
+   *  也不让单条用例的异常掀翻整个套件（返回 { __error } 交给断言判失败） */
+  const debt02Case = async (names, stubBody, body) => JSON.parse(await evalJs(`(async () => {
+    var __names = ${JSON.stringify(names)};
+    var __orig = {};
+    __names.forEach(function (n) { __orig[n] = window[n]; });
+    try {
+      ${stubBody}
+      var __r = await (async () => { ${body} })();
+      return JSON.stringify(__r === undefined ? {} : __r);
+    } catch (e) {
+      return JSON.stringify({ __error: (e && e.message) || String(e) });
+    } finally {
+      __names.forEach(function (n) { window[n] = __orig[n]; });
+    }
+  })()`));
+
+  // ① 自动备份（旧全量分支）后清理旧 ZIP 失败：备份本身是成功的，不能因为清理失败进重试队列
+  const c1 = await debt02Case(
+    ['webdavCheckConflict', '_collectAllData', '_incrementalBackup', '_buildZipBlob', 'webdavUpload', 'webdavCleanupBackups', '_clearBackupRetry'],
+    `webdavCheckConflict = async function () { return null; };
+     _collectAllData = async function () { return { settings: {}, groups: [] }; };
+     _incrementalBackup = undefined;
+     _buildZipBlob = async function () { return new Blob(['x']); };
+     webdavUpload = async function () { return { ok: true }; };
+     webdavCleanupBackups = function () { return Promise.reject(new Error('cleanup boom')); };
+     window.__cleared = 0;
+     _clearBackupRetry = async function () { window.__cleared++; };`,
+    `var prevMode = currentSettings.backupMode;
+     currentSettings.backupMode = 'webdav';
+     try {
+       await new Promise(function (r) { chrome.storage.local.set({ webdav_url: 'https://example.com/dav/', webdav_last_backup: '' }, r); });
+       await _autoBackupIfNeeded();
+       await new Promise(function (r) { setTimeout(r, 200); });
+       return { cleared: window.__cleared };
+     } finally { currentSettings.backupMode = prevMode; }`);
+  const c1Warns = await takeWarns();
+  check('DEBT-02 自动备份：旧 ZIP 清理失败仍算备份成功（重试队列被清空，不误判为失败）',
+    c1.cleared === 1, c1);
+  check('DEBT-02 自动备份：清理失败的诊断真的被打印出来',
+    warnHas(c1Warns, '自动备份后清理旧 ZIP'), c1Warns.slice(0, 2));
+
+  // ② 手动备份（旧全量分支）后清理旧 ZIP 失败：状态区仍显示「备份成功 ✅」
+  await evalJs('(async () => { await ensureSettingsPanelReady(); return "ok"; })()');
+  const c2 = await debt02Case(
+    ['webdavIncrementalBackup', '_collectAllData', '_buildZipBlob', 'webdavUpload', 'webdavCleanupBackups'],
+    `webdavIncrementalBackup = undefined;
+     _collectAllData = async function () { return { settings: {}, groups: [] }; };
+     _buildZipBlob = async function () { return new Blob(['x']); };
+     webdavUpload = async function () { return { ok: true }; };
+     webdavCleanupBackups = function () { return Promise.reject(new Error('cleanup boom')); };`,
+    `document.getElementById('btn-webdav-backup').click();
+     await new Promise(function (r) { setTimeout(r, 600); });
+     var st = document.getElementById('webdav-status');
+     return { status: st ? st.textContent : '' };`);
+  const c2Warns = await takeWarns();
+  check('DEBT-02 手动备份：清理失败不影响成功状态（仍显示「备份成功 ✅」）',
+    /备份成功/.test(c2.status || ''), c2);
+  check('DEBT-02 手动备份：清理失败的诊断真的被打印出来',
+    warnHas(c2Warns, '手动备份后清理旧 ZIP'), c2Warns.slice(0, 2));
+
+  // ③ 备份完成提示弹窗：用户点「以后再说」= CANCELLED（正常选择，必须静默）；真错误必须留痕
+  const c3 = await debt02Case(
+    ['_checkMigrationNeeded', '_collectAllData', '_incrementalBackup', 'webdavCleanupBackups', 'showImportConfirmAsync'],
+    `_checkMigrationNeeded = async function () { return false; };
+     _collectAllData = async function () { return {}; };
+     _incrementalBackup = async function () { return true; };
+     webdavCleanupBackups = function () { return Promise.resolve({ deleted: 0 }); };`,
+    `window.__dpWarnBuf.length = 0;
+     showImportConfirmAsync = function () { return Promise.reject(new Error('CANCELLED')); };
+     await webdavIncrementalBackup();
+     await new Promise(function (r) { setTimeout(r, 1500); });
+     var cancelWarns = window.__dpWarnBuf.slice();
+     window.__dpWarnBuf.length = 0;
+     showImportConfirmAsync = function () { return Promise.reject(new Error('dialog boom')); };
+     await webdavIncrementalBackup();
+     await new Promise(function (r) { setTimeout(r, 1500); });
+     return { cancel: cancelWarns.length, real: window.__dpWarnBuf.slice() };`);
+  check('DEBT-02 备份完成提示：用户取消（CANCELLED）不产生任何诊断（正常选择，不是失败）',
+    c3.cancel === 0, c3.cancel);
+  check('DEBT-02 备份完成提示：非取消的真错误必须留痕（否则这条提示会静默消失）',
+    warnHas(c3.real, '备份完成后的导出提示'), c3.real);
+
+  // ④ 恢复上一次改动的确认弹窗：同样区分「用户取消」与「真错误」
+  const c4 = await debt02Case(['showImportConfirmAsync'],
+    `showImportConfirmAsync = function () { return Promise.reject(new Error('CANCELLED')); };`,
+    `await new Promise(function (r) { chrome.storage.local.set({ groups_local_bak: [{ id: 'gbak', name: 'bak', cards: [] }], bak_timestamp: Date.now() }, r); });
+     window.__dpWarnBuf.length = 0;
+     document.getElementById('btn-restore-bak').click();
+     await new Promise(function (r) { setTimeout(r, 400); });
+     var cancelWarns = window.__dpWarnBuf.slice();
+     window.__dpWarnBuf.length = 0;
+     showImportConfirmAsync = function () { return Promise.reject(new Error('dialog boom')); };
+     document.getElementById('btn-restore-bak').click();
+     await new Promise(function (r) { setTimeout(r, 400); });
+     return { cancel: cancelWarns.length, real: window.__dpWarnBuf.slice() };`);
+  check('DEBT-02 恢复上一次改动：用户取消不产生诊断', c4.cancel === 0, c4.cancel);
+  check('DEBT-02 恢复上一次改动：真错误必须留痕', warnHas(c4.real, '恢复上一次改动的确认弹窗'), c4.real);
+
+  // ⑤ 首次迁移：旧 ZIP 一个都删不掉，仍要完成迁移（不卡住备份）
+  const c5 = await debt02Case(
+    ['_checkMigrationNeeded', 'showImportConfirmAsync', 'exportAll', 'webdavListBackups', 'webdavDeleteBackup'],
+    `_checkMigrationNeeded = async function () { return true; };
+     showImportConfirmAsync = function () { return Promise.resolve(); };
+     exportAll = function () { return Promise.resolve(); };
+     webdavListBackups = async function () { return [{ name: 'old1.zip' }, { name: 'old2.zip' }]; };
+     webdavDeleteBackup = function () { return Promise.reject(new Error('del boom')); };`,
+    `window.__dpWarnBuf.length = 0;
+     var migrated = await _doFirstMigration();
+     await new Promise(function (r) { setTimeout(r, 200); });
+     return { migrated: migrated, warns: window.__dpWarnBuf.slice() };`);
+  check('DEBT-02 首次迁移：旧 ZIP 删不掉仍完成迁移（resolve(true)，不卡住后续备份）',
+    c5.migrated === true, c5.migrated);
+  check('DEBT-02 首次迁移：每个删不掉的旧 ZIP 都留下诊断（2 个各一条）',
+    (c5.warns || []).filter((w) => warnHas([w], '清理旧全量备份')).length === 2, c5.warns);
+
+  // ⑥ 增量备份的孤儿 GC：过期 config / 无引用图片删不掉，本次备份仍算成功
+  const c6 = await debt02Case(
+    ['webdavGetManifest', 'webdavPutConfig', 'webdavPutManifest', 'webdavDeleteConfig', 'webdavListImages', 'webdavDeleteImage'],
+    `var existing = [];
+     for (var i = 0; i < 6; i++) existing.push({ name: 'cfg' + i + '.json', time: new Date().toISOString(), cardCount: 0 });
+     webdavGetManifest = async function () { return { version: 1, images: { keep1: { md5: 'aaa', size: 1, type: 'image/png', refs: ['cfg0.json'] } }, configs: existing }; };
+     webdavPutConfig = async function () { return { ok: true }; };
+     webdavPutManifest = async function () { return { ok: true }; };
+     webdavDeleteConfig = function () { return Promise.reject(new Error('delcfg boom')); };
+     webdavListImages = async function () { return [{ name: 'orphanmd5.bin' }, { name: 'aaa.bin' }]; };
+     webdavDeleteImage = function () { return Promise.reject(new Error('delimg boom')); };`,
+    `window.__dpWarnBuf.length = 0;
+     var ok = await _incrementalBackup({ config: { settings: {}, groups: [], activeGroup: 0 }, images: [] }, true);
+     return { ok: ok, warns: window.__dpWarnBuf.slice() };`);
+  check('DEBT-02 增量备份：过期 config 删不掉不影响本次备份成功（仍返回 true）', c6.ok === true, c6.ok);
+  check('DEBT-02 增量备份：两个过期 config 的删除失败各留下一条诊断',
+    warnHas(c6.warns, '删除过期配置快照 cfg4.json') && warnHas(c6.warns, '删除过期配置快照 cfg5.json'), c6.warns);
+  check('DEBT-02 增量备份：孤儿图片删不掉有诊断，且仍被引用的图片不会被误删',
+    warnHas(c6.warns, '删除云端孤儿图片 orphanmd5.bin') && !warnHas(c6.warns, 'aaa.bin'), c6.warns);
+
+  // ⑦ 删除云端版本：manifest 更新失败，但删除本身已完成（行移除 + Toast）
+  const c7 = await debt02Case(
+    ['showImportConfirmAsync', 'webdavDeleteConfig', 'webdavGetManifest'],
+    `showImportConfirmAsync = function () { return Promise.resolve(); };
+     webdavDeleteConfig = async function () { return { ok: true }; };
+     webdavGetManifest = function () { return Promise.reject(new Error('manifest boom')); };`,
+    `var list = document.getElementById('webdav-version-list');
+     var row = document.createElement('div');
+     row.className = 'webdav-version-item';
+     row.innerHTML = '<input type="radio" name="wdv"><button class="version-delete" data-name="cfgX.json" data-type="config">删</button>';
+     list.appendChild(row);
+     window.__dpWarnBuf.length = 0;
+     row.querySelector('.version-delete').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+     await new Promise(function (r) { setTimeout(r, 500); });
+     var toasts = [...document.querySelectorAll('.toast')].map(function (t) { return t.textContent; }).join('|');
+     return { rowStillThere: !!list.contains(row), toasts: toasts, warns: window.__dpWarnBuf.slice() };`);
+  check('DEBT-02 删除云端版本：manifest 更新失败仍完成删除（行移除 + 提示「已删除」）',
+    c7.rowStillThere === false && /已删除/.test(c7.toasts || ''), c7);
+  check('DEBT-02 删除云端版本：manifest 更新失败留下诊断（云端清单会残留幽灵条目）',
+    warnHas(c7.warns, '从云端 manifest 移除已删配置 cfgX.json'), c7.warns);
+
+  // ⑧ 图片缓存删除失败：不抛出（调用方流程不中断）但要留痕
+  const c8 = await debt02Case(['openImgDB'],
+    `openImgDB = function () { return Promise.reject(new Error('idb boom')); };`,
+    `window.__dpWarnBuf.length = 0;
+     var threw = null;
+     try { await deleteImage('debt02_key'); } catch (e) { threw = e.message; }
+     return { threw: threw, warns: window.__dpWarnBuf.slice() };`);
+  check('DEBT-02 图片缓存删除失败：不抛出（删除卡片的流程不中断）', c8.threw === null, c8.threw);
+  check('DEBT-02 图片缓存删除失败：诊断带上键名（否则「图片库莫名变大」无从查起）',
+    warnHas(c8.warns, '删除图片缓存 debt02_key'), c8.warns);
+
+  // ⑨ 重复检查：坏 URL 卡片跳过（有意静默）vs 传入 URL 自己解析不了（降级 + 留痕）
+  const c9 = await debt02Case([], ``,
+    `groups.push({ id: 'gdebt02', name: 'DEBT02', cards: [
+       { id: 'debt02bad', name: 'bad', url: 'not-a-url' },
+       { id: 'debt02good', name: 'good', url: 'https://example.com/debt02path' }
+     ] });
+     try {
+       window.__dpWarnBuf.length = 0;
+       var good = findDuplicate('https://www.example.com/debt02path');
+       var goodWarns = window.__dpWarnBuf.slice();
+       window.__dpWarnBuf.length = 0;
+       var bad = findDuplicate('not-a-url');
+       var badWarns = window.__dpWarnBuf.slice();
+       return { good: good && good.cardName, bad: bad, goodWarns: goodWarns, badWarns: badWarns };
+     } finally {
+       groups = groups.filter(function (g) { return g.id !== 'gdebt02'; });
+     }`);
+  check('DEBT-02 重复检查：列表里有坏 URL 卡片时跳过它继续比对（正对照：好卡片仍能找到，且不刷诊断）',
+    c9.good === 'good' && (c9.goodWarns || []).length === 0, c9);
+  check('DEBT-02 重复检查：传入的 URL 自己解析不了 → 返回 null（降级可用）且留下诊断',
+    c9.bad === null && warnHas(c9.badWarns, 'URL 无法解析'), c9);
+
+  // ⑩ 新增卡片后补图标失败：卡片本身必须已经保存
+  const c10 = await debt02Case(['enrichCardFavicons'],
+    `enrichCardFavicons = function () { return Promise.reject(new Error('fav boom')); };`,
+    `var prevFav = currentSettings.useFavicon;
+     currentSettings.useFavicon = true;
+     window.__dpWarnBuf.length = 0;
+     try {
+       await addSpeeddial('DEBT02新卡', 'https://debt02-newcard.example.com/', '');
+       await new Promise(function (r) { setTimeout(r, 300); });
+       var added = speeddials.filter(function (c) { return c.url === 'https://debt02-newcard.example.com/'; });
+       return { added: added.length, warns: window.__dpWarnBuf.slice() };
+     } finally {
+       currentSettings.useFavicon = prevFav;
+       speeddials = speeddials.filter(function (c) { return c.url !== 'https://debt02-newcard.example.com/'; });
+       groups[activeGroupIndex].cards = speeddials;
+       await saveGroups(groups);
+       renderSpeeddials();
+     }`);
+  check('DEBT-02 新增卡片：补图标失败不影响卡片保存（正对照）', c10.added === 1, c10);
+  check('DEBT-02 新增卡片：补图标失败的诊断真的被打印出来',
+    warnHas(c10.warns, '新卡片补网站图标'), c10.warns);
+
+  // ⑪ 首屏后任务：补图标失败不能拖垮同一批的其它任务
+  const c11 = await debt02Case(['enrichCardFavicons', 'migrateCardIcons', 'collectCardImageGarbage', 'initWallpaper'],
+    `window.__spy = { migrate: 0, gc: 0, wallpaper: 0 };
+     enrichCardFavicons = function () { return Promise.reject(new Error('fav boom')); };
+     migrateCardIcons = function () { window.__spy.migrate++; };
+     collectCardImageGarbage = function () { window.__spy.gc++; };
+     initWallpaper = function () { window.__spy.wallpaper++; };`,
+    `var prevFav = currentSettings.useFavicon;
+     currentSettings.useFavicon = true;
+     window.__dpWarnBuf.length = 0;
+     try {
+       _runAfterFirstPaintTasks();
+       await new Promise(function (r) { setTimeout(r, 300); });
+       return { spy: window.__spy, warns: window.__dpWarnBuf.slice() };
+     } finally { currentSettings.useFavicon = prevFav; }`);
+  check('DEBT-02 首屏后任务：补图标失败不影响同一批的其它任务（图标迁移 / GC / 壁纸照跑）',
+    !!c11.spy && c11.spy.migrate === 1 && c11.spy.gc === 1 && c11.spy.wallpaper === 1, c11.spy);
+  check('DEBT-02 首屏后任务：补图标失败留下诊断', warnHas(c11.warns, '首屏后补网站图标'), c11.warns);
+
+  // ⑫ 天气：地理编码失败 → 回退默认坐标；IP 定位失败 → 回退「北京」
+  const c12 = await debt02Case(['swFetch'],
+    `swFetch = function () { return Promise.reject(new Error('geo boom')); };`,
+    `await new Promise(function (r) { chrome.storage.local.remove(['openmeteo_coords'], r); });
+     window.__dpWarnBuf.length = 0;
+     var coords = await getOpenMeteoCoords({ weatherCity: '上海' });
+     return { coords: coords, warns: window.__dpWarnBuf.slice() };`);
+  check('DEBT-02 天气：按城市名取经纬度失败 → 回退默认坐标（降级仍可用，不报错）',
+    c12.coords && c12.coords.source === 'default' && c12.coords.lat === 39.9042, c12.coords);
+  check('DEBT-02 天气：经纬度回退留下诊断', warnHas(c12.warns, '按城市名查询经纬度'), c12.warns);
+
+  const c13 = await debt02Case(['swFetch'],
+    `swFetch = function () { return Promise.reject(new Error('ip boom')); };`,
+    `window.__dpWarnBuf.length = 0;
+     var city = await detectCityByIP('k');
+     return { city: city, warns: window.__dpWarnBuf.slice() };`);
+  check('DEBT-02 天气：IP 定位失败 → 回退「北京」（降级仍可用）', c13.city === '北京', c13.city);
+  check('DEBT-02 天气：IP 定位回退留下诊断', warnHas(c13.warns, '按 IP 定位城市'), c13.warns);
+
+  // ⑬ 删组前的后悔药快照失败：不抛出、不阻断删除
+  const c14 = await debt02Case(['getGroups'],
+    `getGroups = function () { return Promise.reject(new Error('bak boom')); };`,
+    `window.__dpWarnBuf.length = 0;
+     var threw = null;
+     try { await _snapshotGroupsForUndo(); } catch (e) { threw = e.message; }
+     return { threw: threw, warns: window.__dpWarnBuf.slice() };`);
+  check('DEBT-02 删组前快照：快照失败不抛出（删组流程不中断）', c14.threw === null, c14.threw);
+  check('DEBT-02 删组前快照：留下诊断（否则「恢复上一次改动」会静默回退到更早状态）',
+    warnHas(c14.warns, '删组前的本地快照'), c14.warns);
+
+  const c14b = await debt02Case(['_snapshotGroupsForUndo'],
+    `_snapshotGroupsForUndo = async function () { _warnDegraded('删组前的本地快照（后悔药）', new Error('bak boom')); };`,
+    `groups.push({ id: 'gdebt02del', name: 'DEBT02待删', cards: [] });
+     var before = groups.length;
+     _pendingDeleteGroup = groups.length - 1;
+     await doDeleteGroup();
+     await new Promise(function (r) { setTimeout(r, 250); });
+     return { before: before, after: groups.length, gone: !groups.some(function (g) { return g.id === 'gdebt02del'; }) };`);
+  check('DEBT-02 删组前快照：快照失败时分组仍然被删掉（降级路径真的走通，不是只打日志）',
+    c14b.after === c14b.before - 1 && c14b.gone === true, c14b);
+
+  // ⑭ 分组拖拽：dataTransfer 写入失败是有意静默（排序用的是 dragFrom 变量）
+  const c15 = JSON.parse(await evalJs(`(async () => {
+    renderGroupManagerList();
+    await new Promise(function (r) { setTimeout(r, 200); });
+    var handle = document.querySelector('.group-mgr-item .group-mgr-drag');
+    if (!handle) return JSON.stringify({ handle: false });
+    window.__dpWarnBuf.length = 0;
+    var dt = new DataTransfer();
+    dt.setData = function () { throw new Error('dt boom'); };
+    handle.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+    return JSON.stringify({
+      handle: true,
+      dragging: handle.closest('.group-mgr-item').classList.contains('dragging'),
+      warns: window.__dpWarnBuf.slice()
+    });
+  })()`));
+  check('DEBT-02 分组拖拽：dataTransfer 写入失败仍继续拖拽，且不刷诊断（有意静默）',
+    c15.handle === true && c15.dragging === true && (c15.warns || []).length === 0, c15);
+
+  // ⑮ 右键菜单刷新失败（扩展上下文失效）：数据已落盘，可降级
+  const c16 = JSON.parse(await evalJs(`(async () => {
+    var orig = chrome.runtime.sendMessage;
+    window.__dpWarnBuf.length = 0;
+    var threw = null;
+    chrome.runtime.sendMessage = function () { throw new Error('ctx invalidated'); };
+    try { await _verifyGroupsWrite(groups); }
+    catch (e) { threw = e.message; }
+    finally { chrome.runtime.sendMessage = orig; }
+    return JSON.stringify({ threw: threw, warns: window.__dpWarnBuf.slice() });
+  })()`));
+  check('DEBT-02 右键菜单刷新：扩展上下文失效时不抛出（数据已经落盘）', c16.threw === null, c16.threw);
+  check('DEBT-02 右键菜单刷新：失败留下诊断', warnHas(c16.warns, '刷新右键菜单'), c16.warns);
+
+  // ⑯ favicon 开关：整条补图标链路失败属于「不能降级」—— 用户刚打开开关，必须有反馈
+  const c17 = await debt02Case(['enrichCardFavicons'],
+    `enrichCardFavicons = function () { return Promise.reject(new Error('fav boom')); };`,
+    `await ensureSettingsPanelReady();
+     var sw = document.getElementById('toggle-use-favicon');
+     sw.checked = true;
+     window.__dpWarnBuf.length = 0;
+     sw.dispatchEvent(new Event('change', { bubbles: true }));
+     await new Promise(function (r) { setTimeout(r, 400); });
+     var toasts = [...document.querySelectorAll('.toast')].map(function (t) { return t.textContent; }).join('|');
+     sw.checked = false;
+     return { toasts: toasts, warns: window.__dpWarnBuf.slice() };`);
+  check('DEBT-02 favicon 开关：补图标整链路失败时给出用户提示（不能降级 → Toast）',
+    /获取网站图标失败/.test(c17.toasts || ''), c17.toasts);
+  check('DEBT-02 favicon 开关：同时留下 warn 诊断（且不是 console.error）',
+    warnHas(c17.warns, '开关打开后补网站图标'), c17.warns);
+
+  // 还原 console.warn（后续 [33] 段与 CI 的报错门都用真实 console）
+  await evalJs('(function () { if (window.__dpWarnRestore) window.__dpWarnRestore(); window.__dpWarnInstalled = false; return "ok"; })()');
+
+  console.log('\n[33] 页面无 JS 报错');
   consoleLog.report();
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 

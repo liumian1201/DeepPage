@@ -371,7 +371,9 @@ async function _verifyGroupsWrite(groups) {
       } else { resolve(); }
     });
   });
-  try { chrome.runtime.sendMessage({ type: 'refresh-context-menus' }); } catch (e) {}
+  // DEBT-02: 扩展上下文失效（重载 / 更新中）时 sendMessage 会**同步抛错** ——
+  // 右键菜单晚一点刷新即可，不影响已落盘的数据（可降级），但要让失败可见
+  try { chrome.runtime.sendMessage({ type: 'refresh-context-menus' }); } catch (e) { _warnDegraded('刷新右键菜单', e); }
 }
 
 async function getActiveGroup() {
@@ -384,6 +386,23 @@ async function saveActiveGroup(index) {
   // v1.3.3: 滚轮连续切分组会产生突发写入 → 合并写（local 仍立即写，保证回退路径新鲜）
   scheduleSyncWrite(STORAGE_KEYS.ACTIVE_GROUP, index);
   saveToLocal(STORAGE_KEYS.ACTIVE_GROUP, index);
+}
+
+/** DEBT-02: 删组前的「后悔药」快照（写 local.groups_local_bak，供「恢复上一次改动」用）。
+ *  抽成具名函数的原因：① 降级路径要可断言 —— 内联在删除流程里没法单独触发失败；
+ *  ② 让「快照失败不阻断删除」这条约定有一个明确的落点。
+ *  失败不抛出（可降级：用户要删的组照删），但必须留痕 —— 否则「恢复上一次改动」
+ *  会静默回退到更早的状态，用户以为拿到的是删除前的快照。 */
+async function _snapshotGroupsForUndo() {
+  if (typeof getGroups !== 'function') return;
+  try {
+    var prev = await getGroups();
+    if (prev && Array.isArray(prev) && prev.length > 0) {
+      await new Promise(function (r) { chrome.storage.local.set({ groups_local_bak: prev, bak_timestamp: Date.now() }, r); });
+    }
+  } catch (e) {
+    _warnDegraded('删组前的本地快照（后悔药）', e);
+  }
 }
 
 async function saveSpeeddials(cards) {

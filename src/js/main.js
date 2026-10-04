@@ -61,6 +61,21 @@ function _scheduleAfterFirstPaint(fn) {
   else setTimeout(run, 0);
 }
 
+/** 首屏之后的非关键任务（v1.5.15 从 init() 里抽出，便于单点验证「一个任务失败不影响其它」）：
+ *  图标迁移要逐张发网络请求、GC 要扫 IndexedDB、壁纸要拉图，都不该挡第一帧。
+ *  抽成具名函数还有一个好处：DEBT-02 要求降级路径可断言，而内联回调没法单独触发。 */
+function _runAfterFirstPaintTasks() {
+  if (typeof migrateCardIcons === 'function') migrateCardIcons();
+  // v1.5.0: 可选 favicon（设置开启时才跑；失败落回首字符色块）
+  if (currentSettings && currentSettings.useFavicon && typeof enrichCardFavicons === 'function') {
+    enrichCardFavicons().then(function (r) {
+      if (r && r.fetched > 0 && typeof renderSpeeddials === 'function') renderSpeeddials();
+    }).catch(function (e) { _warnDegraded('首屏后补网站图标', e); });
+  }
+  if (typeof collectCardImageGarbage === 'function') collectCardImageGarbage();
+  initWallpaper();
+}
+
 /* ==================== 初始化 ==================== */
 async function init() {
   if (window.performance && performance.mark) performance.mark('dp-init-start');
@@ -93,17 +108,7 @@ async function init() {
   // v1.3.3: 非关键任务排到首屏之后 ——
   //   图标迁移要逐张发网络请求（原来是 await 在渲染前，卡片多时明显拖慢首屏）、
   //   GC 要扫 IndexedDB、壁纸要拉图，都不该挡第一帧
-  _scheduleAfterFirstPaint(function () {
-    if (typeof migrateCardIcons === 'function') migrateCardIcons();
-    // v1.5.0: 可选 favicon（设置开启时才跑；失败落回首字符色块）
-    if (currentSettings && currentSettings.useFavicon && typeof enrichCardFavicons === 'function') {
-      enrichCardFavicons().then(function (r) {
-        if (r && r.fetched > 0 && typeof renderSpeeddials === 'function') renderSpeeddials();
-      }).catch(function () {});
-    }
-    if (typeof collectCardImageGarbage === 'function') collectCardImageGarbage();
-    initWallpaper();
-  });
+  _scheduleAfterFirstPaint(_runAfterFirstPaintTasks);
   // v1.2.6: 延迟碰撞检测，等 DOM 布局稳定后再判断
   setTimeout(_checkDashboardCollision, 500);
   window.addEventListener('resize', _debounceCollisionCheck);
@@ -230,7 +235,7 @@ async function _autoBackupIfNeeded() {
         await webdavUpload(zipBlob, fname);
         setWebdavLastBackupFilename(fname);
         setWebdavLastBackup(new Date().toISOString());
-        webdavCleanupBackups(5).catch(function () {});
+        webdavCleanupBackups(5).catch(function (e) { _warnDegraded('自动备份后清理旧 ZIP', e); });
       }
       // v1.3.3: 成功则清空重试队列
       if (typeof _clearBackupRetry === 'function') await _clearBackupRetry();
@@ -921,6 +926,14 @@ function showToast(message, type) {
 }
 
 /* ==================== 工具函数 ==================== */
+
+/** DEBT-02: 降级路径的统一诊断出口 —— 失败不阻断主流程，但必须留下痕迹。
+ *  ⚠️ 这里只能用 console.warn：三个 E2E 套件都断言「无 console error」，
+ *  把降级诊断写成 console.error 会直接把 CI 判红（而它并不是代码缺陷）。
+ *  对应地，「不能降级」的路径要自己补用户提示（Toast / 状态文案），不走这个函数。 */
+function _warnDegraded(what, err) {
+  console.warn('[DeepPage] ' + what + '失败（已降级）:', (err && err.message) || err);
+}
 
 /** 根据字符串生成固定的哈希颜色 */
 function stringToColor(str) {
