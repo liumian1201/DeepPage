@@ -78,7 +78,7 @@ async function waitBrowserWs() {
 }
 
 let ws, msgId = 0;
-let interceptedDrag = null;   // BUG-079：CDP 原生拖拽数据（Input.dragIntercepted）
+// BUG-088：分组行排序已改用鼠标事件 → 不再需要 CDP 的原生拖拽拦截（Input.dragIntercepted）
 const pending = new Map();
 // BUG-073：只有「已知外部服务的网络失败」被忽略（且单独计数打印），其余一律计入失败
 const consoleLog = createConsoleErrorCollector();
@@ -111,7 +111,6 @@ function send(method, params, sessionId) {
       // BUG-073：过滤规则收窄为「来源精确 + 网络失败」两条同时成立（见 tests/lib/console-error-filter.js）
       consoleLog.add(text);
     }
-    if (msg.method === 'Input.dragIntercepted') interceptedDrag = msg.params.data;
     if (msg.method === 'Runtime.exceptionThrown') {
       consoleLog.addException(msg.params.exceptionDetails.exception?.description || msg.params.exceptionDetails.text);
     }
@@ -911,7 +910,9 @@ function send(method, params, sessionId) {
   await evalJs('openGroupManager()');
   await sleep(400);
   check('分组行含颜色/图标/拖拽控件', (await evalJs('!!document.querySelector(".group-mgr-color") && !!document.querySelector(".group-mgr-icon") && !!document.querySelector(".group-mgr-drag")')) === true);
-  check('拖拽手柄可拖（draggable）', (await evalJs('document.querySelector(".group-mgr-drag").getAttribute("draggable")')) === 'true');
+  // BUG-088：排序改用鼠标事件后，手柄不再需要原生 draggable；保留 tabindex 以便键盘排序
+  check('拖拽手柄不再是原生 draggable，但仍是可聚焦的键盘排序入口',
+    (await evalJs('(function () { var h = document.querySelector(".group-mgr-drag"); return !!h && h.getAttribute("draggable") === null && h.getAttribute("tabindex") === "0"; })()')) === true);
 
   await evalJs(`(() => { const c = document.querySelector('.group-mgr-color[data-index="0"]'); c.value = '#e91e63'; c.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; })()`);
   await sleep(600);
@@ -923,22 +924,32 @@ function send(method, params, sessionId) {
   check('图标写入分组数据', (await evalJs('groups[0].icon')) === '🏠', await evalJs('groups[0].icon'));
   check('指示器渲染图标', (await evalJs('!!document.querySelector("#group-dots .group-icon")')) === true);
 
-  // 拖拽排序：模拟 HTML5 DnD（手柄 dragstart → 末行 dragover/drop）
+  // 拖拽排序：**真实鼠标**按下 → 移动 → 松手（BUG-088 起走鼠标事件，不再用原生 HTML5 拖拽）
   const grpOrderBefore = JSON.parse(await evalJs('JSON.stringify(groups.map(g => g.name))'));
-  await evalJs(`(() => {
+  const grpDragPts = JSON.parse(await evalJs(`(() => {
     const list = document.getElementById('group-manager-list');
-    const handle = list.querySelector('.group-mgr-drag[data-index="0"]');
     const rows = [...list.querySelectorAll('.group-mgr-item')];
-    const dt = new DataTransfer();
-    handle.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
-    const last = rows[rows.length - 1];
-    last.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
-    last.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
-    return 'ok';
-  })()`);
+    const h = rows[0].querySelector('.group-mgr-drag').getBoundingClientRect();
+    const t = rows[rows.length - 1].getBoundingClientRect();
+    return JSON.stringify({
+      from: { x: Math.round(h.left + h.width / 2), y: Math.round(h.top + h.height / 2) },
+      to: { x: Math.round(t.left + t.width / 2), y: Math.round(t.top + t.height / 2) }
+    });
+  })()`));
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: grpDragPts.from.x, y: grpDragPts.from.y, button: 'left', clickCount: 1, buttons: 1 }, sid);
+  for (let i = 1; i <= 5; i++) {
+    await send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: Math.round(grpDragPts.from.x + (grpDragPts.to.x - grpDragPts.from.x) * i / 5),
+      y: Math.round(grpDragPts.from.y + (grpDragPts.to.y - grpDragPts.from.y) * i / 5),
+      button: 'left', buttons: 1
+    }, sid);
+    await sleep(70);
+  }
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: grpDragPts.to.x, y: grpDragPts.to.y, button: 'left', clickCount: 1, buttons: 0 }, sid);
   await sleep(900);
   const grpOrderAfter = JSON.parse(await evalJs('JSON.stringify(groups.map(g => g.name))'));
-  check('拖拽后顺序改变且长度不变', grpOrderAfter.length === grpOrderBefore.length && grpOrderAfter[grpOrderAfter.length - 1] === grpOrderBefore[0], { before: grpOrderBefore, after: grpOrderAfter });
+  check('真实鼠标拖拽后顺序改变且长度不变', grpOrderAfter.length === grpOrderBefore.length && grpOrderAfter[grpOrderAfter.length - 1] === grpOrderBefore[0], { before: grpOrderBefore, after: grpOrderAfter });
   check('活动分组按 id 跟随（未错位）', (await evalJs('groups[activeGroupIndex] && groups[activeGroupIndex].id')) === (await evalJs('(async () => (await getActiveGroup(), groups[activeGroupIndex].id))()')), await evalJs('groups[activeGroupIndex].name'));
   check('拖拽后持久化到 storage', (await evalJs(`new Promise(r => chrome.storage.sync.get('groups', d => r((d.groups || []).map(g => g.name).join(','))))`)) === grpOrderAfter.join(','));
 
@@ -3058,24 +3069,24 @@ function send(method, params, sessionId) {
   check('DEBT-02 删组前快照：快照失败时分组仍然被删掉（降级路径真的走通，不是只打日志）',
     c14b.after === c14b.before - 1 && c14b.gone === true, c14b);
 
-  // ⑭ 分组拖拽：dataTransfer 写入失败是有意静默（排序用的是 dragFrom 变量）
+  // ⑭ 分组拖拽的 dataTransfer 写入：**BUG-088 起该路径整条移除**（排序改用鼠标事件，
+  //    不再有 setData 调用）→ 原先那条"写入失败仍继续拖拽"的有意静默断言随之作废，
+  //    改为断言新实现下拖拽过程不产生任何降级诊断（本来就是纯 DOM 状态，没有可失败的外部调用）。
   const c15 = JSON.parse(await evalJs(`(async () => {
     renderGroupManagerList();
     await new Promise(function (r) { setTimeout(r, 200); });
-    var handle = document.querySelector('.group-mgr-item .group-mgr-drag');
-    if (!handle) return JSON.stringify({ handle: false });
+    var list = document.getElementById('group-manager-list');
+    var row = list && list.querySelector('.group-mgr-item');
+    if (!row) return JSON.stringify({ row: false });
     window.__dpWarnBuf.length = 0;
-    var dt = new DataTransfer();
-    dt.setData = function () { throw new Error('dt boom'); };
-    handle.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
-    return JSON.stringify({
-      handle: true,
-      dragging: handle.closest('.group-mgr-item').classList.contains('dragging'),
-      warns: window.__dpWarnBuf.slice()
-    });
+    var r0 = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, clientY: r0.top + 2 }));
+    document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientY: r0.top + 20 }));
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientY: r0.top + 20 }));
+    return JSON.stringify({ row: true, warns: window.__dpWarnBuf.slice() });
   })()`));
-  check('DEBT-02 分组拖拽：dataTransfer 写入失败仍继续拖拽，且不刷诊断（有意静默）',
-    c15.handle === true && c15.dragging === true && (c15.warns || []).length === 0, c15);
+  check('DEBT-02 分组拖拽（鼠标事件实现）：全过程不产生降级诊断',
+    c15.row === true && (c15.warns || []).length === 0, c15);
 
   // ⑮ 右键菜单刷新失败（扩展上下文失效）：数据已落盘，可降级
   const c16 = JSON.parse(await evalJs(`(async () => {
@@ -3370,49 +3381,78 @@ function send(method, params, sessionId) {
       && sliderFix.afterPct === '45%' && sliderFix.resetBtn === false
       && sliderFix.resetLabel === '跟随全局' && sliderFix.resetStored === null, sliderFix);
 
-  // —— ② 分组管理器：真实 CDP 拖拽（不是合成 DragEvent —— 合成事件绕过浏览器 DnD 状态机，
-  //    正是这个覆盖缺口让 BUG-079 潜伏：逐行绑定 + 闭包 dragFrom，拖拽途中一重渲染就失去放置目标）——
+  // —— ② 分组管理器排序：**真实鼠标拖拽**（BUG-088 起改用鼠标事件实现，不再依赖原生 HTML5 拖拽）——
+  //    为什么不再用原生拖拽：用户真实浏览器里，分组行的 dragstart 正常、dragenter 也送达列表，
+  //    但**一次 drop 都不派发**、光标全程 🚫（同一浏览器里卡片拖拽与看板编辑拖拽都正常）。
+  //    所以断言也改成"真实鼠标按下→移动→松手"，这才是用户实际做的动作。
   const dragRects = async () => JSON.parse(await evalJs(`(async () => {
     if (typeof ensureSettingsPanelReady === 'function') await ensureSettingsPanelReady();
     while (groups.length < 3) groups.push({ id: 'gdrag' + groups.length, name: '拖拽测试组' + groups.length, cards: [], sortMode: 'manual' });
     await saveGroups(groups); renderGroupDots(); openGroupManager();
     await new Promise(function (r) { setTimeout(r, 400); });
-    var rows = [].slice.call(document.querySelectorAll('.group-mgr-item'));
+    var list = document.getElementById('group-manager-list');
+    var rows = [].slice.call(list.querySelectorAll('.group-mgr-item'));
     var h = rows[0].querySelector('.group-mgr-drag').getBoundingClientRect();
     var t = rows[rows.length - 1].getBoundingClientRect();
+    var r0 = rows[0].getBoundingClientRect(), r1 = rows[1].getBoundingClientRect();
+    // 行内「非输入区」起拖点：从左往右扫，取 elementFromPoint 命中本行且不在 input/button 上的点
+    function freePoint(row) {
+      var rr = row.getBoundingClientRect();
+      for (var dx = 3; dx < rr.width - 3; dx += 3) {
+        var x = Math.round(rr.left + dx), y = Math.round(rr.top + rr.height / 2);
+        var el = document.elementFromPoint(x, y);
+        if (!el || !row.contains(el) || el.closest('input') || el.closest('button')) continue;
+        return { x: x, y: y, hit: String(el.className || el.tagName) };
+      }
+      return null;
+    }
     return JSON.stringify({
       names: groups.map(function (g) { return g.name; }),
+      rows: rows.length,
       handle: { x: Math.round(h.left + h.width / 2), y: Math.round(h.top + h.height / 2) },
-      target: { x: Math.round(t.left + t.width / 2), y: Math.round(t.top + t.height / 2) }
+      target: { x: Math.round(t.left + t.width / 2), y: Math.round(t.top + t.height / 2) },
+      gap: { x: Math.round(r0.left + r0.width / 2), y: Math.round((r0.bottom + r1.top) / 2) },
+      elsewhere: { x: Math.round(list.getBoundingClientRect().left + 8), y: Math.round(document.querySelector('#dialog-group-manager .dialog-card').getBoundingClientRect().top + 12) },
+      free: freePoint(rows[0]),
+      nameInput: (function () { var inp = rows[0].querySelector('.group-mgr-name'); var r = inp.getBoundingClientRect(); return { x: Math.round(r.left + 3), y: Math.round(r.top + r.height / 2), w: Math.round(r.width) }; })(),
+      nativeDraggable: { row: rows[0].getAttribute('draggable'), handle: rows[0].querySelector('.group-mgr-drag').getAttribute('draggable') }
     });
   })()`));
-  const realDrag = async (r, midRerender) => {
-    interceptedDrag = null;
-    await send('Input.setInterceptDrags', { enabled: true }, sid);
-    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.handle.x, y: r.handle.y, button: 'left', clickCount: 1, buttons: 1 }, sid);
-    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r.handle.x + 12, y: r.handle.y + 12, button: 'left', buttons: 1 }, sid);
-    for (let i = 0; i < 20 && !interceptedDrag; i++) await sleep(100);
-    const started = !!interceptedDrag;
-    if (midRerender) { await evalJs('(function () { renderGroupManagerList(); return "ok"; })()'); await sleep(150); }
-    if (started) {
-      // CDP 拖拽序列必须 dragEnter → dragOver → drop（漏掉 dragEnter 事件不会送达页面）
-      await send('Input.dispatchDragEvent', { type: 'dragEnter', x: r.target.x, y: r.target.y, data: interceptedDrag }, sid);
-      await send('Input.dispatchDragEvent', { type: 'dragOver', x: r.target.x, y: r.target.y, data: interceptedDrag }, sid);
-      await sleep(120);
-      await send('Input.dispatchDragEvent', { type: 'drop', x: r.target.x, y: r.target.y, data: interceptedDrag }, sid);
-      await sleep(600);
+
+  /** 真实鼠标拖拽：按下 → 分步移动（越过 4px 阈值）→ 松手；可指定起拖点与落点、可选中途重渲染 */
+  const mouseDrag = async (from, to, opts) => {
+    opts = opts || {};
+    const names = JSON.parse(await evalJs('JSON.stringify(groups.map(function (g) { return g.name; }))'));
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: from.x, y: from.y, button: 'left', clickCount: 1, buttons: 1 }, sid);
+    const steps = 6;
+    let painted = null;
+    for (let i = 1; i <= steps; i++) {
+      const x = Math.round(from.x + (to.x - from.x) * i / steps);
+      const y = Math.round(from.y + (to.y - from.y) * i / steps);
+      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'left', buttons: 1 }, sid);
+      await sleep(70);
+      if (opts.midRerender && i === 3) { await evalJs('(function () { renderGroupManagerList(); return "ok"; })()'); await sleep(150); }
+      if (i === steps) {
+        painted = JSON.parse(await evalJs('JSON.stringify({ dragging: document.querySelectorAll(".group-mgr-item.dragging").length, over: document.querySelectorAll(".group-mgr-item.drag-over").length, cursor: document.body.classList.contains("gmgr-dragging") })'));
+      }
     }
-    await send('Input.setInterceptDrags', { enabled: false }, sid).catch(() => {});
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: to.x, y: to.y, button: 'left', clickCount: 1, buttons: 0 }, sid);
+    await sleep(600);
     const after = JSON.parse(await evalJs('JSON.stringify(groups.map(function (g) { return g.name; }))'));
     const stored = JSON.parse(await evalJs(`new Promise(function (r) { chrome.storage.sync.get('groups', function (x) { r(JSON.stringify((x.groups || []).map(function (g) { return g.name; }))); }); })`));
-    return { started, after, stored, movedToEnd: after[after.length - 1] === r.names[0] };
+    return { names, after, stored, painted, movedToEnd: after[after.length - 1] === names[0], changed: after.join() !== names.join() };
   };
-  const dr1 = await realDrag(await dragRects(), false);
-  check('BUG-079 真实拖拽 ⠿ 手柄能重排分组（拖拽真的启动 + 落盘顺序同步）',
-    dr1.started && dr1.movedToEnd && dr1.stored.join() === dr1.after.join(), dr1);
-  const dr2 = await realDrag(await dragRects(), true);
-  check('BUG-079 拖拽中途列表被重渲染仍能重排（事件委托的核心收益；修复前此场景 drop 不会触发）',
-    dr2.started && dr2.movedToEnd, dr2);
+  const dr0 = await dragRects();
+  check('BUG-088 前提：分组行与 ⠿ 手柄都**不再**是原生 draggable（排序已改用鼠标事件）',
+    dr0.nativeDraggable.row === null && dr0.nativeDraggable.handle === null, dr0.nativeDraggable);
+  const dr1 = await mouseDrag(dr0.handle, dr0.target, {});
+  check('BUG-088 真实鼠标拖拽 ⠿ 手柄能重排分组（拖拽真的启动 + 视觉反馈 + 落盘顺序同步）',
+    dr1.painted && dr1.painted.dragging === 1 && dr1.painted.cursor === true
+      && dr1.movedToEnd && dr1.stored.join() === dr1.after.join(), dr1);
+  const dr0b = await dragRects();
+  const dr2 = await mouseDrag(dr0b.handle, dr0b.target, { midRerender: true });
+  check('BUG-088 拖拽中途列表被重渲染仍能重排（按**下标**重画反馈、按下标落位，不依赖行元素引用）',
+    dr2.movedToEnd && dr2.stored.join() === dr2.after.join(), dr2);
   // 清理：把本次造的测试分组删掉，恢复分组数
   await evalJs(`(async () => {
     groups = groups.filter(function (g) { return g.id.indexOf('gdrag') !== 0; });
@@ -3423,18 +3463,18 @@ function send(method, params, sessionId) {
     return 'ok';
   })()`);
 
-  console.log('\n[36] v1.6.4 收尾：BUG-079 真因/加固 + BUG-081 多选壁纸 + #8 实测 BUG-082/083/084');
+  console.log('\n[36] v1.6.2 收尾：BUG-088 鼠标拖拽排序 + BUG-081 多选壁纸 + #8 实测 BUG-082/083/084');
 
-  // —— (1) BUG-079 真因：用户实测「光标进到行间空隙/列表留白就变 🚫、松手无效」——
-  //    根因是原先只在「正落在某一行上」才 preventDefault → 空隙处浏览器判定不接受放置，
-  //    drop 永不触发。dd699bc 改为整块列表接受放置 + 空隙按落点找最近行。
-  //    落点用两行中线（elementFromPoint 命中的是列表容器，不是行）。
+  // —— (1) BUG-088：排序改用鼠标事件后，**落点不再受"必须在列表内"限制** ——
+  //    旧实现（原生拖拽）的教训：只在正落在某一行上才接受放置 → 空隙/列表外一律 🚫 且 drop 不触发；
+  //    现在按落点 Y 与各行中线比较取最近行，在弹窗哪儿松手都算。
   const gmgr = JSON.parse(await evalJs(`(async () => {
     if (typeof ensureSettingsPanelReady === 'function') await ensureSettingsPanelReady();
     while (groups.length < 3) groups.push({ id: 'gdrag' + groups.length, name: '拖拽测试组' + groups.length, cards: [], sortMode: 'manual' });
     await saveGroups(groups); renderGroupDots(); openGroupManager();
     await new Promise(function (r) { setTimeout(r, 400); });
-    var rows = [].slice.call(document.querySelectorAll('.group-mgr-item'));
+    var list = document.getElementById('group-manager-list');
+    var rows = [].slice.call(list.querySelectorAll('.group-mgr-item'));
     function center(el) { var r = el.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; }
     // 行内「非输入区」起拖点：从左往右扫，取 elementFromPoint 命中本行且不在 input/button 上的点
     function freePoint(row) {
@@ -3450,115 +3490,83 @@ function send(method, params, sessionId) {
     var r0 = rows[0].getBoundingClientRect(), r1 = rows[1].getBoundingClientRect();
     var gap = { x: Math.round(r0.left + r0.width / 2), y: Math.round((r0.bottom + r1.top) / 2) };
     var gapEl = document.elementFromPoint(gap.x, gap.y);
-    var rowTags = [].slice.call(document.querySelectorAll('.group-mgr-name')).map(function (i) { return i.value; });
+    // 列表**外面**（弹窗卡片顶部）的落点：旧实现这里必 🚫，新实现应按 Y 找最近行
+    var card = document.querySelector('#dialog-group-manager .dialog-card').getBoundingClientRect();
     return JSON.stringify({
       names: groups.map(function (g) { return g.name; }),
-      rowTags: rowTags,
       handle: center(rows[0].querySelector('.group-mgr-drag')),
       free: freePoint(rows[0]),
       gap: gap,
       gapHitsRow: !!(gapEl && gapEl.closest && gapEl.closest('.group-mgr-item')),
       gapHit: gapEl ? String(gapEl.id || gapEl.className || gapEl.tagName) : null,
       last: center(rows[rows.length - 1]),
+      // 列表**下方**的弹窗留白（页脚区）：按落点 Y 应映射到**最后一行** → 与源行(0)不同才会重排。
+      // 注意别选列表上方的点：那会映射到第 0 行 = 源行本身，to === from 按语义就是不重排。
+      outside: { x: Math.round(card.left + card.width / 2), y: Math.round(card.bottom - 12) },
       nameInput: (function () { var inp = rows[0].querySelector('.group-mgr-name'); var r = inp.getBoundingClientRect(); return { x: Math.round(r.left + 3), y: Math.round(r.top + r.height / 2), w: Math.round(r.width) }; })()
     });
   })()`));
-  check('BUG-079 前提：落点确实在两行之间的空隙上（elementFromPoint 不是行）',
+  check('BUG-088 前提：落点确实在两行之间的空隙上（elementFromPoint 不是行）',
     gmgr.gapHitsRow === false && gmgr.names.length >= 3, { gap: gmgr.gap, gapHit: gmgr.gapHit });
 
-  // 真实 CDP 拖拽（不是合成 DragEvent）：可指定起拖点与落点，并观测页面是否接受放置
-  const realDrag2 = async (fromKey, toKey) => {
-    const from = gmgr[fromKey], to = gmgr[toKey];
-    // 每次拖拽前重新取一次顺序快照：上一次拖拽本身就会改变顺序，
-    // 拿 initial 快照比对会得出「拖错了一行」的假失败（本文件第一版就踩了这个）
-    const namesBefore = JSON.parse(await evalJs('JSON.stringify(groups.map(function (g) { return g.name; }))'));
-    await evalJs(`(function () {
-      window.__dgo = { over: 0, prevented: 0, drop: 0, dropPrevented: 0 };
-      document.addEventListener('dragover', function (e) { window.__dgo.over++; if (e.defaultPrevented) window.__dgo.prevented++; });
-      document.addEventListener('drop', function (e) { window.__dgo.drop++; if (e.defaultPrevented) window.__dgo.dropPrevented++; });
-      return 'ok';
-    })()`);
-    interceptedDrag = null;
-    await send('Input.setInterceptDrags', { enabled: true }, sid);
-    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: from.x, y: from.y, button: 'left', clickCount: 1, buttons: 1 }, sid);
-    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: from.x + 12, y: from.y + 12, button: 'left', buttons: 1 }, sid);
-    for (let i = 0; i < 20 && !interceptedDrag; i++) await sleep(100);
-    const started = !!interceptedDrag;
-    if (started) {
-      await send('Input.dispatchDragEvent', { type: 'dragEnter', x: to.x, y: to.y, data: interceptedDrag }, sid);
-      await send('Input.dispatchDragEvent', { type: 'dragOver', x: to.x, y: to.y, data: interceptedDrag }, sid);
-      await sleep(150);
-      await send('Input.dispatchDragEvent', { type: 'drop', x: to.x, y: to.y, data: interceptedDrag }, sid);
-      await sleep(600);
-    }
-    await send('Input.setInterceptDrags', { enabled: false }, sid).catch(() => {});
-    const dgo = JSON.parse(await evalJs('JSON.stringify(window.__dgo)'));
-    const after = JSON.parse(await evalJs('JSON.stringify(groups.map(function (g) { return g.name; }))'));
-    const stored = JSON.parse(await evalJs(`new Promise(function (r) { chrome.storage.sync.get('groups', function (x) { r(JSON.stringify((x.groups || []).map(function (g) { return g.name; }))); }); })`));
-    return { started, dgo, after, stored, namesBefore, from: fromKey, to: toKey, names: gmgr.names };
-  };
+  const gapDrag = await mouseDrag(gmgr.handle, gmgr.gap, {});
+  check('BUG-088 松手在两行之间的空隙也能重排（按落点找最近行；旧实现此处 drop 根本不触发）',
+    gapDrag.after[1] === gapDrag.names[0] && gapDrag.stored.join() === gapDrag.after.join(), gapDrag);
 
-  const gapDrag = await realDrag2('handle', 'gap');
-  check('BUG-079 真因：落在两行之间的空隙也能重排（修复前此处不 preventDefault → drop 不触发、顺序静默不变）',
-    gapDrag.started && gapDrag.dgo.prevented > 0 && gapDrag.dgo.dropPrevented > 0
-      && gapDrag.after[1] === gapDrag.namesBefore[0] && gapDrag.stored.join() === gapDrag.after.join(), gapDrag);
+  // —— (2) 整行（非输入区）起拖 ——
+  const rowDrag = await mouseDrag(gmgr.free, gmgr.last, {});
+  check('BUG-088 从整行非输入区起拖也能重排并落盘（旧实现只有 ⠿ 手柄是拖拽源）',
+    !!gmgr.free && rowDrag.movedToEnd && rowDrag.stored.join() === rowDrag.after.join(), { free: gmgr.free, rowDrag });
 
-  // —— (2) 加固：整行（非输入区）作为拖拽源 ——
-  const rowDrag = await realDrag2('free', 'last');
-  check('BUG-079 加固：从整行非输入区起拖也能重排并落盘（修复前只有 ⠿ 手柄是拖拽源）',
-    !!gmgr.free && rowDrag.started && rowDrag.after[rowDrag.after.length - 1] === rowDrag.namesBefore[0]
-      && rowDrag.stored.join() === rowDrag.after.join(), { free: gmgr.free, rowDrag });
+  // —— (2b) 松手在**列表外**（弹窗留白）也能重排：旧实现这里必 🚫 ——
+  const outsideDrag = await mouseDrag(gmgr.handle, gmgr.outside, {});
+  check('BUG-088 松手在列表外的弹窗留白也能重排（旧实现：列表外一律不接受放置 → 🚫 + 顺序不变）',
+    outsideDrag.changed && outsideDrag.stored.join() === outsideDrag.after.join(), { outside: gmgr.outside, outsideDrag });
 
-  // —— (3) 加固：在输入框上按下不启动行拖拽，且输入框仍可正常选字 ——
-  interceptedDrag = null;
-  await send('Input.setInterceptDrags', { enabled: true }, sid);
+  // —— (3) 在输入框上按下不启动行拖拽，且输入框仍可正常选字 ——
+  const inputBefore = JSON.parse(await evalJs('JSON.stringify(groups.map(function (g) { return g.name; }))'));
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: gmgr.nameInput.x, y: gmgr.nameInput.y, button: 'left', clickCount: 1, buttons: 1 }, sid);
   await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: gmgr.nameInput.x + Math.min(40, gmgr.nameInput.w - 6), y: gmgr.nameInput.y, button: 'left', buttons: 1 }, sid);
-  await sleep(800);
+  await sleep(300);
   const inputDragState = JSON.parse(await evalJs(`JSON.stringify({
-    rowDraggable: document.querySelector('.group-mgr-item').getAttribute('draggable'),
-    focused: document.activeElement === document.querySelector('.group-mgr-item .group-mgr-name'),
-    selLen: (function () { var i = document.querySelector('.group-mgr-item .group-mgr-name'); try { return Math.abs((i.selectionEnd || 0) - (i.selectionStart || 0)); } catch (e) { return -1; } })(),
-    value: document.querySelector('.group-mgr-item .group-mgr-name').value
+    dragging: document.querySelectorAll('.group-mgr-item.dragging').length,
+    cursor: document.body.classList.contains('gmgr-dragging'),
+    selectedLen: (function () { var i = document.querySelector('.group-mgr-item .group-mgr-name'); try { return Math.abs((i.selectionEnd || 0) - (i.selectionStart || 0)); } catch (e) { return -1; } })(),
+    focused: document.activeElement === document.querySelector('.group-mgr-item .group-mgr-name')
   })`));
-  inputDragState.intercepted = interceptedDrag !== null;
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: gmgr.nameInput.x, y: gmgr.nameInput.y, button: 'left', clickCount: 1, buttons: 0 }, sid);
-  await send('Input.setInterceptDrags', { enabled: false }, sid).catch(() => {});
-  check('BUG-079 加固：在输入框上按下不启动行拖拽（临时关掉行的 draggable）',
-    inputDragState.intercepted === false && inputDragState.rowDraggable === 'false', inputDragState);
-  check('BUG-079 加固：输入框仍保持可选字（mousedown 被拖拽吞掉的话这里选不中）',
-    inputDragState.focused === true && inputDragState.selLen > 0, inputDragState);
+  await sleep(500);
+  inputDragState.after = JSON.parse(await evalJs('JSON.stringify(groups.map(function (g) { return g.name; }))'));
+  inputDragState.unchanged = inputDragState.after.join() === inputBefore.join();
+  check('BUG-088 在输入框上按下拖动不启动行拖拽（没有 dragging 反馈、顺序不变）',
+    inputDragState.dragging === 0 && inputDragState.cursor === false && inputDragState.unchanged === true, inputDragState);
+  check('BUG-088 输入框仍保持可选字（mousedown 被拖拽吞掉的话这里选不中）',
+    inputDragState.focused === true && inputDragState.selectedLen > 0, inputDragState);
 
-  // —— (3b) BUG-087：拖拽开关必须在**按下之前**摆好 ——
-  // 真因（用户真实浏览器实测：分组行"按住拖不动"，而同页面普通 draggable 元素能拖）：
-  // **在 mousedown 处理器里改 `draggable`，会让这次原生拖拽根本起不来** —— Chrome 的拖拽启动
-  // 决策在按下那一刻就定了。无头 Chromium 走 CDP `Input.setInterceptDrags` 路径（比较宽松），
-  // 这类差异**抓不到**，所以这里断言的是"机制"本身：属性由 mouseover 预先摆好、mousedown 不再改它。
-  const pressGuard = JSON.parse(await evalJs(`(async () => {
+  // —— (3b) BUG-088：排序**不依赖原生 HTML5 拖拽** ——
+  // 用户浏览器实测：原生拖拽在分组行上走不完放置链路（dragstart/dragenter 正常，但一次 drop
+  // 都不派发、光标全程 🚫）。所以这里断言"我们不再用原生拖拽"这条设计约束，防止有人改回去：
+  // 行与手柄都没有 draggable 属性，且整条拖拽链路（按下→移动→松手）只用鼠标事件。
+  const noNativeDnd = JSON.parse(await evalJs(`(() => {
     var list = document.getElementById('group-manager-list');
     var row = list.querySelector('.group-mgr-item');
-    var input = row.querySelector('.group-mgr-name');
-    var out = {};
-    input.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-    out.hoverInput = row.getAttribute('draggable');               // 期望 'false'（输入框上按下不该起拖）
-    row.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-    out.hoverRow = row.getAttribute('draggable');                 // 期望 'true'（行主体可拖）
-    input.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-    out.afterMousedownOnInput = row.getAttribute('draggable');    // 修复后仍 'true'（按下时不改属性）
-    out.pressedFlag = (typeof _gmgrPressedOnControl !== 'undefined') ? _gmgrPressedOnControl : 'missing';
+    var out = {
+      rowDraggable: row.getAttribute('draggable'),
+      handleDraggable: row.querySelector('.group-mgr-drag').getAttribute('draggable'),
+      hasDndState: (typeof _gmgrDragFrom !== 'undefined') || (typeof _gmgrPressedOnControl !== 'undefined'),
+      hasMouseDragState: (typeof _gmgrDrag !== 'undefined')
+    };
+    // 合成一次 dragstart：不该被我们接管（没有原生拖拽 → 排序只由鼠标事件驱动）
     var ev = new MouseEvent('dragstart', { bubbles: true, cancelable: true });
     row.dispatchEvent(ev);
-    out.dragstartCancelled = ev.defaultPrevented;                 // 兜底：这次拖拽被取消
-    row.querySelector('.group-mgr-drag').dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-    out.hoverHandle = row.getAttribute('draggable');              // 回到手柄/行体 → 又能拖
+    out.dragstartCancelled = ev.defaultPrevented;
+    out.listenerState = list.dataset.gmgrSortBound || null;
     return JSON.stringify(out);
   })()`));
-  check('BUG-087 能否拖由 hover 决定（输入框上 false / 行体上 true），且 mousedown 不再改 draggable',
-    pressGuard.hoverInput === 'false' && pressGuard.hoverRow === 'true'
-      && pressGuard.afterMousedownOnInput === 'true' && pressGuard.pressedFlag === true
-      && pressGuard.hoverHandle === 'true', pressGuard);
-  check('BUG-087 兜底：指针没动就按在输入框上时，dragstart 被取消（选字/点按钮不被拖拽吞掉）',
-    pressGuard.dragstartCancelled === true, pressGuard);
+  check('BUG-088 分组行与 ⠿ 都不再是原生 draggable，旧的 DnD 状态已移除、鼠标拖拽已就绪',
+    noNativeDnd.rowDraggable === null && noNativeDnd.handleDraggable === null
+      && noNativeDnd.hasDndState === false && noNativeDnd.hasMouseDragState === true
+      && noNativeDnd.listenerState === '1', noNativeDnd);
 
   // 清理本次造的分组
   await evalJs(`(async () => {

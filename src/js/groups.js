@@ -311,10 +311,47 @@ async function moveGroupTo(from, to) {
 }
 
 
-/** BUG-079: 分组管理器拖拽的源下标（模块级，不放在渲染闭包里 —— 见 renderGroupManagerList 的注释） */
-var _gmgrDragFrom = null;
-/** BUG-087: 这次按下是否落在行内输入框/按钮上（dragstart 兜底用；**不再**在 mousedown 里改 draggable） */
-var _gmgrPressedOnControl = false;
+/**
+ * BUG-088: 分组行排序的鼠标拖拽状态（模块级，不放在渲染闭包里）。
+ * 形如 { from: 源下标, startY: 按下时的 clientY, active: 是否已越过阈值 }。
+ */
+var _gmgrDrag = null;
+/** 文档级 mousemove/mouseup 只绑一次（列表元素可能被重渲染/重建） */
+var _gmgrDocBound = false;
+/** 拖拽刚结束的时间戳：短时间内忽略 click，避免"松手即切分组"（原生拖拽不会产生 click，鼠标拖拽会） */
+var _gmgrDragEndAt = 0;
+
+/** 落点 clientY 对应的目标行下标：与各行中线比较；都在上方则归到末尾 */
+function _gmgrTargetIndex(clientY) {
+  var list = document.getElementById('group-manager-list');
+  if (!list) return -1;
+  var rows = [].slice.call(list.querySelectorAll('.group-mgr-item'));
+  if (!rows.length) return -1;
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i].getBoundingClientRect();
+    if (clientY < r.top + r.height / 2) return i;
+  }
+  return rows.length - 1;
+}
+
+/** 拖拽中的视觉反馈：源行半透明、目标行顶部高亮（每次重新按**下标**取行，重渲染后也不会丢） */
+function _gmgrPaintDrag(fromIdx, toIdx) {
+  var list = document.getElementById('group-manager-list');
+  if (!list) return;
+  [].slice.call(list.querySelectorAll('.group-mgr-item')).forEach(function (el, i) {
+    el.classList.toggle('dragging', i === fromIdx);
+    el.classList.toggle('drag-over', i === toIdx && i !== fromIdx);
+  });
+}
+
+/** 清掉拖拽中的全部视觉状态 */
+function _gmgrClearDragPaint() {
+  var list = document.getElementById('group-manager-list');
+  if (!list) return;
+  [].slice.call(list.querySelectorAll('.group-mgr-item')).forEach(function (el) {
+    el.classList.remove('dragging', 'drag-over');
+  });
+}
 
 function renderGroupManagerList() {
   var list = document.getElementById('group-manager-list');
@@ -323,14 +360,14 @@ function renderGroupManagerList() {
   groups.forEach(function (g, i) {
     var activeCls = i === activeGroupIndex ? ' active' : '';
     var cardCount = (g.cards && g.cards.length) ? g.cards.length : 0;
-    // BUG-079 加固：**整行**作为拖拽源（用户直觉是拖整行），行内 input/button 上按下时由
-    // 下面的 mousedown 委托临时关掉 draggable，保证输入框仍能正常选字/点击。
-    html += '<div class="group-mgr-item' + activeCls + '" data-index="' + i + '" draggable="true">' +
+    // BUG-088: **整行**可拖（用户直觉就是拖整行），但走的是鼠标事件而非原生 HTML5 拖拽；
+    // 行内 input/button 上按下不启动拖拽（见下面的 mousedown 委托），保证输入框能选字、按钮能点。
+    html += '<div class="group-mgr-item' + activeCls + '" data-index="' + i + '">' +
       '<span class="mgr-card-count">' + cardCount + '</span>' +
       '<input type="color" class="group-mgr-color" data-index="' + i + '" value="' + escapeHtml(g.color || '#4a90d9') + '" title="分组颜色" aria-label="分组颜色">' +
       '<input type="text" class="group-mgr-icon" data-index="' + i + '" maxlength="2" placeholder="图标" value="' + escapeHtml(g.icon || '') + '" title="分组图标（emoji，最多 2 字）" aria-label="分组图标">' +
       '<input class="group-mgr-name" value="' + escapeHtml(g.name) + '" data-index="' + i + '">' +
-      '<span class="group-mgr-drag" draggable="true" tabindex="0" role="button" data-index="' + i + '" title="拖拽调整顺序（聚焦后按 ↑↓ 也可移动）" aria-label="拖拽调整分组顺序，聚焦后按上下方向键移动">⠿</span>' +
+      '<span class="group-mgr-drag" tabindex="0" role="button" data-index="' + i + '" title="拖拽调整顺序（聚焦后按 ↑↓ 也可移动）" aria-label="拖拽调整分组顺序，聚焦后按上下方向键移动">⠿</span>' +
       '<div class="group-mgr-actions">' +
       '<button class="group-mgr-btn" data-action="mgr-export" data-index="' + i + '" title="导出此分组">📤</button>' +
       '<button class="group-mgr-btn danger" data-action="mgr-delete" data-index="' + i + '" title="删除">✕</button>' +
@@ -367,84 +404,53 @@ function renderGroupManagerList() {
     });
   });
 
-  // v1.6.3 BUG-079: 拖拽改为**事件委托 + 模块级状态**（原先逐行绑定、dragFrom 存在渲染闭包里）。
-  // 逐行绑定的致命缺陷：拖拽途中列表一旦被重渲染，行元素被换新 → 新行的 dragover 读到的是
-  // 自己闭包里的 dragFrom === null → 不 preventDefault → 浏览器判定「此处不接受放置」
-  // （无效光标），drop 永不触发、顺序静默不变。与 v1.3.1 看板箭头同一类坑：
-  // **动态增删的列表必须用委托**。委托后容器不随重渲染消失，拖拽状态也不再随闭包丢失。
-  if (!list.dataset.gmgrDndBound) {
-    list.dataset.gmgrDndBound = '1';
-    /* BUG-087（用户真实浏览器实测：分组行"按住拖不动"，而页面层的普通 draggable 元素能拖）：
-       **不要在 mousedown 里改 draggable。** Chrome 的拖拽启动决策在按下那一刻就定了，
-       在 mousedown 处理器里改这个属性（哪怕是同值赋值之外的必要改动）会让这次拖拽根本起不来；
-       无头 Chromium 走 CDP 的 `Input.setInterceptDrags` 路径比较宽松，所以 E2E 一直没抓到。
-       改为在 **mouseover** 里预先摆好属性（指针移到哪里之前必然先经过 mouseover，按下时无需再改），
-       mousedown 只**记录**这次是不是按在行内输入框/按钮上，供 dragstart 兜底。 */
-    list.addEventListener('mouseover', function (e) {
+  /* ============================================================
+     BUG-088: 分组行排序 = **鼠标事件拖拽**（与看板编辑态同一套机制），不再用原生 HTML5 拖拽。
+     为什么换掉原生拖拽（用户真实浏览器实测，取证包日志）：
+       在同一浏览器里，卡片拖拽、看板编辑态拖拽都正常，唯独分组行 —— `dragstart` 正常触发、
+       `dragenter` 也送到了列表、我们内部"正在拖第几行"的标记也设对了，但**从头到尾一次 `drop`
+       都不派发**，光标全程 🚫，顺序自然不变。规范上此时页面已经 `preventDefault` 接受放置，
+       该派发 `drop` 才对 —— 这属于该浏览器/环境对这类元素原生拖拽的处置，我们改不动，
+       于是改用**已经验证过可用**的鼠标事件路径（看板编辑态就是它，用户实测能拖）。
+     顺带解决两个老问题：① 不再有"落点必须在列表内才接受"的小放置区（现在按落点 Y 找最近行，
+     在弹窗哪儿松手都算）；② 不再出现原生拖拽的 🚫 光标。
+     旧的原生拖拽实现（逐行绑定 → 事件委托 → 空隙接受放置 → mousedown 改 draggable → hover 摆属性）
+     一路打的全是这条链路上的补丁，现在整条链路不再需要。
+     注意：点击语义保持不变 —— 没越过阈值就是"点击"，仍由下面的 click 处理器切分组。
+     ============================================================ */
+  if (!list.dataset.gmgrSortBound) {
+    list.dataset.gmgrSortBound = '1';
+    list.addEventListener('mousedown', function (e) {
+      if (e.button !== 0) return;
       var row = e.target.closest && e.target.closest('.group-mgr-item');
       if (!row) return;
-      var want = !(e.target.closest('input') || e.target.closest('button'));
-      if (row.draggable !== want) row.draggable = want;
+      if (e.target.closest('input') || e.target.closest('button')) return;   // 行内控件保持原交互
+      _gmgrDrag = { from: parseInt(row.dataset.index, 10), startY: e.clientY, active: false };
+      e.preventDefault();   // 阻止文本选中；**不**阻止 click → 轻点仍能切分组
     });
-    list.addEventListener('mousedown', function (e) {
-      _gmgrPressedOnControl = !!(e.target.closest && (e.target.closest('input') || e.target.closest('button')));
-    }, true);
-    list.addEventListener('dragstart', function (e) {
-      // 兜底：属性还是 true（例如指针没动、行刚被重渲染过）时，按在控件上就直接取消这次拖拽，
-      // 保证输入框选字 / 按钮点击不被拖拽吞掉
-      if (_gmgrPressedOnControl) { e.preventDefault(); return; }
-      var handle = e.target.closest && e.target.closest('.group-mgr-drag');
-      var row0 = e.target.closest && e.target.closest('.group-mgr-item');
-      var src = (handle && list.contains(handle)) ? handle : row0;   // 手柄或整行都可作为拖拽源
-      if (!src || !list.contains(src)) return;
-      var handle2 = src;
-      _gmgrDragFrom = parseInt(handle2.dataset.index, 10);
-      e.dataTransfer.effectAllowed = 'move';
-      try { e.dataTransfer.setData('text/plain', String(_gmgrDragFrom)); } catch (err) { /* best-effort: 排序用的是 _gmgrDragFrom，dataTransfer 只是给外部拖放留的标记 */ }
-      var row = handle2.closest('.group-mgr-item');
-      if (row) row.classList.add('dragging');
-    });
-    list.addEventListener('dragend', function () {
-      _gmgrDragFrom = null;
-      list.querySelectorAll('.group-mgr-item').forEach(function (el) { el.classList.remove('dragging', 'drag-over'); });
-    });
-    list.addEventListener('dragover', function (e) {
-      if (_gmgrDragFrom === null) return;
-      // 实测（BUG-079）：原先只在「正落在某一行上」才 preventDefault → 光标停在行间空隙/列表留白时
-      // 浏览器显示禁止光标（用户以为拖拽坏了），在那里松手 drop 根本不触发。
-      // 现在**整块列表都接受放置**，空隙里也按落点找最近的行。
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      var row = e.target.closest && e.target.closest('.group-mgr-item');
-      list.querySelectorAll('.group-mgr-item.drag-over').forEach(function (el) { if (el !== row) el.classList.remove('drag-over'); });
-      if (row) row.classList.add('drag-over');
-    });
-    list.addEventListener('dragleave', function (e) {
-      // 只在真正离开列表时清掉高亮（在行/空隙之间移动不清，避免闪烁）
-      if (e.relatedTarget && list.contains(e.relatedTarget)) return;
-      list.querySelectorAll('.group-mgr-item.drag-over').forEach(function (el) { el.classList.remove('drag-over'); });
-    });
-    list.addEventListener('drop', function (e) {
-      if (_gmgrDragFrom === null) return;
-      e.preventDefault();
-      list.querySelectorAll('.group-mgr-item.drag-over').forEach(function (el) { el.classList.remove('drag-over'); });
-      var row = e.target.closest && e.target.closest('.group-mgr-item');
-      var to;
-      if (row) {
-        to = parseInt(row.dataset.index, 10);
-      } else {
-        // 落在行间空隙 / 列表留白：按落点纵向位置找最近的一行；都在上方则移到末尾
-        var rows = [].slice.call(list.querySelectorAll('.group-mgr-item'));
-        to = rows.length - 1;
-        for (var i = 0; i < rows.length; i++) {
-          var r = rows[i].getBoundingClientRect();
-          if (e.clientY < r.top + r.height / 2) { to = i; break; }
-        }
+  }
+  if (!_gmgrDocBound) {
+    _gmgrDocBound = true;
+    document.addEventListener('mousemove', function (e) {
+      if (!_gmgrDrag) return;
+      if (!_gmgrDrag.active) {
+        if (Math.abs(e.clientY - _gmgrDrag.startY) < 4) return;   // 4px 阈值：以内算点击
+        _gmgrDrag.active = true;
+        document.body.classList.add('gmgr-dragging');
       }
-      var from = _gmgrDragFrom;
-      _gmgrDragFrom = null;
-      if (isNaN(to) || to === from || to < 0 || to >= groups.length) return;
-      moveGroupTo(from, to);
+      _gmgrPaintDrag(_gmgrDrag.from, _gmgrTargetIndex(e.clientY));
+    });
+    document.addEventListener('mouseup', function (e) {
+      if (!_gmgrDrag) return;
+      var drag = _gmgrDrag;
+      _gmgrDrag = null;
+      document.body.classList.remove('gmgr-dragging');
+      _gmgrClearDragPaint();
+      if (!drag.active) return;                       // 没越阈值 → 交给 click（切分组）
+      _gmgrDragEndAt = Date.now();                   // 真拖过 → 抑制随后的 click
+      var to = _gmgrTargetIndex(e.clientY);
+      if (isNaN(to) || to === drag.from || to < 0 || to >= groups.length) return;
+      moveGroupTo(drag.from, to);
     });
   }
   // v1.5.1: 手柄支持键盘排序（去掉 ▲▼ 后保留无障碍路径）
@@ -460,6 +466,7 @@ function renderGroupManagerList() {
   list.querySelectorAll('.group-mgr-item').forEach(function (row) {
     row.addEventListener('click', function (e) {
       if (e.target.closest('input') || e.target.closest('button')) return;
+      if (Date.now() - _gmgrDragEndAt < 300) return;   // BUG-088: 刚拖完那一下不算点击（否则会误切分组）
       var idx = parseInt(this.dataset.index, 10);
       if (idx !== activeGroupIndex) switchGroup(idx);
     });

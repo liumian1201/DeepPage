@@ -305,6 +305,8 @@
 .group-mgr-drag:active { cursor: grabbing; }
 .group-mgr-item.dragging { opacity: 0.5; }
 .group-mgr-item.drag-over { box-shadow: inset 0 2px 0 var(--accent); }
+/* BUG-088: 鼠标事件拖拽进行中 → 光标 grabbing（原生拖拽已弃用，也就不会再出现 🚫 光标） */
+body.gmgr-dragging, body.gmgr-dragging .group-mgr-item, body.gmgr-dragging .group-mgr-name { cursor: grabbing; }
 
 .group-mgr-btn {
   width: 28px;
