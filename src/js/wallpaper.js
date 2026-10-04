@@ -565,8 +565,12 @@ function initLocalWallpaperUI() {
   if (multiBtn && multiInput) {
     multiBtn.addEventListener('click', function () { multiInput.click(); });
     multiInput.addEventListener('change', function () {
-      if (this.files && this.files.length) addLocalWallpapers(this.files);
+      // BUG-081: 必须**先把 FileList 快照成数组**再清空 input ——
+      // addLocalWallpapers 是 async（内部 await 让出），而 this.value = '' 会立刻清空 FileList，
+      // 下一轮循环判断 files.length 就成了 0 → 多选时只有第一张生效。
+      var picked = [].slice.call(this.files || []);
       this.value = '';
+      if (picked.length) addLocalWallpapers(picked);
     });
   }
   var rotateSel = document.getElementById('setting-wallpaper-rotate');
