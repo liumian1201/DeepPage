@@ -3529,6 +3529,37 @@ function send(method, params, sessionId) {
   check('BUG-079 加固：输入框仍保持可选字（mousedown 被拖拽吞掉的话这里选不中）',
     inputDragState.focused === true && inputDragState.selLen > 0, inputDragState);
 
+  // —— (3b) BUG-087：拖拽开关必须在**按下之前**摆好 ——
+  // 真因（用户真实浏览器实测：分组行"按住拖不动"，而同页面普通 draggable 元素能拖）：
+  // **在 mousedown 处理器里改 `draggable`，会让这次原生拖拽根本起不来** —— Chrome 的拖拽启动
+  // 决策在按下那一刻就定了。无头 Chromium 走 CDP `Input.setInterceptDrags` 路径（比较宽松），
+  // 这类差异**抓不到**，所以这里断言的是"机制"本身：属性由 mouseover 预先摆好、mousedown 不再改它。
+  const pressGuard = JSON.parse(await evalJs(`(async () => {
+    var list = document.getElementById('group-manager-list');
+    var row = list.querySelector('.group-mgr-item');
+    var input = row.querySelector('.group-mgr-name');
+    var out = {};
+    input.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    out.hoverInput = row.getAttribute('draggable');               // 期望 'false'（输入框上按下不该起拖）
+    row.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    out.hoverRow = row.getAttribute('draggable');                 // 期望 'true'（行主体可拖）
+    input.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    out.afterMousedownOnInput = row.getAttribute('draggable');    // 修复后仍 'true'（按下时不改属性）
+    out.pressedFlag = (typeof _gmgrPressedOnControl !== 'undefined') ? _gmgrPressedOnControl : 'missing';
+    var ev = new MouseEvent('dragstart', { bubbles: true, cancelable: true });
+    row.dispatchEvent(ev);
+    out.dragstartCancelled = ev.defaultPrevented;                 // 兜底：这次拖拽被取消
+    row.querySelector('.group-mgr-drag').dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    out.hoverHandle = row.getAttribute('draggable');              // 回到手柄/行体 → 又能拖
+    return JSON.stringify(out);
+  })()`));
+  check('BUG-087 能否拖由 hover 决定（输入框上 false / 行体上 true），且 mousedown 不再改 draggable',
+    pressGuard.hoverInput === 'false' && pressGuard.hoverRow === 'true'
+      && pressGuard.afterMousedownOnInput === 'true' && pressGuard.pressedFlag === true
+      && pressGuard.hoverHandle === 'true', pressGuard);
+  check('BUG-087 兜底：指针没动就按在输入框上时，dragstart 被取消（选字/点按钮不被拖拽吞掉）',
+    pressGuard.dragstartCancelled === true, pressGuard);
+
   // 清理本次造的分组
   await evalJs(`(async () => {
     groups = groups.filter(function (g) { return g.id.indexOf('gdrag') !== 0; });

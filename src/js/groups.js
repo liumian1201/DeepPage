@@ -313,6 +313,8 @@ async function moveGroupTo(from, to) {
 
 /** BUG-079: 分组管理器拖拽的源下标（模块级，不放在渲染闭包里 —— 见 renderGroupManagerList 的注释） */
 var _gmgrDragFrom = null;
+/** BUG-087: 这次按下是否落在行内输入框/按钮上（dragstart 兜底用；**不再**在 mousedown 里改 draggable） */
+var _gmgrPressedOnControl = false;
 
 function renderGroupManagerList() {
   var list = document.getElementById('group-manager-list');
@@ -372,13 +374,25 @@ function renderGroupManagerList() {
   // **动态增删的列表必须用委托**。委托后容器不随重渲染消失，拖拽状态也不再随闭包丢失。
   if (!list.dataset.gmgrDndBound) {
     list.dataset.gmgrDndBound = '1';
-    list.addEventListener('mousedown', function (e) {
-      // 行内控件上按下时不启动行拖拽（否则输入框无法选字、按钮点击会被拖拽吞掉）
+    /* BUG-087（用户真实浏览器实测：分组行"按住拖不动"，而页面层的普通 draggable 元素能拖）：
+       **不要在 mousedown 里改 draggable。** Chrome 的拖拽启动决策在按下那一刻就定了，
+       在 mousedown 处理器里改这个属性（哪怕是同值赋值之外的必要改动）会让这次拖拽根本起不来；
+       无头 Chromium 走 CDP 的 `Input.setInterceptDrags` 路径比较宽松，所以 E2E 一直没抓到。
+       改为在 **mouseover** 里预先摆好属性（指针移到哪里之前必然先经过 mouseover，按下时无需再改），
+       mousedown 只**记录**这次是不是按在行内输入框/按钮上，供 dragstart 兜底。 */
+    list.addEventListener('mouseover', function (e) {
       var row = e.target.closest && e.target.closest('.group-mgr-item');
       if (!row) return;
-      row.draggable = !(e.target.closest('input') || e.target.closest('button'));
+      var want = !(e.target.closest('input') || e.target.closest('button'));
+      if (row.draggable !== want) row.draggable = want;
+    });
+    list.addEventListener('mousedown', function (e) {
+      _gmgrPressedOnControl = !!(e.target.closest && (e.target.closest('input') || e.target.closest('button')));
     }, true);
     list.addEventListener('dragstart', function (e) {
+      // 兜底：属性还是 true（例如指针没动、行刚被重渲染过）时，按在控件上就直接取消这次拖拽，
+      // 保证输入框选字 / 按钮点击不被拖拽吞掉
+      if (_gmgrPressedOnControl) { e.preventDefault(); return; }
       var handle = e.target.closest && e.target.closest('.group-mgr-drag');
       var row0 = e.target.closest && e.target.closest('.group-mgr-item');
       var src = (handle && list.contains(handle)) ? handle : row0;   // 手柄或整行都可作为拖拽源
