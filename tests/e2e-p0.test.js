@@ -78,6 +78,7 @@ async function waitBrowserWs() {
 }
 
 let ws, msgId = 0;
+let interceptedDrag = null;   // BUG-079：CDP 原生拖拽数据（Input.dragIntercepted）
 const pending = new Map();
 // BUG-073：只有「已知外部服务的网络失败」被忽略（且单独计数打印），其余一律计入失败
 const consoleLog = createConsoleErrorCollector();
@@ -110,6 +111,7 @@ function send(method, params, sessionId) {
       // BUG-073：过滤规则收窄为「来源精确 + 网络失败」两条同时成立（见 tests/lib/console-error-filter.js）
       consoleLog.add(text);
     }
+    if (msg.method === 'Input.dragIntercepted') interceptedDrag = msg.params.data;
     if (msg.method === 'Runtime.exceptionThrown') {
       consoleLog.addException(msg.params.exceptionDetails.exception?.description || msg.params.exceptionDetails.text);
     }
@@ -3216,7 +3218,109 @@ function send(method, params, sessionId) {
     shotFixture.close(() => r());
   });
 
-  console.log('\n[35] 页面无 JS 报错');
+  console.log('\n[35] BUG-079 分组拖拽（真实 CDP 拖拽）＋ BUG-080 滑块轨道可读性');
+
+  // —— ① 滑块：轨道对比 ≥3:1（两种主题）+ --pct 进度 + 单张遮罩可回到「跟随全局」 ——
+  const sliderFix = JSON.parse(await evalJs(`(async () => {
+    function lum(c){var m=/rgba?\\(([^)]+)\\)/.exec(c||'');if(!m)return null;var p=m[1].split(',').map(parseFloat);var f=function(v){v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);};return 0.2126*f(p[0])+0.7152*f(p[1])+0.0722*f(p[2]);}
+    function toRgb(h){h=String(h||'').trim().replace('#','');if(h.length<6)return null;return 'rgb('+parseInt(h.slice(0,2),16)+','+parseInt(h.slice(2,4),16)+','+parseInt(h.slice(4,6),16)+')';}
+    function ratio(a,b){var l1=lum(a),l2=lum(b);return (l1===null||l2===null)?null:Math.round(((Math.max(l1,l2)+0.05)/(Math.min(l1,l2)+0.05))*100)/100;}
+    await ensureSettingsPanelReady(); openSettingsPanel(); await new Promise(function(r){setTimeout(r,300);});
+    var s=document.getElementById('setting-wallpaper-opacity'), panel=document.getElementById('settings-panel'), out={};
+    for (var ti=0; ti<2; ti++) { var t = ti ? 'dark' : 'light'; applyTheme(t); await new Promise(function(r){setTimeout(r,100);});
+      out[t] = { contrast: ratio(toRgb(getComputedStyle(document.documentElement).getPropertyValue('--slider-track')), getComputedStyle(panel).backgroundColor),
+                 isGradient: getComputedStyle(s).backgroundImage.indexOf('gradient') !== -1 }; }
+    applyTheme('light');
+    s.value='60'; s.dispatchEvent(new Event('input',{bubbles:true})); out.pct60 = s.style.getPropertyValue('--pct');
+    var key='lwtest_e2e';
+    currentSettings.localWallpapers = (currentSettings.localWallpapers||[]).filter(function(x){return x.key!==key;});
+    currentSettings.localWallpapers.push({ key: key, name: 'E2E测试壁纸.png', opacity: null });
+    renderLocalWallpaperList(); await new Promise(function(r){setTimeout(r,150);});
+    out.beforeBtn = !!document.querySelector('.lw-op-reset[data-key="'+key+'"]');
+    setLocalWallpaperOpacity(key, '45'); await new Promise(function(r){setTimeout(r,150);});
+    var row = document.querySelector('.lw-item[data-key="'+key+'"]');
+    out.afterBtn = !!document.querySelector('.lw-op-reset[data-key="'+key+'"]');
+    out.afterBtnFound = out.afterBtn;
+    out.afterLabel = row ? row.querySelector('.lw-op-val').textContent : null;
+    out.afterPct = row ? row.querySelector('.lw-op').style.getPropertyValue('--pct') : null;
+    // 修复前对照时该按钮不存在 → 不能直接 .click()（会抛 TypeError 掀翻整个套件，而不是让断言失败）
+    var rbtn = document.querySelector('.lw-op-reset[data-key="'+key+'"]');
+    if (rbtn) rbtn.click(); else out.clickSkipped = true;
+    await new Promise(function(r){setTimeout(r,200);});
+    row = document.querySelector('.lw-item[data-key="'+key+'"]');
+    out.resetBtn = !!document.querySelector('.lw-op-reset[data-key="'+key+'"]');
+    out.resetLabel = row ? row.querySelector('.lw-op-val').textContent : null;
+    var it = (getLocalWallpapers()||[]).filter(function(x){return x.key===key;})[0];
+    out.resetStored = it ? it.opacity : 'missing';
+    currentSettings.localWallpapers = (currentSettings.localWallpapers||[]).filter(function(x){return x.key!==key;});
+    renderLocalWallpaperList(); closeSettingsPanel();
+    return JSON.stringify(out);
+  })()`, true));
+  check('BUG-080 滑块未填充轨道与面板底色对比 ≥3:1（浅色；修复前 1.21:1）',
+    sliderFix.light.contrast >= 3 && sliderFix.light.isGradient === true, sliderFix.light);
+  check('BUG-080 同上（深色；修复前 1.47:1，且旧规则会把渐变整个盖掉）',
+    sliderFix.dark.contrast >= 3 && sliderFix.dark.isGradient === true, sliderFix.dark);
+  check('BUG-080 滑块有进度填充：--pct 随值同步（值 60 / 上限 80 → 75%）',
+    sliderFix.pct60 === '75%', sliderFix.pct60);
+  check('BUG-080 单张遮罩可回到「跟随全局」（修复前状态不可逆：标签永久变 N%、无重置入口）',
+    sliderFix.beforeBtn === false && sliderFix.afterBtn === true && sliderFix.afterLabel === '45%'
+      && sliderFix.afterPct === '45%' && sliderFix.resetBtn === false
+      && sliderFix.resetLabel === '跟随全局' && sliderFix.resetStored === null, sliderFix);
+
+  // —— ② 分组管理器：真实 CDP 拖拽（不是合成 DragEvent —— 合成事件绕过浏览器 DnD 状态机，
+  //    正是这个覆盖缺口让 BUG-079 潜伏：逐行绑定 + 闭包 dragFrom，拖拽途中一重渲染就失去放置目标）——
+  const dragRects = async () => JSON.parse(await evalJs(`(async () => {
+    if (typeof ensureSettingsPanelReady === 'function') await ensureSettingsPanelReady();
+    while (groups.length < 3) groups.push({ id: 'gdrag' + groups.length, name: '拖拽测试组' + groups.length, cards: [], sortMode: 'manual' });
+    await saveGroups(groups); renderGroupDots(); openGroupManager();
+    await new Promise(function (r) { setTimeout(r, 400); });
+    var rows = [].slice.call(document.querySelectorAll('.group-mgr-item'));
+    var h = rows[0].querySelector('.group-mgr-drag').getBoundingClientRect();
+    var t = rows[rows.length - 1].getBoundingClientRect();
+    return JSON.stringify({
+      names: groups.map(function (g) { return g.name; }),
+      handle: { x: Math.round(h.left + h.width / 2), y: Math.round(h.top + h.height / 2) },
+      target: { x: Math.round(t.left + t.width / 2), y: Math.round(t.top + t.height / 2) }
+    });
+  })()`));
+  const realDrag = async (r, midRerender) => {
+    interceptedDrag = null;
+    await send('Input.setInterceptDrags', { enabled: true }, sid);
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.handle.x, y: r.handle.y, button: 'left', clickCount: 1, buttons: 1 }, sid);
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r.handle.x + 12, y: r.handle.y + 12, button: 'left', buttons: 1 }, sid);
+    for (let i = 0; i < 20 && !interceptedDrag; i++) await sleep(100);
+    const started = !!interceptedDrag;
+    if (midRerender) { await evalJs('(function () { renderGroupManagerList(); return "ok"; })()'); await sleep(150); }
+    if (started) {
+      // CDP 拖拽序列必须 dragEnter → dragOver → drop（漏掉 dragEnter 事件不会送达页面）
+      await send('Input.dispatchDragEvent', { type: 'dragEnter', x: r.target.x, y: r.target.y, data: interceptedDrag }, sid);
+      await send('Input.dispatchDragEvent', { type: 'dragOver', x: r.target.x, y: r.target.y, data: interceptedDrag }, sid);
+      await sleep(120);
+      await send('Input.dispatchDragEvent', { type: 'drop', x: r.target.x, y: r.target.y, data: interceptedDrag }, sid);
+      await sleep(600);
+    }
+    await send('Input.setInterceptDrags', { enabled: false }, sid).catch(() => {});
+    const after = JSON.parse(await evalJs('JSON.stringify(groups.map(function (g) { return g.name; }))'));
+    const stored = JSON.parse(await evalJs(`new Promise(function (r) { chrome.storage.sync.get('groups', function (x) { r(JSON.stringify((x.groups || []).map(function (g) { return g.name; }))); }); })`));
+    return { started, after, stored, movedToEnd: after[after.length - 1] === r.names[0] };
+  };
+  const dr1 = await realDrag(await dragRects(), false);
+  check('BUG-079 真实拖拽 ⠿ 手柄能重排分组（拖拽真的启动 + 落盘顺序同步）',
+    dr1.started && dr1.movedToEnd && dr1.stored.join() === dr1.after.join(), dr1);
+  const dr2 = await realDrag(await dragRects(), true);
+  check('BUG-079 拖拽中途列表被重渲染仍能重排（事件委托的核心收益；修复前此场景 drop 不会触发）',
+    dr2.started && dr2.movedToEnd, dr2);
+  // 清理：把本次造的测试分组删掉，恢复分组数
+  await evalJs(`(async () => {
+    groups = groups.filter(function (g) { return g.id.indexOf('gdrag') !== 0; });
+    activeGroupIndex = Math.min(activeGroupIndex, groups.length - 1);
+    speeddials = (groups[activeGroupIndex] && groups[activeGroupIndex].cards) || [];
+    await saveGroups(groups); renderSpeeddials(); renderGroupDots();
+    if (typeof closeGroupManager === 'function') closeGroupManager();
+    return 'ok';
+  })()`);
+
+  console.log('\n[36] 页面无 JS 报错');
   consoleLog.report();
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 

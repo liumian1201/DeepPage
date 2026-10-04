@@ -5,6 +5,8 @@
 
 /* --------------------- CSS 变量 (浅色默认) --------------------- */
 :root {
+  /* BUG-080: 滑块未填充轨道的颜色 —— 必须与面板底色 ≥3:1（WCAG 非文字控件） */
+  --slider-track: #80868b;
   --bg-primary: #f0f2f5;
   --bg-secondary: #ffffff;
   --bg-tertiary: #e8eaed;
@@ -63,6 +65,7 @@
 
 /* --------------------- 深色模式变量 --------------------- */
 [data-theme="dark"] {
+  --slider-track: #6b7280;
   --bg-primary: #1a1a2e;
   --bg-secondary: #222236;
   --bg-tertiary: #2a2a44;
@@ -176,10 +179,10 @@ body.has-wallpaper::before {
   box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.2);
 }
 
-/* 深色模式下的设置面板滑块 */
-[data-theme="dark"] .setting-group input[type="range"] {
-  background: var(--border-color);
-}
+/* 深色模式下的设置面板滑块：
+   v1.6.3 BUG-080 起不再在这里覆盖 background —— 轨道由 settings.css 的
+   「已填充(accent) + 未填充(var(--slider-track))」渐变负责，这里的平色覆盖会把它盖掉
+   （导致深色下既没有进度条、对比度也回到 1.47:1）。深色轨道色改由 --slider-track 承担。 */
 
 /* 深色模式下的 input color */
 [data-theme="dark"] .setting-group input[type="color"] {

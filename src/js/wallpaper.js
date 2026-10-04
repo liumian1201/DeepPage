@@ -519,7 +519,8 @@ function renderLocalWallpaperList() {
         '<div class="lw-opacity">' +
           '<span class="lw-op-label">遮罩</span>' +
           '<input type="range" class="lw-op" data-key="' + escapeHtml(it.key) + '" min="0" max="100" step="5" value="' + (op === '' ? globalOp : op) + '">' +
-          '<span class="lw-op-val">' + (op === '' ? '跟随全局' : op + '%') + '</span>' +
+          '<span class="lw-op-val slider-val">' + (op === '' ? '跟随全局' : op + '%') + '</span>' +
+          (op === '' ? '' : '<button class="lw-op-reset" data-key="' + escapeHtml(it.key) + '" title="恢复为跟随全局遮罩" aria-label="恢复为跟随全局遮罩">↺ 跟随全局</button>') +
         '</div>' +
       '</div>' +
       '<button class="lw-del" data-key="' + escapeHtml(it.key) + '" title="删除这张壁纸" aria-label="删除壁纸">✕</button>' +
@@ -538,6 +539,14 @@ function renderLocalWallpaperList() {
   wrap.querySelectorAll('.lw-del').forEach(function (btn) {
     btn.addEventListener('click', function (e) { e.stopPropagation(); deleteLocalWallpaper(this.dataset.key); });
   });
+  wrap.querySelectorAll('.lw-op-reset').forEach(function (btn) {
+    // BUG-080: 单张遮罩一旦拖动就无法回到「跟随全局」（状态不可逆）→ 给一个显式重置入口
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      setLocalWallpaperOpacity(this.dataset.key, null);
+    });
+  });
+  if (typeof _syncAllRangeFills === 'function') _syncAllRangeFills(wrap);   // BUG-080: 初始 --pct
   wrap.querySelectorAll('.lw-op').forEach(function (slider) {
     slider.addEventListener('input', function () {
       var val = this.parentElement.querySelector('.lw-op-val');

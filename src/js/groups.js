@@ -311,6 +311,9 @@ async function moveGroupTo(from, to) {
 }
 
 
+/** BUG-079: 分组管理器拖拽的源下标（模块级，不放在渲染闭包里 —— 见 renderGroupManagerList 的注释） */
+var _gmgrDragFrom = null;
+
 function renderGroupManagerList() {
   var list = document.getElementById('group-manager-list');
   if (!list) return;
@@ -360,20 +363,51 @@ function renderGroupManagerList() {
     });
   });
 
-  // v1.5.0: 拖拽排序（拖手柄，落到目标行上）
-  var dragFrom = null;
-  list.querySelectorAll('.group-mgr-drag').forEach(function (handle) {
-    handle.addEventListener('dragstart', function (e) {
-      dragFrom = parseInt(this.dataset.index, 10);
+  // v1.6.3 BUG-079: 拖拽改为**事件委托 + 模块级状态**（原先逐行绑定、dragFrom 存在渲染闭包里）。
+  // 逐行绑定的致命缺陷：拖拽途中列表一旦被重渲染，行元素被换新 → 新行的 dragover 读到的是
+  // 自己闭包里的 dragFrom === null → 不 preventDefault → 浏览器判定「此处不接受放置」
+  // （无效光标），drop 永不触发、顺序静默不变。与 v1.3.1 看板箭头同一类坑：
+  // **动态增删的列表必须用委托**。委托后容器不随重渲染消失，拖拽状态也不再随闭包丢失。
+  if (!list.dataset.gmgrDndBound) {
+    list.dataset.gmgrDndBound = '1';
+    list.addEventListener('dragstart', function (e) {
+      var handle = e.target.closest && e.target.closest('.group-mgr-drag');
+      if (!handle || !list.contains(handle)) return;
+      _gmgrDragFrom = parseInt(handle.dataset.index, 10);
       e.dataTransfer.effectAllowed = 'move';
-      try { e.dataTransfer.setData('text/plain', String(dragFrom)); } catch (err) { /* best-effort: 排序用的是上面的 dragFrom 变量，dataTransfer 只是给外部拖放留的标记 */ }
-      this.closest('.group-mgr-item').classList.add('dragging');
+      try { e.dataTransfer.setData('text/plain', String(_gmgrDragFrom)); } catch (err) { /* best-effort: 排序用的是 _gmgrDragFrom，dataTransfer 只是给外部拖放留的标记 */ }
+      var row = handle.closest('.group-mgr-item');
+      if (row) row.classList.add('dragging');
     });
-    handle.addEventListener('dragend', function () {
-      dragFrom = null;
+    list.addEventListener('dragend', function () {
+      _gmgrDragFrom = null;
       list.querySelectorAll('.group-mgr-item').forEach(function (el) { el.classList.remove('dragging', 'drag-over'); });
     });
-  });
+    list.addEventListener('dragover', function (e) {
+      if (_gmgrDragFrom === null) return;
+      var row = e.target.closest && e.target.closest('.group-mgr-item');
+      if (!row || !list.contains(row)) return;
+      e.preventDefault();          // ← 必须：不 preventDefault，浏览器就不会派发 drop
+      e.dataTransfer.dropEffect = 'move';
+      row.classList.add('drag-over');
+    });
+    list.addEventListener('dragleave', function (e) {
+      var row = e.target.closest && e.target.closest('.group-mgr-item');
+      if (row) row.classList.remove('drag-over');
+    });
+    list.addEventListener('drop', function (e) {
+      if (_gmgrDragFrom === null) return;
+      var row = e.target.closest && e.target.closest('.group-mgr-item');
+      if (!row) return;
+      e.preventDefault();
+      row.classList.remove('drag-over');
+      var to = parseInt(row.dataset.index, 10);
+      var from = _gmgrDragFrom;
+      _gmgrDragFrom = null;
+      if (isNaN(to) || to === from) return;
+      moveGroupTo(from, to);
+    });
+  }
   // v1.5.1: 手柄支持键盘排序（去掉 ▲▼ 后保留无障碍路径）
   list.querySelectorAll('.group-mgr-drag').forEach(function (handle) {
     handle.addEventListener('keydown', function (e) {
@@ -383,24 +417,6 @@ function renderGroupManagerList() {
     });
   });
 
-  list.querySelectorAll('.group-mgr-item').forEach(function (row) {
-    row.addEventListener('dragover', function (e) {
-      if (dragFrom === null) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      row.classList.add('drag-over');
-    });
-    row.addEventListener('dragleave', function () { row.classList.remove('drag-over'); });
-    row.addEventListener('drop', function (e) {
-      e.preventDefault();
-      row.classList.remove('drag-over');
-      if (dragFrom === null) return;
-      var to = parseInt(this.dataset.index, 10);
-      if (isNaN(to) || to === dragFrom) return;
-      moveGroupTo(dragFrom, to);
-      dragFrom = null;
-    });
-  });
   // BUG-021: click 绑定在 .group-mgr-item 整行上，排除 input/button
   list.querySelectorAll('.group-mgr-item').forEach(function (row) {
     row.addEventListener('click', function (e) {

@@ -209,7 +209,12 @@
   width: 100%;
   height: 6px;
   border-radius: 3px;
-  background: var(--bg-tertiary);
+  /* BUG-080: 轨道画两段 —— 已填充(accent) + 未填充(--slider-track)，--pct 由 settings.js 同步。
+     原先整条都用 --bg-tertiary，与面板底色对比只有 1.21:1（浅）/1.47:1（深），
+     且 0% 与 80% 长得一模一样 → 用户反馈「拖动范围不可读」。 */
+  background: linear-gradient(to right,
+    var(--accent) 0, var(--accent) var(--pct, 0%),
+    var(--slider-track) var(--pct, 0%), var(--slider-track) 100%);
   outline: none;
   -webkit-appearance: none;
   appearance: none;

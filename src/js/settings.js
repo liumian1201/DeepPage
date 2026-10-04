@@ -249,6 +249,21 @@ function applyAllSettings(settings) {
   if (typeof renderGroupDots === 'function') renderGroupDots();
 }
 
+/* BUG-080: 滑块轨道用 --pct 画「已填充」进度 —— 否则 0% 与 80% 视觉上完全一样。
+   统一在这里同步，避免每个滑块各自维护（面板里 15+ 个滑块 + 动态生成的本地壁纸行）。 */
+function _syncRangeFill(el) {
+  if (!el || el.type !== 'range') return;
+  var min = Number(el.min || 0), max = Number(el.max === '' || el.max === undefined ? 100 : el.max);
+  var v = Number(el.value);
+  var pct = (isFinite(min) && isFinite(max) && max > min) ? ((v - min) / (max - min)) * 100 : 0;
+  el.style.setProperty('--pct', Math.max(0, Math.min(100, pct)) + '%');
+}
+
+/** 批量同步（面板回填后 / 动态渲染出滑块后调用一次） */
+function _syncAllRangeFills(root) {
+  (root || document).querySelectorAll('input[type="range"]').forEach(_syncRangeFill);
+}
+
 /** 应用主题 */
 function applyTheme(theme) {
   if (theme === 'auto') {
@@ -549,6 +564,13 @@ function closeSettingsPanel() {
 
 /* ---------- 事件绑定 ---------- */
 function bindSettingsEvents() {
+  // BUG-080: 任意滑块变化时同步 --pct（捕获阶段，早于各业务 handler）
+  document.addEventListener('input', function (e) {
+    if (e.target && e.target.type === 'range') _syncRangeFill(e.target);
+  }, true);
+  // 面板首次渲染后把已有值同步一次
+  _syncAllRangeFills(document.getElementById('settings-panel') || document);
+
   // 注：齿轮按钮（domSettings.btnOpen）已在 initSettings 中绑定 ——
   // 面板事件延迟到首次打开才绑定，若在此处绑定会导致面板打不开
   domSettings.btnClose.addEventListener('click', closeSettingsPanel);
