@@ -1324,19 +1324,6 @@ async function doImportFromUnzipped(unzipped, showToastResult) {
   }
 }
 
-/** 更新 WebDAV 状态显示 */
-function updateWebdavStatus() {
-  var el = document.getElementById('webdav-status');
-  if (!el) return;
-  getWebdavLastBackup(function (t) {
-    if (t) {
-      el.textContent = '上次备份: ' + new Date(t).toLocaleString('zh-CN');
-    } else {
-      el.textContent = '尚未备份';
-    }
-  });
-}
-
 /** 收集全量数据（供 WebDAV 备份复用 exportAll 逻辑） */
 async function _collectAllData() {
   // v1.3.3: 同上，读云端数据前先落盘

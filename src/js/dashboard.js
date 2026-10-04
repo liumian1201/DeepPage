@@ -145,16 +145,6 @@ function applyDashWidgetLayout(layout) {
   });
 }
 
-/** 兼容旧 API（v1.3.x 的 dashboardOrder 数组） */
-function applyDashboardOrder(order) {
-  if (!Array.isArray(order)) return;
-  var layout = _dashCurrentLayout();
-  order.forEach(function (id, i) {
-    if (layout[id]) layout[id].order = i;
-  });
-  applyDashWidgetLayout(layout);
-}
-
 /* ==================== 初始化 ==================== */
 
 function initDashboardGrid() {

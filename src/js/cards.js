@@ -133,7 +133,6 @@ var _selectionAnchorId = null;
 
 function getSelectedCardIds() { return _selectedCardIds.slice(); }
 function hasCardSelection() { return _selectedCardIds.length > 0; }
-function isCardSelected(id) { return _selectedCardIds.indexOf(id) !== -1; }
 
 /** 当前分组的展示顺序（DOM 顺序即视觉顺序）
  *  v1.5.1: 必须限定当前分组的容器 —— DOM 池会同时保留其它分组的容器，
@@ -1066,14 +1065,5 @@ async function incrementVisitCount(cardId, render) {
         return;
       }
     }
-  }
-}
-
-/* ==================== 卡片点击跳转 ==================== */
-function openCard(index) {
-  const card = speeddials[index];
-  if (card && card.url) {
-    incrementVisitCount(card.id);
-    window.location.href = card.url;
   }
 }

@@ -1,5 +1,68 @@
 # DeepPage 更新日志
 
+## v1.5.14 (2026-10-04) — 技术债清理 ①：DEBT-01 死函数（11 个「可被调用但无人调用」的函数下线）
+
+> 本版开始清理 v1.5.5 全量审计遗留的**技术债**（不属缺陷，见审计报告 §5）。第一批 = **DEBT-01 死函数**。
+> 审计报告给的是 v1.5.5 时点的 **13 个**，其中 `refreshCardFavicon` / `_clearAllBlobCaches` /
+> `resetDashWorkingLayout` 已在 v1.5.12 接线，所以本批用 **AST 严格扫描**（真实引用 = 0，
+> 注释与字符串不计入）重新推导清单，实际清理 **11 个**（审计的 10 个 + 连带失去唯一调用方的
+> `getWebdavLastBackup`）。
+> 这类改动的风险是「删掉之后才发现还有人在用」，因此断言分两层：**主链路行为断言**
+> （渲染 / 卡片点击 / 拖拽 / 备份导出四条链路照常工作）+ **静态补充断言**
+> （11 个名字连同注释一起从 `src/` 消失，因为静态扫描按文本计数，名字留在注释里下次就会漏掉）。
+
+### 🧹 DEBT-01 死函数清理（11 个，全部直接删除）
+
+这 11 个函数在「除声明处以外」的全仓库检索里零命中，但都在页面作用域内仍可被调用，
+所以 ESLint 的未使用符号检查不会报警 —— 维护者会误以为这些能力还在，改动时容易在死代码上继续加逻辑。
+
+| 函数 | 位置 | 判定 |
+|------|------|------|
+| `applyDashboardOrder(order)` | `dashboard.js` | v1.3.x `dashboardOrder` 数组的兼容入口，已被 `applyDashWidgetLayout` 取代（P2-3 迁移残留） |
+| `getSpeeddials()` | `storage.js` | 存储层遗留（`getGroups()` + `getActiveGroup()` 早已取代） |
+| `isCardSelected(id)` | `cards.js` | 多选辅助，实际代码直接用 `_selectedCardIds` 判断 |
+| `openCard(index)` | `cards.js` | 卡片点击早已走事件委托（`main.js` 的 grid click 监听），旧入口残留 |
+| `updateWebdavStatus()` | `backup.js` | 被 `settings-webdav.js` 的状态区取代 |
+| `getWebdavLastBackup(cb)` | `webdav.js` | **连带清理**：只被 `updateWebdavStatus` 调用；备份时间在 `backup.js` / `main.js` 里直接读 storage |
+| `getWebdavLastBackupFilename(cb)` | `webdav.js` | 遗留（写入侧 `setWebdavLastBackupFilename` 仍在用，保留） |
+| `webdavListConfigs()` | `webdav.js` | WebDAV 版本列表旧 API |
+| `webdavSilentPut(zipBlob)` | `webdav.js` | 静默备份链路（见下） |
+| `webdavSilentPutIncremental(data)` | `webdav.js` | 静默备份链路（见下） |
+| `withImgStore(mode, cb)` | `wallpaper.js` | IndexedDB 封装好但没有任何调用方 |
+
+### ⚰️ 整条下线：静默备份链路（能力移除，不是接线）
+
+审计报告要求「补 `beforeunload` 监听」或「整条删除并说明下线」二选一。核实后确认**这条链路从未工作过**，
+因此选择删除而不是为一个从未生效的能力补入口：
+
+- `webdavSilentPut` 的注释写「beforeunload 调用」，但全仓库**没有任何 `beforeunload` 监听**；
+  且它发出的 payload **连 `body` 都没有**，SW 侧的空 body 守卫（BUG-032）会直接 `return { ok: true }`。
+- `webdavSilentPutIncremental` 传了 `_config` / `_images`，但 SW 侧**从来没读过这两个字段**
+  （只当普通 PUT 用，而它同样没有 body）→ 所谓「增量静默备份」从未实现。
+- 本批删除：两个页面函数 + `WEBDAV_MSG.SILENT_PUT` 常量 + `background.js` 的 `webdav:silent-put` 分支。
+  **若要恢复该能力**，正确做法是在 `visibilitychange` / `beforeunload` 里调用现成的
+  `_incrementalBackup(data, true)`（自动备份与 WebDAV 手动备份都走它），而不是复活这条旧链路。
+- 保留说明：SW 的 `webdav:config-list` 分支**未删**（页面封装 `webdavListConfigs` 已删，
+  但 SW 侧 `CONFIG_LIST` 与 `IMG_LIST` 共用目录列举逻辑，删它会牵动 `webdavProxy` 的共享分支）。
+
+### ✅ 测试（DEBT-01：删得掉，也要证明没删坏）
+- `tests/e2e-p0.test.js` 新增 [31] 段 **8 项**：
+  - **静态补充**：11 个名字连同注释从 `src/`（含 `index.html`）彻底消失；
+  - **运行时**：页面作用域不再暴露这 11 个符号（原状态是「可被调用但无人调用」）；
+  - **主链路行为**：① 渲染（`renderSpeeddials()` 后 DOM 卡片数 = 当前分组数据）；
+    ② 卡片点击（真实点击 → 走事件委托开卡片 + 访问计数 +1，证明真实入口不是已删的 `openCard`）；
+    ③ 拖拽排序（**真实 CDP 鼠标事件**走 `mousedown/mousemove/mouseup`，断言顺序改变**且已落盘**）；
+    ④ 备份导出（`exportAll()` 仍产出可解压 zip，断言 `config.json` + `manifest.json` + 分组与卡片数）。
+- `tests/e2e-sw-protocol.test.js` 新增 **2 项**：已下线的 `webdav:silent-put` **不再有任何响应值**
+  （修复前 SW 回 `{ ok: true }`）+ 正对照「同族 `webdav:test` 仍被响应」。
+- 探针 `_private/tools/audit-probes/rt05-rt06-missing-dom-ids.json`：P5 改为断言 11 个符号全部 `undefined`，
+  并新增 P6 正对照（v1.5.12 接线的 `refreshCardFavicon` / `_clearAllBlobCaches` / `resetDashWorkingLayout` 必须仍在）。
+- **安全网**：ESLint 的跨文件全局是**加载时扫描** `src/js/*.js` 收集的，漏改的引用会直接 `no-undef` error
+  （本批实测 0 error / 35 warning，warning 数与改动前完全一致）。
+- 验证：E2E **431 项**（p0 364 + SW 12 + WebDAV 55）｜ 逻辑桩测 29 ｜ 工程反向对照 52 ｜ ESLint 0 error。
+- 修复前 / 后对照（`DP_EXT_DIR` 指向修复前的源码）：新增断言在旧代码上失败（3 项）、新代码全绿。
+- `audit-static-scan.mjs` 第 1 节（疑似死符号）与第 2 节（ID 对齐）均为空。
+
 ## v1.5.13 (2026-10-04) — 审计清零：最后 8 条缺陷（权限闸门 / 资源回收 / 空断言 / 判定歧义）
 
 > 本版是 v1.5.5 全量代码审计的**最后 8 条**：BUG-046 / 051 / 058 / 059 / 064 / 067 / 068 / 072。

@@ -2494,7 +2494,166 @@ function send(method, params, sessionId) {
     return 'ok';
   })()`);
 
-  console.log('\n[31] 页面无 JS 报错');
+  console.log('\n[31] v1.5.14 DEBT-01 死函数清理（主链路不受影响 + 死符号彻底移除）');
+
+  // 清单 = AST 严格扫描（真实引用 = 0，注释与字符串不计）+ 人工复核：
+  // 审计的 10 个 + 连带失去唯一调用方的 getWebdavLastBackup（只被 updateWebdavStatus 调用）。
+  const DEBT01_NAMES = [
+    'applyDashboardOrder', 'getSpeeddials', 'isCardSelected', 'openCard', 'updateWebdavStatus',
+    'webdavListConfigs', 'webdavSilentPut', 'webdavSilentPutIncremental', 'getWebdavLastBackupFilename',
+    'withImgStore', 'getWebdavLastBackup'
+  ];
+  // 静态补充断言：连注释一起要求清干净 —— audit-static-scan.mjs 按文本计数，
+  // 名字只要留在注释里，下次扫描就不会再把它列进死符号清单（deleteCardIcon 就是这样漏掉的）。
+  const debt01Files = [];
+  (function collectSrc(dir) {
+    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, ent.name);
+      if (ent.isDirectory()) collectSrc(p);
+      else if (/\.(js|html)$/.test(ent.name) && ent.name !== 'fflate.min.js') debt01Files.push(p);
+    }
+  })(SRC);
+  const debt01Hits = [];
+  for (const n of DEBT01_NAMES) {
+    const re = new RegExp('\\b' + n + '\\b');
+    for (const p of debt01Files) {
+      fs.readFileSync(p, 'utf8').split('\n').forEach((line, i) => {
+        if (re.test(line)) debt01Hits.push(path.relative(SRC, p) + ':' + (i + 1) + ':' + n);
+      });
+    }
+  }
+  check('DEBT-01 11 个死符号已从 src/ 彻底移除（含注释与 index.html）',
+    debt01Hits.length === 0, debt01Hits.slice(0, 5));
+  const debt01Exposed = JSON.parse(await evalJs(
+    `JSON.stringify(${JSON.stringify(DEBT01_NAMES)}.filter(function (n) { return typeof window[n] !== 'undefined'; }))`));
+  check('DEBT-01 页面作用域不再暴露这些死符号（原状态是「可被调用但无人调用」）',
+    debt01Exposed.length === 0, debt01Exposed);
+
+  // —— 主链路 1：初始化 + 渲染（原 applyDashboardOrder / getSpeeddials 所在链路）——
+  const renderChain = JSON.parse(await evalJs(`(async () => {
+    renderSpeeddials();
+    await new Promise(function (r) { setTimeout(r, 200); });
+    var visible = [...document.querySelectorAll('#speeddial-grid .card-wrapper[data-id]')].filter(function (el) { return el.offsetParent !== null; });
+    return JSON.stringify({ dom: visible.length, data: (groups[activeGroupIndex] || { cards: [] }).cards.length });
+  })()`));
+  check('DEBT-01 主链路·渲染：渲染出的卡片数与当前分组数据一致',
+    renderChain.data > 0 && renderChain.dom === renderChain.data, renderChain);
+
+  // —— 主链路 2：卡片点击（openCard 是死入口，真实链路是 main.js 的事件委托）——
+  const clickChain = JSON.parse(await evalJs(`(async () => {
+    var origCreate = chrome.tabs.create;
+    var opened = [];
+    chrome.tabs.create = function (o) { opened.push(o && o.url); };
+    var prevMode = currentSettings.cardOpenMode;
+    currentSettings.cardOpenMode = 'background';
+    try {
+      var list = [...document.querySelectorAll('#speeddial-grid .card-wrapper[data-id]')].filter(function (el) { return el.offsetParent !== null; });
+      var el = list.filter(function (x) { return /^https?:/.test(x.dataset.url || ''); })[0] || list[0];
+      var id = el.dataset.id;
+      var pick = function () {
+        for (var gi = 0; gi < groups.length; gi++) {
+          for (var ci = 0; ci < groups[gi].cards.length; ci++) {
+            if (groups[gi].cards[ci].id === id) return groups[gi].cards[ci];
+          }
+        }
+        return null;
+      };
+      var before = (pick() || {}).visitCount || 0;
+      el.querySelector('.speeddial-card').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise(function (r) { setTimeout(r, 300); });
+      return JSON.stringify({ opened: opened.length, url: opened[0] || '', visited: ((pick() || {}).visitCount || 0) - before, id: id });
+    } finally {
+      chrome.tabs.create = origCreate;
+      if (prevMode === undefined) { delete currentSettings.cardOpenMode; } else { currentSettings.cardOpenMode = prevMode; }
+    }
+  })()`));
+  check('DEBT-01 主链路·点击：真实点击仍能打开卡片（走事件委托，不是已删的 openCard）',
+    clickChain.opened === 1 && /^https?:/.test(clickChain.url), clickChain);
+  check('DEBT-01 主链路·点击：访问计数仍累加', clickChain.visited === 1, clickChain);
+
+  // —— 主链路 3：拖拽排序（真实鼠标事件 → dragdrop.js 的 mousedown/mousemove/mouseup）——
+  // 先让存储与内存对齐：doReorder → saveSpeeddials 是「按存储里的 activeGroup 索引 + 存储里的
+  // groups 数组」落盘的，而本套件前面的段落会直接改内存（不落盘），不先对齐就会写进别的分组。
+  await evalJs('(async () => { await flushSyncWrites(); await saveActiveGroup(activeGroupIndex); await saveGroups(groups); await flushSyncWrites(); return "ok"; })()');
+  // 渲染是 300ms 防抖的：落盘后的回声/防抖重渲染若落在拖拽中途，会换掉 dragCard 指向的元素，
+  // 于是 mouseup 时 targetIndex === dragOrigIndex 直接放弃（表现为「拖了但顺序没变」）→ 先等它稳定
+  await sleep(600);
+  const dragBefore = JSON.parse(await evalJs(`JSON.stringify({
+    ids: groups[activeGroupIndex].cards.map(function (c) { return c.id; }),
+    rects: [...document.querySelectorAll('#speeddial-grid .card-wrapper[data-id]')].filter(function (el) { return el.offsetParent !== null; }).slice(0, 2).map(function (el) {
+      var r = el.getBoundingClientRect();
+      // 落点刻意放在目标卡片右 3/4 处：dragdrop 用「落点是否越过目标中线」决定插到前面还是后面，
+      // 正好落在中线上会因浮点误差被判成「插回原位」（to === dragOrigIndex 直接放弃重排）
+      return { id: el.dataset.id, x: r.left + r.width / 2, y: r.top + r.height / 2, dropX: r.left + r.width * 0.75 };
+    })
+  })`));
+  if (dragBefore.rects.length === 2) {
+    const [dFrom, dTo] = dragBefore.rects;
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: dFrom.x, y: dFrom.y, button: 'left', clickCount: 1, buttons: 1 }, sid);
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: dFrom.x + 24, y: dFrom.y + 10, button: 'left', buttons: 1 }, sid);
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: dTo.dropX, y: dTo.y, button: 'left', buttons: 1 }, sid);
+    await sleep(150);
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: dTo.dropX, y: dTo.y, button: 'left', clickCount: 1, buttons: 0 }, sid);
+    await sleep(500);
+  }
+  const dragAfter = JSON.parse(await evalJs(`(async () => {
+    var gid = groups[activeGroupIndex].id;
+    var stored = await new Promise(function (r) { chrome.storage.sync.get(['groups', 'activeGroup'], function (x) { r(x); }); });
+    var sg = (stored.groups || []).filter(function (g) { return g.id === gid; })[0] || { cards: [] };
+    return JSON.stringify({
+      ids: groups[activeGroupIndex].cards.map(function (c) { return c.id; }),
+      storedIds: (sg.cards || []).map(function (c) { return c.id; }),
+      storedActive: stored.activeGroup,
+      memActive: activeGroupIndex,
+      gid: gid
+    });
+  })()`));
+  const dragDiag = JSON.parse(await evalJs(`JSON.stringify({
+    locked: (typeof isLocked !== 'undefined') ? !!isLocked : null,
+    sortMode: (groups[activeGroupIndex] || {}).sortMode || 'manual',
+    origIndex: (typeof dragOrigIndex !== 'undefined') ? dragOrigIndex : null,
+    cloneCreated: (typeof dragClone !== 'undefined') ? !!dragClone : null,
+    justDragged: !!window._justDragged
+  })`));
+  check('DEBT-01 主链路·拖拽：真实鼠标拖拽仍改变卡片顺序',
+    dragBefore.rects.length === 2 && dragAfter.ids.join(',') !== dragBefore.ids.join(','),
+    { before: dragBefore.ids, after: dragAfter.ids, diag: dragDiag });
+  check('DEBT-01 主链路·拖拽：新顺序已落盘（sync 里的分组顺序与内存一致）',
+    dragAfter.storedIds.join(',') === dragAfter.ids.join(','), dragAfter);
+  // 还原顺序，避免影响后续断言
+  await evalJs(`(async () => {
+    var want = ${JSON.stringify(dragBefore.ids)};
+    speeddials.sort(function (a, b) { return want.indexOf(a.id) - want.indexOf(b.id); });
+    await saveSpeeddials(speeddials);
+    renderSpeeddials();
+    return 'ok';
+  })()`);
+
+  // —— 主链路 4：备份导出（fflate zip 仍产出可解压的完整备份）——
+  const backupChain = JSON.parse(await evalJs(`(async () => {
+    var origDownload = downloadFile;
+    var captured = null;
+    downloadFile = function (blob, filename) { captured = { blob: blob, name: filename }; };
+    try {
+      await exportAll();
+      if (!captured) return JSON.stringify({ captured: false });
+      var u8 = new Uint8Array(await captured.blob.arrayBuffer());
+      var un = fflate.unzipSync(u8);
+      var cfg = un['config.json'] ? JSON.parse(fflate.strFromU8(un['config.json'])) : null;
+      var man = un['manifest.json'] ? JSON.parse(fflate.strFromU8(un['manifest.json'])) : null;
+      return JSON.stringify({
+        captured: true, size: u8.length, name: captured.name,
+        hasConfig: !!cfg, hasManifest: !!man,
+        groups: cfg && Array.isArray(cfg.groups) ? cfg.groups.length : -1,
+        cards: cfg && Array.isArray(cfg.groups) ? cfg.groups.reduce(function (s, g) { return s + (g.cards || []).length; }, 0) : -1
+      });
+    } finally { downloadFile = origDownload; }
+  })()`));
+  check('DEBT-01 主链路·备份：导出仍产出可解压的 zip（config + manifest + 卡片数据）',
+    backupChain.captured === true && backupChain.hasConfig === true && backupChain.hasManifest === true
+      && backupChain.groups > 0 && backupChain.cards > 0, backupChain);
+
+  console.log('\n[32] 页面无 JS 报错');
   consoleLog.report();
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 

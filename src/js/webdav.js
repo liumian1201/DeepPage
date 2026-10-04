@@ -70,7 +70,6 @@ var WEBDAV_MSG = {
   GET: 'webdav:get',
   PROPFIND: 'webdav:propfind',
   TEST: 'webdav:test',
-  SILENT_PUT: 'webdav:silent-put',
   LIST: 'webdav:list',
   DELETE: 'webdav:delete',
   // v1.2.8: 增量备份消息类型
@@ -230,11 +229,6 @@ async function webdavGetConfig(name) {
   return _wdSend(WEBDAV_MSG.CONFIG_GET, { _filename: name });
 }
 
-/** 列出所有配置快照 */
-async function webdavListConfigs() {
-  return _wdSend(WEBDAV_MSG.CONFIG_LIST);
-}
-
 /** 删除配置快照 */
 async function webdavDeleteConfig(name) {
   return _wdSend(WEBDAV_MSG.CONFIG_DELETE, { _filename: name });
@@ -265,52 +259,9 @@ async function webdavListImages() {
   return _wdSend(WEBDAV_MSG.IMG_LIST);
 }
 
-/** 静默备份（beforeunload 调用，v1.2.8: 支持增量标记） */
-function webdavSilentPut(zipBlob) {
-  _wdGetCreds().then(function (c) {
-    if (!c.url) return;
-    // v1.2.8: 传递增量标记，SW 侧尝试增量备份
-    chrome.runtime.sendMessage({ type: WEBDAV_MSG.SILENT_PUT, payload: { _incremental: true, _url: c.url, _user: c.user, _pass: c.pass } });
-  });
-}
-
-/** v1.2.8: 增量静默备份（传入收集好的数据） */
-function webdavSilentPutIncremental(data) {
-  if (!data || !data.config || !data.images) return;
-  _wdGetCreds().then(function (c) {
-    if (!c.url) return;
-    chrome.runtime.sendMessage({
-      type: WEBDAV_MSG.SILENT_PUT,
-      payload: {
-        _incremental: true,
-        _url: c.url, _user: c.user, _pass: c.pass,
-        _config: JSON.stringify(data.config),
-        _images: data.images.map(function (img) {
-          return { key: img.key, type: img.blob.type || 'image/png' };
-        })
-      }
-    });
-    // 图片 Blob 无法通过 sendMessage 传递，SW 侧自行从 IndexedDB 读取
-  });
-}
-
-/** 读取上次备份时间 */
-function getWebdavLastBackup(callback) {
-  chrome.storage.local.get(['webdav_last_backup'], function (r) {
-    callback(r.webdav_last_backup || null);
-  });
-}
-
 /** 更新上次备份时间 */
 function setWebdavLastBackup(timeStr) {
   chrome.storage.local.set({ webdav_last_backup: timeStr || new Date().toISOString() });
-}
-
-/** v1.2.6: 获取上次备份文件名 */
-function getWebdavLastBackupFilename(callback) {
-  chrome.storage.local.get(['webdav_last_backup_filename'], function (r) {
-    callback(r.webdav_last_backup_filename || null);
-  });
 }
 
 /** v1.2.6: 存储上次备份文件名 */

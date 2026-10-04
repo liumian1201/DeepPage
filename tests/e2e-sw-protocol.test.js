@@ -258,6 +258,28 @@ function send(method, params, sessionId) {
       leakedTargets.length === 0, leakedTargets.map((t) => t.url));
   }
 
+  // v1.5.14 DEBT-01：静默备份链路整条下线（页面侧 webdavSilentPut / webdavSilentPutIncremental
+  // + WEBDAV_MSG.SILENT_PUT + SW 的 webdav:silent-put 分支）。该链路从未接过线：
+  // webdavSilentPut 连 body 都不发，SW 的空 body 守卫直接 return；全仓库也没有任何 beforeunload 监听。
+  // 断言口径：修复前 SW 回 { ok: true }；下线后不再有任何响应值（undefined + 端口关闭）。
+  const silentPut = await evalJs(`(async () => {
+    var resp = await Promise.race([
+      new Promise(function (r) {
+        chrome.runtime.sendMessage({ type: 'webdav:silent-put', payload: { body: [1, 2, 3], _url: 'https://example.com/dav/' } }, function (x) {
+          r({ value: (x === undefined ? null : x), lastError: chrome.runtime.lastError ? chrome.runtime.lastError.message : null });
+        });
+      }),
+      new Promise(function (r) { setTimeout(function () { r({ value: '«超时»', lastError: null }); }, 5000); })
+    ]);
+    return JSON.stringify(resp);
+  })()`);
+  const silentPutRes = typeof silentPut === 'string' ? JSON.parse(silentPut) : { parseFailed: silentPut };
+  check('DEBT-01 已下线的 webdav:silent-put 不再被 SW 响应（修复前回 { ok: true }）',
+    silentPutRes.value === null, silentPutRes);
+  const stillAlive = await evalJsStr(msg({ type: 'webdav:test', payload: { _url: 'file:///tmp/dav', _user: 'u', _pass: btoa('p') } }));
+  check('DEBT-01 正对照：同族 webdav:test 仍被 SW 响应（只下线了死链路）',
+    stillAlive.includes('http/https'), stillAlive);
+
   // BUG-073：本文件原先收集了 console error 却从不检查（死门），现在与 e2e-p0 用同一套来源精确过滤
   consoleLog.report();
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));

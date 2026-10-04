@@ -25,15 +25,6 @@ function openImgDB() {
   });
 }
 
-function withImgStore(mode, callback) {
-  return openImgDB().then(function (db) {
-    return new Promise(function (resolve, reject) {
-      var tx = db.transaction('images', mode);
-      callback(tx.objectStore('images'), resolve, reject);
-    });
-  });
-}
-
 async function saveImage(key, blob) {
   var db = await openImgDB();
   return new Promise(function (resolve, reject) {

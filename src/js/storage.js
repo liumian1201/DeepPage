@@ -386,14 +386,6 @@ async function saveActiveGroup(index) {
   saveToLocal(STORAGE_KEYS.ACTIVE_GROUP, index);
 }
 
-// 兼容旧代码
-async function getSpeeddials() {
-  var groups = await getGroups();
-  var idx = await getActiveGroup();
-  if (groups[idx]) return groups[idx].cards;
-  return groups[0] ? groups[0].cards : [];
-}
-
 async function saveSpeeddials(cards) {
   var groups = await getGroups();
   var idx = await getActiveGroup();
