@@ -2996,7 +2996,89 @@ function send(method, params, sessionId) {
   // 还原 console.warn（后续 [33] 段与 CI 的报错门都用真实 console）
   await evalJs('(function () { if (window.__dpWarnRestore) window.__dpWarnRestore(); window.__dpWarnInstalled = false; return "ok"; })()');
 
-  console.log('\n[33] 页面无 JS 报错');
+  console.log('\n[33] v1.6.1 修复：自己导出的备份不再误报「已忽略 N 项未知设置」');
+
+  // ① 白名单计数：`_exportTime` 是扩展自己注入的导出元数据（exportAll / _collectAllData 都写它），
+  //    不该被计成「未知设置」；但真正的未知键必须照旧计数 —— 否则就是把安全信号一起关掉。
+  const wlCase = JSON.parse(await evalJs(`(function () {
+    var withMeta = Object.assign({}, DEFAULT_SETTINGS, { _exportTime: '2026/10/4 16:21:05' });
+    var safeMeta = normalizeImportedSettings(withMeta);
+    var withEvil = Object.assign({}, DEFAULT_SETTINGS, { _exportTime: '2026/10/4 16:21:05', evilKey: 'boom' });
+    var safeEvil = normalizeImportedSettings(withEvil);
+    var protoRaw = JSON.parse('{"__proto__":{"polluted":1},"theme":"dark"}');
+    var safeProto = normalizeImportedSettings(protoRaw);
+    return JSON.stringify({
+      metaCount: countRejectedSettings(withMeta, safeMeta),
+      metaInSafe: Object.prototype.hasOwnProperty.call(safeMeta, '_exportTime'),
+      evilCount: countRejectedSettings(withEvil, safeEvil),
+      evilInSafe: Object.prototype.hasOwnProperty.call(safeEvil, 'evilKey'),
+      protoCount: countRejectedSettings(protoRaw, safeProto),
+      protoPolluted: ({}).polluted !== undefined
+    });
+  })()`));
+  check('修复：带 _exportTime（本扩展注入的导出元数据）不再被计为「未知设置」',
+    wlCase.metaCount === 0, wlCase);
+  check('修复：_exportTime 仍然不会被写进设置（只是不告警，元数据不进 storage）',
+    wlCase.metaInSafe === false, wlCase);
+  check('负对照：真正的未知键仍被计数并经白名单丢弃（安全信号没被削弱）',
+    wlCase.evilCount === 1 && wlCase.evilInSafe === false, wlCase);
+  check('负对照：__proto__ 这类原型污染键仍计数告警，且原型未被污染（只放行单下划线元数据约定）',
+    wlCase.protoCount >= 1 && wlCase.protoPolluted === false, wlCase);
+
+  // ② 端到端：真实「导出 → 重新导入自己导出的包」必须完全没有「已忽略」告警（用户实际遇到的场景）
+  const ownBackup = JSON.parse(await evalJs(`(async () => {
+    var origDownload = downloadFile;
+    var captured = null;
+    downloadFile = function (blob) { captured = blob; };
+    try { await exportAll(); } finally { downloadFile = origDownload; }
+    if (!captured) return JSON.stringify({ captured: false });
+    var un = fflate.unzipSync(new Uint8Array(await captured.arrayBuffer()));
+    var cfg = JSON.parse(fflate.strFromU8(un['config.json']));
+    [].forEach.call(document.querySelectorAll('.toast'), function (t) { t.remove(); });
+    await doImportFromUnzipped(un, false);
+    await new Promise(function (r) { setTimeout(r, 600); });
+    return JSON.stringify({
+      captured: true,
+      hasExportTime: !!(cfg.settings && cfg.settings._exportTime),
+      toasts: [].map.call(document.querySelectorAll('.toast'), function (t) { return t.textContent; }).join('|')
+    });
+  })()`));
+  check('端到端复现前提：导出包里确实带着 _exportTime（修复前必然触发误报）',
+    ownBackup.hasExportTime === true, ownBackup);
+  check('端到端：重新导入自己导出的备份，不再出现「已忽略 N 项…备份可能被篡改」误报',
+    !/已忽略/.test(ownBackup.toasts || ''), ownBackup);
+
+  // ③ 端到端负对照：真的塞一个未知键进备份 → 告警必须照常出现，且该键不得进入设置。
+  //    注意口径：ZIP 导入路径的用户可见信号是 console.warn（云端恢复路径才额外弹 Toast ——
+  //    两条路径的反馈不对称，属已记录的观察项而非本批改动），所以这里断言 warn 文本而不是 Toast。
+  const tampered = JSON.parse(await evalJs(`(async () => {
+    var origDownload = downloadFile;
+    var captured = null;
+    downloadFile = function (blob) { captured = blob; };
+    try { await exportAll(); } finally { downloadFile = origDownload; }
+    var un = fflate.unzipSync(new Uint8Array(await captured.arrayBuffer()));
+    var cfg = JSON.parse(fflate.strFromU8(un['config.json']));
+    cfg.settings.evilKey = 'boom';                       // 模拟「被篡改」的备份
+    un['config.json'] = fflate.strToU8(JSON.stringify(cfg));
+    [].forEach.call(document.querySelectorAll('.toast'), function (t) { t.remove(); });
+    var warns = [];
+    var origWarn = console.warn;
+    console.warn = function () { warns.push([].slice.call(arguments).map(String).join(' ')); };
+    try { await doImportFromUnzipped(un, false); } finally { console.warn = origWarn; }
+    await new Promise(function (r) { setTimeout(r, 300); });
+    var stored = await new Promise(function (r) { chrome.storage.sync.get('settings', function (x) { r(x.settings || {}); }); });
+    return JSON.stringify({
+      ignoreWarns: warns.filter(function (w) { return w.indexOf('已忽略') !== -1; }),
+      evilStored: Object.prototype.hasOwnProperty.call(stored, 'evilKey'),
+      toasts: [].map.call(document.querySelectorAll('.toast'), function (t) { return t.textContent; }).join('|')
+    });
+  })()`));
+  check('负对照（端到端）：被篡改的备份仍然报「已忽略 1 项」（不能为了消音把安全信号关掉）',
+    tampered.ignoreWarns.some((w) => /已忽略 1 项/.test(w)), tampered);
+  check('负对照（端到端）：未知键确实没有被写进 storage',
+    tampered.evilStored === false, tampered);
+
+  console.log('\n[34] 页面无 JS 报错');
   consoleLog.report();
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 

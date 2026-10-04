@@ -1259,13 +1259,21 @@ function _withSchemaVersion(config) {
   return out;
 }
 
-/** 统计被白名单/校验拒掉的键数（0 表示这份备份的设置全部合法） */function countRejectedSettings(raw, safe) {
+/** 统计被白名单/校验拒掉的键数（0 表示这份备份的设置全部合法）。
+ *  ⚠️ 必须排除「本扩展自己注入的元数据」，否则**自己导出的备份再导入时会误报**
+ *  「已忽略 N 项未知或不合法的设置（备份可能被篡改）」—— 把安全告警变成噪音（v1.6.1 修复）：
+ *    · `storageFallback`：v1.1.9 的 sync/local 回退标记（内部标记，不是用户设置）
+ *    · `_exportTime`：`exportAll()` 与 `_collectAllData()` 写入的导出时间，导入预览要读它
+ *  只放行「单下划线 + 小写字母」这一条元数据约定：`__proto__` 这类原型污染键**仍要被计数告警**。 */
+function countRejectedSettings(raw, safe) {
   if (!raw || typeof raw !== 'object') return 0;
   var n = 0;
   var keys = Object.keys(raw);
   for (var i = 0; i < keys.length; i++) {
-    if (keys[i] === 'storageFallback') continue;   // 内部标记，不算用户设置
-    if (!Object.prototype.hasOwnProperty.call(safe, keys[i])) n++;
+    var k = keys[i];
+    if (k === 'storageFallback') continue;
+    if (/^_[a-z]/.test(k)) continue;
+    if (!Object.prototype.hasOwnProperty.call(safe, k)) n++;
   }
   return n;
 }
