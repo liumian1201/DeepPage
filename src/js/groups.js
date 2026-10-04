@@ -396,26 +396,40 @@ function renderGroupManagerList() {
     });
     list.addEventListener('dragover', function (e) {
       if (_gmgrDragFrom === null) return;
-      var row = e.target.closest && e.target.closest('.group-mgr-item');
-      if (!row || !list.contains(row)) return;
-      e.preventDefault();          // ← 必须：不 preventDefault，浏览器就不会派发 drop
+      // 实测（BUG-079）：原先只在「正落在某一行上」才 preventDefault → 光标停在行间空隙/列表留白时
+      // 浏览器显示禁止光标（用户以为拖拽坏了），在那里松手 drop 根本不触发。
+      // 现在**整块列表都接受放置**，空隙里也按落点找最近的行。
+      e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
-      row.classList.add('drag-over');
+      var row = e.target.closest && e.target.closest('.group-mgr-item');
+      list.querySelectorAll('.group-mgr-item.drag-over').forEach(function (el) { if (el !== row) el.classList.remove('drag-over'); });
+      if (row) row.classList.add('drag-over');
     });
     list.addEventListener('dragleave', function (e) {
-      var row = e.target.closest && e.target.closest('.group-mgr-item');
-      if (row) row.classList.remove('drag-over');
+      // 只在真正离开列表时清掉高亮（在行/空隙之间移动不清，避免闪烁）
+      if (e.relatedTarget && list.contains(e.relatedTarget)) return;
+      list.querySelectorAll('.group-mgr-item.drag-over').forEach(function (el) { el.classList.remove('drag-over'); });
     });
     list.addEventListener('drop', function (e) {
       if (_gmgrDragFrom === null) return;
-      var row = e.target.closest && e.target.closest('.group-mgr-item');
-      if (!row) return;
       e.preventDefault();
-      row.classList.remove('drag-over');
-      var to = parseInt(row.dataset.index, 10);
+      list.querySelectorAll('.group-mgr-item.drag-over').forEach(function (el) { el.classList.remove('drag-over'); });
+      var row = e.target.closest && e.target.closest('.group-mgr-item');
+      var to;
+      if (row) {
+        to = parseInt(row.dataset.index, 10);
+      } else {
+        // 落在行间空隙 / 列表留白：按落点纵向位置找最近的一行；都在上方则移到末尾
+        var rows = [].slice.call(list.querySelectorAll('.group-mgr-item'));
+        to = rows.length - 1;
+        for (var i = 0; i < rows.length; i++) {
+          var r = rows[i].getBoundingClientRect();
+          if (e.clientY < r.top + r.height / 2) { to = i; break; }
+        }
+      }
       var from = _gmgrDragFrom;
       _gmgrDragFrom = null;
-      if (isNaN(to) || to === from) return;
+      if (isNaN(to) || to === from || to < 0 || to >= groups.length) return;
       moveGroupTo(from, to);
     });
   }
