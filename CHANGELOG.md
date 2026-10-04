@@ -1,5 +1,49 @@
 # DeepPage 更新日志
 
+## v1.5.16 (2026-10-04) — 技术债清理 ③（收官）：DEBT-02 静默吞异常（`background.js` 7 处）→ **技术债清零**
+
+> 第三批 = DEBT-02 在 **Service Worker 侧**的剩余 7 处。至此 `audit-static-scan.mjs` 第 6 节
+> （空 catch）**完全清零**，DEBT-01 / DEBT-02 两条技术债全部结清。
+> 口径与 v1.5.15 完全一致：**能降级 → `console.warn`**、**有意静默 → `best-effort` 注释**、
+> **「用户主动关窗」不算失败 → 静默**。SW 不加载页面脚本，所以诊断出口是独立的
+> `_swWarnDegraded(what, err)`（同样**只用 `console.warn`**）。
+>
+> ⚠️ SW 侧的「MKCOL 建目录」值得单独说明：HTTP 405（目录已存在）**不会**进 catch ——
+> `fetch` 只在网络层失败时 reject，所以这里的 warn 是真失败信号，不会变成噪音。
+
+### 🔇 DEBT-02 分级治理（`background.js` 7 处）
+
+| # | 位置 | 判定 | 处理 |
+|:-:|------|------|------|
+| 1 | `webdavProxy('PUT')`：MKCOL 建 WebDAV 根目录 | 能降级（后续 PUT 自己会报错） | warn（带上下文） |
+| 2 | `webdavProxy('PUT')`：读取失败响应的文本片段 | **有意静默**（只是给错误信息补充服务端返回，失败上报不受影响） | `// best-effort` 注释 |
+| 3 | `webdavProxy('*_PUT')`：MKCOL 建子目录（`config/`、`img/`） | 能降级 | warn（带目录名） |
+| 4 | `captureScreenshot` 失败出口：关闭截图窗口 | 窗口可能已被用户关掉 → **正常路径** | 抽 `_swCloseCaptureWindow()`：`No window with id` 静默 / 其它原因 warn |
+| 5 | `captureScreenshot` 完成出口：关闭截图窗口 | 同上（同一函数复用，消除重复实现） | 同上 |
+| 6 | 右键菜单「添加到分组」：解析页面 URL | 能降级（跳过重复检查仍添加） | warn |
+| 7 | 右键菜单「添加到分组」：遍历卡片时某张 URL 非法 | **有意跳过**（继续比对其它卡片） | `// best-effort` 注释 |
+
+- **顺带的小重构（DEBT-03「改到就顺手拆」）**：右键菜单 `onClicked` 监听器里 60 行的匿名闭包抽成具名
+  `addPageToGroupFromMenu(pageUrl, pageTitle, groupIndex, tabId)`，监听器只留参数解析。
+  与 v1.5.15 的两次抽出一脉相承 —— **内联在监听器里的降级路径没法被点对点验证**。
+- **顺带修掉一个 ESLint 警告**：原先 `var result` 在监听器里被声明两次（`no-redeclare`），
+  抽出时把内层改名为 `dupResult` → 警告数 **35 → 34**（0 error 不变）。
+
+### ✅ 测试（SW 侧代码用 CDP 直接挂到 Service Worker 上下文验证）
+- `tests/e2e-sw-protocol.test.js` 新增 [DEBT-02] 段 **9 项**：通过 CDP `Target.attachToTarget`
+  挂到 `background.js` 这个 SW target 上求值（页面上下文看不到 SW 内部函数），逐条断言：
+  - MKCOL 根目录 / 子目录失败的诊断**真的被打印**，且 **PUT 失败照常上报给页面**（`ok:false`）；
+  - 关闭截图窗口：`No window with id`（用户自己关掉）**不刷诊断**，其它错误**必须留痕**（两个方向都测）；
+  - 右键添加：坏页面 URL → 留痕**且卡片仍然被添加**；组内坏卡片 URL → **静默跳过**且好卡片仍被识别为重复
+    （用打桩的 `chrome.scripting.executeScript` 拿到「确实弹了确认框、参数里带重复组名」的证据）；
+    正对照：没有重复时不弹确认框、也没有诊断。
+  - 单条用例**错误隔离**（`swCase()`）：旧代码上缺函数时是「该条断言失败」，不是整个套件崩掉。
+  - 刻意**不调** `Runtime.enable`(SW)：避免把 SW 的 console 事件并进「无 console error」门，改变既有门的语义。
+- 验证：E2E **475 项**（p0 399 + SW 21 + WebDAV 55）｜ 逻辑桩测 29 ｜ 工程反向对照 52 ｜ ESLint 0 error / **34 warning**。
+- 修复前 / 后对照（`DP_EXT_DIR` 指向 v1.5.15 源码）：SW 套件 **9 项失败**（缺 `_swWarnDegraded` /
+  `_swCloseCaptureWindow` / `addPageToGroupFromMenu`，以及 MKCOL 无诊断）→ 新代码 0 项失败。
+- `audit-static-scan.mjs` **第 6 节（空 catch）已清零**，第 1、2 节保持为空。
+
 ## v1.5.15 (2026-10-04) — 技术债清理 ②：DEBT-02 静默吞异常（`src/js/` 20 处分级治理）
 
 > 第二批技术债 = **DEBT-02「静默吞异常」**。审计口径是 28 处（空 `catch` / `.catch(function () {})`），

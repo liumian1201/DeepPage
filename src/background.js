@@ -23,6 +23,26 @@ function isProxyUrlAllowed(url) {
   }
 }
 
+/**
+ * DEBT-02: SW 侧降级路径的统一诊断出口（与页面侧 main.js 的 `_warnDegraded` 同约定，
+ * 但 SW 不加载页面脚本，所以各自实现一份）。
+ * ⚠️ 只能用 console.warn：三个 E2E 套件都断言「无 console error」，降级诊断写成 error 会让 CI 判红。
+ */
+function _swWarnDegraded(what, err) {
+  console.warn('[DeepPage SW] ' + what + '失败（已降级）:', (err && err.message) || err);
+}
+
+/** DEBT-02: 关闭截图窗口（best-effort）。窗口可能已被用户手动关闭 ——
+ *  那种情况下 chrome.windows.remove 会抛「No window with id: N」，属于正常路径（不该刷诊断）；
+ *  其它原因才是真的没关掉（会留下孤儿窗口），必须留痕。 */
+function _swCloseCaptureWindow(winId) {
+  try {
+    chrome.windows.remove(winId);
+  } catch (e) {
+    if (!/No window with id/i.test((e && e.message) || '')) _swWarnDegraded('关闭截图窗口', e);
+  }
+}
+
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   if (request.type === 'weather-fetch') {
     if (!isProxyUrlAllowed(request.url)) {
@@ -247,7 +267,7 @@ async function webdavProxy(method, payload) {
   }
 
   if (method === 'PUT') {
-    try { await fetch(baseUrl, { method: 'MKCOL', headers: headers }); } catch (e) {}
+    try { await fetch(baseUrl, { method: 'MKCOL', headers: headers }); } catch (e) { _swWarnDegraded('创建 WebDAV 根目录 (MKCOL)', e); }
     // v1.2.6: 支持版本化文件名
     var fname = payload._filename || WEBDAV_BACKUP_FILE;
     var putUrl = baseUrl + '/' + encodeURIComponent(fname);
@@ -258,7 +278,7 @@ async function webdavProxy(method, payload) {
     var res = await fetch(putUrl, { method: 'PUT', headers: putHeaders, body: body });
     if (!res.ok) {
       var errText = '';
-      try { errText = ' ' + (await res.text()).slice(0, 200); } catch (e) {}
+      try { errText = ' ' + (await res.text()).slice(0, 200); } catch (e) { /* best-effort: 只是给错误信息补一段服务端返回，读不到也不影响已经失败的结果上报 */ }
       return { ok: false, error: 'PUT ' + res.status + ' ' + res.statusText + errText };
     }
     return { ok: true, data: new Date().toISOString() };
@@ -321,7 +341,7 @@ async function webdavProxy(method, payload) {
       // 确保父目录存在
       if (subPath.indexOf('/') !== -1) {
         var dirPath = subPath.substring(0, subPath.lastIndexOf('/'));
-        try { await fetch(baseUrl + '/' + dirPath, { method: 'MKCOL', headers: headers }); } catch (e) {}
+        try { await fetch(baseUrl + '/' + dirPath, { method: 'MKCOL', headers: headers }); } catch (e) { _swWarnDegraded('创建 WebDAV 子目录 ' + dirPath, e); }
       }
       var body = payload.body;
       if (typeof body === 'string') body = new TextEncoder().encode(body);
@@ -459,7 +479,7 @@ async function captureScreenshot(url) {
 
     function doReject(msg, skipWinRemove) {
       cleanup();
-      if (!skipWinRemove) { try { chrome.windows.remove(win.id); } catch (e) {} }
+      if (!skipWinRemove) _swCloseCaptureWindow(win.id);
       reject(new Error(msg));
     }
     // BUG-046：把提前失败的出口交给 injectButton（同一时刻只有一个有效）
@@ -521,7 +541,7 @@ async function batchCaptureOne(url) {
 
     function finish(err, dataUrl) {
       cleanup();
-      try { chrome.windows.remove(win.id); } catch (e) {}
+      _swCloseCaptureWindow(win.id);
       if (err) reject(new Error(err));
       else resolve(dataUrl);
     }
@@ -596,15 +616,10 @@ chrome.storage.onChanged.addListener(function (changes, areaName) {
   }
 });
 
-/** 处理右键菜单点击 */
-chrome.contextMenus.onClicked.addListener(async function (info, tab) {
-  var menuId = info.menuItemId;
-  if (typeof menuId !== 'string' || !menuId.startsWith('deeppage-group-')) return;
-
-  var groupIndex = parseInt(menuId.replace('deeppage-group-', ''), 10);
-  var pageUrl = info.pageUrl;
-  var pageTitle = tab.title || pageUrl;
-
+/** 右键菜单「添加当前页面到分组」的实现。
+ *  v1.5.16: 从 onClicked 监听器里抽出成具名函数（DEBT-03 顺手拆 60 行闭包），
+ *  同时让两条降级路径（页面 URL 解析不了 / 卡片 URL 非法）可以被点对点验证。 */
+async function addPageToGroupFromMenu(pageUrl, pageTitle, groupIndex, tabId) {
   if (!pageUrl || pageUrl.startsWith('chrome://') || pageUrl.startsWith('chrome-extension://')) {
     // 无法添加浏览器内部页面
     return;
@@ -621,7 +636,13 @@ chrome.contextMenus.onClicked.addListener(async function (info, tab) {
 
   // v1.2.8: 检查重复（完整 URL 匹配，非仅域名）→ 当前页面弹确认框
   var normalizedUrl = '';
-  try { var u = new URL(pageUrl); normalizedUrl = u.hostname.replace('www.', '') + u.pathname + u.search; } catch (e) {}
+  try {
+    var u = new URL(pageUrl);
+    normalizedUrl = u.hostname.replace('www.', '') + u.pathname + u.search;
+  } catch (e) {
+    // DEBT-02: 页面 URL 解析不了 → 只能跳过重复检查直接添加（可降级），但必须留痕
+    _swWarnDegraded('解析页面 URL（跳过重复检查）', e);
+  }
   var dupGroup = null, dupCardName = '';
   if (normalizedUrl) {
     for (var gi = 0; gi < groups.length; gi++) {
@@ -634,7 +655,7 @@ chrome.contextMenus.onClicked.addListener(async function (info, tab) {
             dupCardName = cards[ci].name;
             break;
           }
-        } catch (e) {}
+        } catch (e) { /* best-effort: 某张卡片的 URL 非法就跳过它，继续比对其余卡片（不是失败） */ }
       }
       if (dupGroup) break;
     }
@@ -643,14 +664,14 @@ chrome.contextMenus.onClicked.addListener(async function (info, tab) {
   if (dupGroup) {
     // 在当前网页弹出确认框
     try {
-      var result = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
+      var dupResult = await chrome.scripting.executeScript({
+        target: { tabId: tabId },
         func: function (name, groupName, cardName) {
           return confirm('「' + name + '」已在「' + groupName + '」分组中存在（' + cardName + '），是否继续添加？');
         },
         args: [pageTitle || pageUrl, dupGroup, dupCardName]
       });
-      if (!result || !result[0] || !result[0].result) return; // 用户取消
+      if (!dupResult || !dupResult[0] || !dupResult[0].result) return; // 用户取消
     } catch (e) {
       // executeScript 失败（如 chrome:// 页面），静默添加
     }
@@ -690,6 +711,17 @@ chrome.contextMenus.onClicked.addListener(async function (info, tab) {
   });
 
   // v1.0.5: 不在此处重建菜单（onChanged 会自动触发）
+}
+
+/** 处理右键菜单点击 */
+chrome.contextMenus.onClicked.addListener(async function (info, tab) {
+  var menuId = info.menuItemId;
+  if (typeof menuId !== 'string' || !menuId.startsWith('deeppage-group-')) return;
+
+  var groupIndex = parseInt(menuId.replace('deeppage-group-', ''), 10);
+  var pageUrl = info.pageUrl;
+  var pageTitle = tab.title || pageUrl;
+  await addPageToGroupFromMenu(pageUrl, pageTitle, groupIndex, tab.id);
 });
 
 // ⚠️ BUG-013: stringToColor 两处定义（background.js + main.js），修改时需保持同步

@@ -280,6 +280,155 @@ function send(method, params, sessionId) {
   check('DEBT-01 正对照：同族 webdav:test 仍被 SW 响应（只下线了死链路）',
     stillAlive.includes('http/https'), stillAlive);
 
+  // ===== v1.5.16 DEBT-02：SW 侧降级路径（background.js 的 7 处空 catch 分级治理）=====
+  // 这些代码跑在 Service Worker 里，页面上下文看不到 → 用 CDP 直接挂到 SW target 上求值。
+  // 刻意不调 Runtime.enable(SW)：避免把 SW 的 console 事件并进本套件的「无 console error」门。
+  console.log('\n[DEBT-02] SW 侧降级路径（诊断 / 有意静默 / 用户已关窗）');
+  let swSid = null;
+  {
+    const { targetInfos } = await send('Target.getTargets');
+    const swTarget = targetInfos.find((t) => /^chrome-extension:\/\/[a-p]{32}\/background\.js/.test(t.url || ''));
+    if (swTarget) {
+      const a = await send('Target.attachToTarget', { targetId: swTarget.targetId, flatten: true });
+      swSid = a.sessionId;
+    }
+  }
+  const evalSw = async (expr) => {
+    const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, swSid);
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || 'SW eval error');
+    return r.result.value;
+  };
+  const swReady = !!swSid && (await evalSw('typeof _swWarnDegraded === "function"')) === true;
+  check('DEBT-02 已挂到 Service Worker 上下文且降级诊断出口就位（SW 侧断言的前提）',
+    swReady, { hasSession: !!swSid, swReady });
+
+  // 逐条错误隔离：旧代码上这些函数/出口不存在时应「该条断言失败」，而不是掀翻整个套件
+  const swCase = async (body) => {
+    try {
+      return JSON.parse(await evalSw(`(async () => {
+        try {
+          var __r = await (async () => { ${body} })();
+          return JSON.stringify(__r === undefined ? {} : __r);
+        } catch (e) { return JSON.stringify({ __error: (e && e.message) || String(e) }); }
+      })()`));
+    } catch (e) {
+      return { __error: (e && e.message) || String(e) };
+    }
+  };
+
+  // 只要 SW 可达就跑（对照时旧代码会逐条失败，而不是被整体跳过）
+  if (swSid) {
+    await evalSw(`(function () {
+      if (!self.__swWarnInstalled) {
+        var orig = console.warn;
+        self.__swWarnBuf = [];
+        console.warn = function () { self.__swWarnBuf.push([].slice.call(arguments).map(String).join(' ')); };
+        self.__swWarnRestore = function () { console.warn = orig; };
+        self.__swWarnInstalled = true;
+      }
+      self.__swWarnBuf.length = 0;
+      return 'ok';
+    })()`);
+    const swWarns = async () => {
+      try { return JSON.parse(await evalSw('JSON.stringify(self.__swWarnBuf.splice(0))')); } catch (e) { return []; }
+    };
+    const swWarnHas = (list, needle) => Array.isArray(list) && list.some((w) => String(w).indexOf(needle) !== -1);
+
+    // ① 诊断格式：带来源前缀，便于在 DevTools 里区分「页面」与「SW」
+    const fmtCase = await swCase(`
+      self.__swWarnBuf.length = 0;
+      _swWarnDegraded("测试上下文", new Error("boom"));
+      return { warns: self.__swWarnBuf.slice() };
+    `);
+    check('DEBT-02 SW 降级诊断带来源前缀与失败原因',
+      (fmtCase.warns || []).length === 1 && /^\[DeepPage SW\] 测试上下文失败（已降级）: boom$/.test(fmtCase.warns[0]), fmtCase);
+
+    // ② / ③ MKCOL 建目录失败（网络层失败才会进 catch；HTTP 405「目录已存在」不会）
+    const badDav = 'http://127.0.0.1:9/dav';
+    await evalSw('self.__swWarnBuf.length = 0');
+    const putRes = await evalJsStr(msg({ type: 'webdav:put', payload: { _url: badDav, _user: 'u', _pass: btoa('p'), body: [1, 2, 3] } }));
+    const putWarns = await swWarns();
+    check('DEBT-02 WebDAV PUT：MKCOL 建根目录失败留下诊断，且 PUT 失败照常上报给页面',
+      swWarnHas(putWarns, '创建 WebDAV 根目录 (MKCOL)') && putRes.includes('"ok":false'),
+      { putRes: putRes.slice(0, 90), putWarns });
+
+    await evalSw('self.__swWarnBuf.length = 0');
+    await evalJsStr(msg({ type: 'webdav:config-put', payload: { _url: badDav, _user: 'u', _pass: btoa('p'), _filename: 'x.json', body: '{}' } }));
+    const cfgWarns = await swWarns();
+    check('DEBT-02 WebDAV 配置快照：MKCOL 建子目录失败留下诊断（带目录名）',
+      swWarnHas(cfgWarns, '创建 WebDAV 子目录 config'), cfgWarns);
+
+    // ④ / ⑤ 关闭截图窗口：用户自己关掉 = 正常路径（静默）；其它原因 = 可能留孤儿窗口（留痕）
+    const closeCase = await swCase(`
+      var orig = chrome.windows.remove;
+      try {
+        self.__swWarnBuf.length = 0;
+        chrome.windows.remove = function () { throw new Error('No window with id: 999'); };
+        _swCloseCaptureWindow(999);
+        var expected = self.__swWarnBuf.slice();
+        self.__swWarnBuf.length = 0;
+        chrome.windows.remove = function () { throw new Error('remove boom'); };
+        _swCloseCaptureWindow(998);
+        return { expected: expected, real: self.__swWarnBuf.slice() };
+      } finally { chrome.windows.remove = orig; }
+    `);
+    check('DEBT-02 关闭截图窗口：窗口已被关掉（No window with id）属正常路径 → 不刷诊断',
+      Array.isArray(closeCase.expected) && closeCase.expected.length === 0, closeCase);
+    check('DEBT-02 关闭截图窗口：其它原因没关掉（会留孤儿窗口）→ 必须留痕',
+      swWarnHas(closeCase.real, '关闭截图窗口'), closeCase);
+
+    // ⑥ / ⑦ / ⑧ 右键菜单「添加到分组」：坏页面 URL（留痕 + 仍添加）/ 坏卡片 URL（静默跳过）/ 正对照不误报重复
+    const menuCase = await swCase(`
+      var origExec = chrome.scripting.executeScript;
+      var execCalls = [];
+      chrome.scripting.executeScript = async function (o) { execCalls.push(o.args); return [{ result: true }]; };
+      var origGroups = await new Promise(function (r) { chrome.storage.sync.get(['groups'], function (x) { r(x.groups || []); }); });
+      try {
+        await new Promise(function (r) { chrome.storage.sync.set({ groups: [{ id: 'gdebt02sw', name: 'DEBT02SW组', cards: [
+          { id: 'badcard', name: '坏卡片', url: 'not-a-url' },
+          { id: 'goodcard', name: '好卡片', url: 'https://example.com/swdup' }
+        ] }] }, r); });
+
+        self.__swWarnBuf.length = 0;
+        await addPageToGroupFromMenu('not-a-url', '坏页面', 0, 999999);
+        var badWarns = self.__swWarnBuf.slice();
+        var afterBad = await new Promise(function (r) { chrome.storage.sync.get(['groups'], function (x) { r(x.groups || []); }); });
+
+        self.__swWarnBuf.length = 0;
+        execCalls.length = 0;
+        await addPageToGroupFromMenu('https://www.example.com/swdup', '重复页', 0, 999999);
+        var dupWarns = self.__swWarnBuf.slice();
+        var dupArgs = execCalls.length ? JSON.stringify(execCalls[0]) : null;
+
+        self.__swWarnBuf.length = 0;
+        execCalls.length = 0;
+        await addPageToGroupFromMenu('https://no-dup.example.com/unique', '新页面', 0, 999999);
+        var noDupWarns = self.__swWarnBuf.slice();
+
+        return {
+          badWarns: badWarns,
+          badAdded: ((afterBad[0] && afterBad[0].cards) || []).some(function (c) { return c.url === 'not-a-url'; }),
+          dupWarns: dupWarns,
+          dupArgs: dupArgs,
+          noDupWarns: noDupWarns,
+          noDupExecs: execCalls.length
+        };
+      } finally {
+        chrome.scripting.executeScript = origExec;
+        await new Promise(function (r) { chrome.storage.sync.set({ groups: origGroups }, r); });
+      }
+    `);
+    check('DEBT-02 右键添加：页面 URL 解析不了 → 跳过重复检查但仍添加卡片（降级可用）',
+      menuCase.badAdded === true && swWarnHas(menuCase.badWarns, '解析页面 URL'), menuCase);
+    check('DEBT-02 右键添加：组内坏 URL 卡片被静默跳过，好卡片仍能被识别为重复（不刷诊断）',
+      typeof menuCase.dupArgs === 'string' && menuCase.dupArgs.indexOf('DEBT02SW组') !== -1
+        && Array.isArray(menuCase.dupWarns) && menuCase.dupWarns.length === 0, menuCase);
+    check('DEBT-02 右键添加：正对照 —— 没有重复时不弹确认框、也没有诊断',
+      menuCase.noDupExecs === 0 && Array.isArray(menuCase.noDupWarns) && menuCase.noDupWarns.length === 0, menuCase);
+
+    await evalSw('(function () { if (self.__swWarnRestore) self.__swWarnRestore(); self.__swWarnInstalled = false; return "ok"; })()');
+  }
+
   // BUG-073：本文件原先收集了 console error 却从不检查（死门），现在与 e2e-p0 用同一套来源精确过滤
   consoleLog.report();
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
