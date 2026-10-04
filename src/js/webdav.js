@@ -77,7 +77,6 @@ var WEBDAV_MSG = {
   MANIFEST_PUT: 'webdav:manifest-put',
   CONFIG_PUT: 'webdav:config-put',
   CONFIG_GET: 'webdav:config-get',
-  CONFIG_LIST: 'webdav:config-list',
   CONFIG_DELETE: 'webdav:config-delete',
   IMG_PUT: 'webdav:img-put',
   IMG_GET: 'webdav:img-get',

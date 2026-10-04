@@ -9,6 +9,14 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  # E2E 用的 Chromium 缓存版本号。
+  # 缓存 key 里带上它 = **显式钉住一个 Chromium 版本**，而不是「每次拿最新」：
+  #   · 不递增 → 一直复用首次下载的那个版本（可复现；actions/cache 的 key 不变就永远命中）
+  #   · 递增   → 缓存 miss，重新安装当时的 Chrome for Testing @latest
+  # 需要换浏览器版本（例如排查 CDP / 扩展行为差异）时把它 +1 即可。
+  CHROMIUM_CACHE_REV: v1
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -36,16 +44,24 @@ jobs:
 
       # runner 预装的是官方 branded Google Chrome，而 Chrome 137+ 已移除 --load-extension，
       # 无法加载未打包扩展；因此单独准备一个 Chromium 构建（Chrome for Testing）专供 E2E。
+      # 注意 key 里的 CHROMIUM_CACHE_REV：以前这里是写死的 `-latest`，导致缓存**永远命中**、
+      # CI 实际被钉死在首次下载的那个版本上（"latest" 名不副实，也无法刷新）。
       - name: 缓存 Chromium
-        id: cache-chromium
         uses: actions/cache@v6
         with:
           path: .cache/chromium
-          key: chromium-${{ runner.os }}-latest
+          key: chromium-${{ runner.os }}-${{ env.CHROMIUM_CACHE_REV }}
 
+      # 不按 cache-hit 判定，而是直接查二进制是否真的在：缓存可能被清理或只恢复了一半，
+      # 缺了就装（自愈）；文件在就绝不重复下载。
       - name: 准备 Chromium（E2E 用）
-        if: steps.cache-chromium.outputs.cache-hit != 'true'
-        run: npx --yes @puppeteer/browsers install chromium@latest --path .cache/chromium
+        run: |
+          if [ -z "$(find .cache/chromium -type f -name chrome 2>/dev/null | head -1)" ]; then
+            echo "未找到缓存的 Chromium → 下载 Chrome for Testing（rev=${CHROMIUM_CACHE_REV}）"
+            npx --yes @puppeteer/browsers install chromium@latest --path .cache/chromium
+          else
+            echo "复用缓存的 Chromium（rev=${CHROMIUM_CACHE_REV}）"
+          fi
 
       - name: 真实浏览器 E2E
         run: |

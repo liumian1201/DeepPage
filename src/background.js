@@ -99,7 +99,6 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   if (request.type === 'webdav:manifest-put') { webdavProxy('MANIFEST_PUT', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
   if (request.type === 'webdav:config-put') { webdavProxy('CONFIG_PUT', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
   if (request.type === 'webdav:config-get') { webdavProxy('CONFIG_GET', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
-  if (request.type === 'webdav:config-list') { webdavProxy('CONFIG_LIST', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
   if (request.type === 'webdav:config-delete') { webdavProxy('CONFIG_DELETE', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
   if (request.type === 'webdav:img-put') { webdavProxy('IMG_PUT', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
   if (request.type === 'webdav:img-get') { webdavProxy('IMG_GET', request.payload).then(sendResponse).catch(function (e) { sendResponse({ ok: false, error: e.message }); }); return true; }
@@ -303,7 +302,6 @@ async function webdavProxy(method, payload) {
   // BUG-042：文件名先净化再拼路径（子路径名可能来自远端 manifest / PROPFIND 列表）
   var subPath = '';
   if (method === 'MANIFEST_GET' || method === 'MANIFEST_PUT') subPath = 'manifest.json';
-  else if (method === 'CONFIG_LIST') subPath = 'config/';
   else if (method === 'IMG_LIST') subPath = 'img/';
   else if (method.startsWith('CONFIG_')) {
     var rawCfg = payload._filename;
@@ -353,8 +351,9 @@ async function webdavProxy(method, payload) {
       if (!res.ok) return { ok: false, error: 'PUT ' + res.status };
       return { ok: true, data: new Date().toISOString() };
     }
-    if (method === 'CONFIG_LIST' || method === 'IMG_LIST') {
-      var listDir = method === 'CONFIG_LIST' ? 'config/' : 'img/';
+    // v1.6.0: 只剩 IMG_LIST 走这里（config 列表来自 manifest.configs，不经 CONFIG_LIST —— 页面调用方已随 DEBT-01 删除）
+    if (method === 'IMG_LIST') {
+      var listDir = 'img/';
       var listUrl = baseUrl + '/' + listDir;
       // PROPFIND on subdirectory
       var subHeaders = Object.assign({}, headers, { Depth: '1' });

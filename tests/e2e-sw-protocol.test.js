@@ -280,6 +280,27 @@ function send(method, params, sessionId) {
   check('DEBT-01 正对照：同族 webdav:test 仍被 SW 响应（只下线了死链路）',
     stillAlive.includes('http/https'), stillAlive);
 
+  // v1.6.0 封版清理：DEBT-01 的最后一处残留 —— 页面侧 webdavListConfigs() 已随 v1.5.14 删除，
+  // 于是 SW 的 webdav:config-list 分支 + WEBDAV_MSG.CONFIG_LIST + webdavProxy 里两处共享判据都没有调用方
+  // （云端 config 列表实际来自 manifest.configs，不经过这条消息）。删完用同一套口径钉住。
+  const cfgList = await evalJs(`(async () => {
+    var resp = await Promise.race([
+      new Promise(function (r) {
+        chrome.runtime.sendMessage({ type: 'webdav:config-list', payload: { _url: 'https://example.com/dav/' } }, function (x) {
+          r({ value: (x === undefined ? null : x), lastError: chrome.runtime.lastError ? chrome.runtime.lastError.message : null });
+        });
+      }),
+      new Promise(function (r) { setTimeout(function () { r({ value: '«超时»', lastError: null }); }, 5000); })
+    ]);
+    return JSON.stringify(resp);
+  })()`);
+  const cfgListRes = typeof cfgList === 'string' ? JSON.parse(cfgList) : { parseFailed: cfgList };
+  check('DEBT-01 残留：已无调用方的 webdav:config-list 不再被 SW 响应（v1.6.0 清理）',
+    cfgListRes.value === null, cfgListRes);
+  const imgListAlive = await evalJsStr(msg({ type: 'webdav:img-list', payload: { _url: 'file:///tmp/dav', _user: 'u', _pass: btoa('p') } }));
+  check('DEBT-01 残留：正对照 —— 同族 webdav:img-list 仍被 SW 响应（只删了没调用方的那条）',
+    imgListAlive.includes('http/https'), imgListAlive);
+
   // ===== v1.5.16 DEBT-02：SW 侧降级路径（background.js 的 7 处空 catch 分级治理）=====
   // 这些代码跑在 Service Worker 里，页面上下文看不到 → 用 CDP 直接挂到 SW target 上求值。
   // 刻意不调 Runtime.enable(SW)：避免把 SW 的 console 事件并进本套件的「无 console error」门。
