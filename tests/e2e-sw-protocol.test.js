@@ -204,6 +204,67 @@ function send(method, params, sessionId) {
     else { fail++; console.log('  ❌ ' + name + (extra !== undefined ? ' → ' + JSON.stringify(extra) : '')); }
   };
 
+  // ===== SW 上下文挂载机制（v1.6.2 提前到这里，供多处复用）=====
+  // ⚠️ MV3 的 SW 会被空闲回收重启：`Target.getTargets` 可能同时列出「已停用实例」与「新实例」，
+  //    两者 url 都是 background.js。**必须遍历所有候选、逐个挂上并轮询等待就绪**，
+  //    否则会挂到空上下文（表现为 xxx is not defined、连 chrome 都没有）。
+  //    就绪判据用**跨版本都存在**的符号（stringToColor + chrome.runtime），不依赖本次新增的函数。
+  const swTargetInfo = (t) => ({ type: t.type, url: String(t.url || '').replace(/[a-p]{32}/, '<ext-id>') });
+  async function attachWorkingSw(timeoutMs = 15000) {
+    const deadline = Date.now() + timeoutMs;
+    const givenUp = new Set();
+    const seen = [];
+    while (Date.now() < deadline) {
+      let targetInfos = [];
+      try { targetInfos = (await send('Target.getTargets')).targetInfos; } catch (e) { /* 重试 */ }
+      const candidates = targetInfos.filter((t) => /^chrome-extension:\/\/[a-p]{32}\/background\.js/.test(t.url || ''));
+      candidates.forEach((t) => { if (!seen.some((s) => s.targetId === t.targetId)) seen.push(swTargetInfo(t)); });
+      for (const t of candidates) {
+        if (givenUp.has(t.targetId)) continue;
+        let session;
+        try {
+          session = (await send('Target.attachToTarget', { targetId: t.targetId, flatten: true })).sessionId;
+        } catch (e) { givenUp.add(t.targetId); continue; }
+        // 轮询等待该上下文真的加载完 background.js（挂上正在启动的 SW 时会先拿到空作用域）。
+        // 就绪判据刻意用**两个版本都存在**的符号（stringToColor + chrome.runtime）：
+        // 若用本批新增的 _swWarnDegraded，旧代码上会永远「不就绪」，修复前/后对照会退化成 1 条失败。
+        for (let i = 0; i < 12; i++) {
+          try {
+            const r = await send('Runtime.evaluate', {
+              expression: 'typeof stringToColor === "function" && typeof chrome !== "undefined" && !!chrome.runtime',
+              returnByValue: true,
+            }, session);
+            if (r.result && r.result.value === true) return { sid: session, target: swTargetInfo(t), seen: seen };
+          } catch (e) { /* 上下文可能正在切换，继续轮询 */ }
+          await sleep(300);
+        }
+        givenUp.add(t.targetId);
+        try { await send('Target.detachFromTarget', { sessionId: session }); } catch (e) { /* 忽略 */ }
+      }
+      await sleep(500);
+    }
+    return { sid: null, target: null, seen: seen };
+  }
+  let swSid = null;
+  const evalSwOnce = async (expr) => {
+    const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, swSid);
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || 'SW eval error');
+    return r.result.value;
+  };
+  // SW 可能在断言过程中被回收重启 → 遇到上下文类错误时重挂一次再试
+  const evalSw = async (expr) => {
+    try {
+      return await evalSwOnce(expr);
+    } catch (e) {
+      const msgText = String((e && e.message) || e);
+      if (!/context|Session|Target|detached|Cannot find/i.test(msgText)) throw e;
+      const re = await attachWorkingSw(8000);
+      if (!re.sid) throw e;
+      swSid = re.sid;
+      return await evalSwOnce(expr);
+    }
+  };
+
   console.log('\n[P0-4] 页面 → SW 消息协议白名单');
   const msg = (payload) => `new Promise(r=>chrome.runtime.sendMessage(${JSON.stringify(payload)},resp=>r(JSON.stringify(resp))))`;
   // BUG-041：eval 结果先做类型断言 —— SW 无响应时 evalJs 返回 undefined，
@@ -236,29 +297,34 @@ function send(method, params, sessionId) {
   // 也不能沿用「按环境权限状态分支」的写法 —— 那会让整段断言恒被跳过（覆盖静默消失）。
   // 改为**在 SW 上下文里把 contains 桩成未授权**，断言因此是确定性的、与环境无关。
   {
-    const swTarget = (await send('Target.getTargets')).targetInfos
-      .find((t) => /^chrome-extension:\/\/[a-p]{32}\/background\.js/.test(t.url || ''));
-    let swSession = null;
-    if (swTarget) {
-      swSession = (await send('Target.attachToTarget', { targetId: swTarget.targetId, flatten: true })).sessionId;
-    }
-    const evalSwOnce = async (expr) => {
-      const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, swSession);
-      if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || 'SW eval error');
-      return r.result.value;
-    };
-    // 等 SW 真的就绪（同一个 background.js url 可能对应多个 target，含已停用的）
+    // 用与 [DEBT-02] 段同一套健壮挂载（遍历候选 + 轮询就绪），避免挂到已停用的 SW 实例
+    const swAtt = await attachWorkingSw(15000);
+    swSid = swAtt.sid;
     let swStubbed = false;
-    for (let i = 0; i < 12 && swSession && !swStubbed; i++) {
-      try {
-        swStubbed = (await evalSwOnce(`(function () {
-          if (typeof swHasHttpHostPermission !== 'function') return false;
-          if (!self.__dpOrigContains) self.__dpOrigContains = chrome.permissions.contains;
-          chrome.permissions.contains = function (p, cb) { cb(false); };
-          return true;
-        })()`)) === true;
-      } catch (e) { /* 上下文可能正在切换 */ }
-      if (!swStubbed) await sleep(300);
+    const stubAttempts = [];
+    if (swSid) {
+      // 等 SW 真的就绪（同一个 background.js url 可能对应多个 target，含已停用的）
+      for (let i = 0; i < 12 && !swStubbed; i++) {
+        try {
+          const probe = await evalSw(`(function () {
+            var out = {
+              hasFn: typeof swHasHttpHostPermission === 'function',
+              hasStringToColor: typeof stringToColor === 'function',
+              hasChrome: typeof chrome !== 'undefined' && !!chrome.runtime,
+              hasPermApi: typeof chrome !== 'undefined' && !!chrome.permissions
+            };
+            if (!out.hasFn || !out.hasPermApi) return JSON.stringify(out);
+            if (!self.__dpOrigContains) self.__dpOrigContains = chrome.permissions.contains;
+            chrome.permissions.contains = function (p, cb) { cb(false); };
+            out.stubbed = true;
+            return JSON.stringify(out);
+          })()`);
+          const parsed = typeof probe === 'string' ? JSON.parse(probe) : { probe: probe };
+          stubAttempts.push(parsed);
+          swStubbed = parsed.stubbed === true;
+        } catch (e) { stubAttempts.push({ threw: String((e && e.message) || e) }); }
+        if (!swStubbed) await sleep(300);
+      }
     }
     try {
       const rawGate = await evalJs(`(async () => {
@@ -278,7 +344,7 @@ function send(method, params, sessionId) {
       })()`);
       const captureGate = typeof rawGate === 'string' ? JSON.parse(rawGate) : { parseFailed: rawGate };
       check('capture-screenshot 未授权 http 时立即拒绝（不等 120s 超时）',
-        swStubbed && captureGate.timeout === false && captureGate.ms < 8000, { stubbed: swStubbed, gate: captureGate });
+        swStubbed && captureGate.timeout === false && captureGate.ms < 8000, { stubbed: swStubbed, gate: captureGate, swAttach: { sid: !!swAtt.sid, target: swAtt.target }, stubAttempts: stubAttempts.slice(0, 3) });
       check('capture-screenshot 拒绝原因是权限（不再是误导性的「用户超时未截图」）',
         captureGate.ok === false && /权限/.test(captureGate.error || ''), captureGate);
       const leakedTargets = (await send('Target.getTargets')).targetInfos.filter((t) => /127\.0\.0\.1:9/.test(t.url || ''));
@@ -286,12 +352,11 @@ function send(method, params, sessionId) {
         leakedTargets.length === 0, leakedTargets.map((t) => t.url));
     } finally {
       // 还原 SW 的 permissions.contains，避免影响后续断言（尤其是 [DEBT-02] 段）
-      if (swStubbed && swSession) {
+      if (swStubbed) {
         try {
-          await evalSwOnce('(function () { if (self.__dpOrigContains) { chrome.permissions.contains = self.__dpOrigContains; delete self.__dpOrigContains; } return true; })()');
+          await evalSw('(function () { if (self.__dpOrigContains) { chrome.permissions.contains = self.__dpOrigContains; delete self.__dpOrigContains; } return true; })()');
         } catch (e) { /* 忽略 */ }
       }
-      if (swSession) { try { await send('Target.detachFromTarget', { sessionId: swSession }); } catch (e) { /* 忽略 */ } }
     }
   }
 
@@ -350,67 +415,13 @@ function send(method, params, sessionId) {
   // 修法：① 先用一次消息往返唤醒 SW；② 把所有候选 target 逐个挂上并**轮询等待**
   // background.js 真的在该上下文里就绪；③ 单个用例失败时错误隔离，不让套件崩。
   console.log('\n[DEBT-02] SW 侧降级路径（诊断 / 有意静默 / 用户已关窗）');
-  const swTargetInfo = (t) => ({ type: t.type, url: String(t.url || '').replace(/[a-p]{32}/, '<ext-id>') });
-  async function attachWorkingSw(timeoutMs = 15000) {
-    const deadline = Date.now() + timeoutMs;
-    const givenUp = new Set();
-    const seen = [];
-    while (Date.now() < deadline) {
-      let targetInfos = [];
-      try { targetInfos = (await send('Target.getTargets')).targetInfos; } catch (e) { /* 重试 */ }
-      const candidates = targetInfos.filter((t) => /^chrome-extension:\/\/[a-p]{32}\/background\.js/.test(t.url || ''));
-      candidates.forEach((t) => { if (!seen.some((s) => s.targetId === t.targetId)) seen.push(swTargetInfo(t)); });
-      for (const t of candidates) {
-        if (givenUp.has(t.targetId)) continue;
-        let session;
-        try {
-          session = (await send('Target.attachToTarget', { targetId: t.targetId, flatten: true })).sessionId;
-        } catch (e) { givenUp.add(t.targetId); continue; }
-        // 轮询等待该上下文真的加载完 background.js（挂上正在启动的 SW 时会先拿到空作用域）。
-        // 就绪判据刻意用**两个版本都存在**的符号（stringToColor + chrome.runtime）：
-        // 若用本批新增的 _swWarnDegraded，旧代码上会永远「不就绪」，修复前/后对照会退化成 1 条失败。
-        for (let i = 0; i < 12; i++) {
-          try {
-            const r = await send('Runtime.evaluate', {
-              expression: 'typeof stringToColor === "function" && typeof chrome !== "undefined" && !!chrome.runtime',
-              returnByValue: true,
-            }, session);
-            if (r.result && r.result.value === true) return { sid: session, target: swTargetInfo(t), seen: seen };
-          } catch (e) { /* 上下文可能正在切换，继续轮询 */ }
-          await sleep(300);
-        }
-        givenUp.add(t.targetId);
-        try { await send('Target.detachFromTarget', { sessionId: session }); } catch (e) { /* 忽略 */ }
-      }
-      await sleep(500);
-    }
-    return { sid: null, target: null, seen: seen };
-  }
   // 先唤醒：一次消息往返确保 SW 实例真的在跑（上面的 webdav:test 已做过，这里显式再确认一次）
   await evalJsStr(msg({ type: 'webdav:test', payload: { _url: 'file:///tmp/dav', _user: 'u', _pass: btoa('p') } }));
   const swAttach = await attachWorkingSw();
-  let swSid = swAttach.sid;
+  swSid = swAttach.sid;
   check('DEBT-02 挂到真正加载了 background.js 的 Service Worker 上下文（SW 侧断言的前提）',
     !!swSid, { attached: !!swSid, target: swAttach.target, seenSwTargets: swAttach.seen });
 
-  const evalSwOnce = async (expr) => {
-    const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, swSid);
-    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || 'SW eval error');
-    return r.result.value;
-  };
-  // SW 可能在断言过程中被回收重启 → 遇到上下文类错误时重挂一次再试
-  const evalSw = async (expr) => {
-    try {
-      return await evalSwOnce(expr);
-    } catch (e) {
-      const msgText = String((e && e.message) || e);
-      if (!/context|Session|Target|detached|Cannot find/i.test(msgText)) throw e;
-      const re = await attachWorkingSw(8000);
-      if (!re.sid) throw e;
-      swSid = re.sid;
-      return await evalSwOnce(expr);
-    }
-  };
 
   // 逐条错误隔离：旧代码上这些函数/出口不存在时应「该条断言失败」，而不是掀翻整个套件
   const swCase = async (body) => {
