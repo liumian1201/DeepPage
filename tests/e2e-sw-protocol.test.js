@@ -229,33 +229,70 @@ function send(method, params, sessionId) {
 
   // BUG-046：http 截图链路必须在 SW 侧也有权限闸门 —— 未授权时立即拒绝，
   // 不开窗、不依赖 120 秒超时（修复前会开一个 1280×720 窗口，注入静默失败，用户干等 2 分钟）
-  const httpGranted = await evalJs(`new Promise(r => chrome.permissions.contains({ origins: ['http://*/*'] }, x => r(!!x)))`);
-  if (httpGranted) {
-    console.log('  ⏭ http://*/* 已授权，跳过「未授权立即拒绝」断言（本环境不适用）');
-  } else {
-    const rawGate = await evalJs(`(async () => {
-      var t0 = Date.now();
-      var resp = await Promise.race([
-        new Promise(function (r) {
-          chrome.runtime.sendMessage({ type: 'capture-screenshot', url: 'http://127.0.0.1:9/' }, function (x) { r(x || { ok: false, error: 'no response' }); });
-        }),
-        new Promise(function (r) { setTimeout(function () { r({ __timeout: true }); }, 8000); })
-      ]);
-      return JSON.stringify({
-        ms: Date.now() - t0,
-        ok: !!(resp && resp.ok),
-        error: (resp && resp.error) || '',
-        timeout: !!(resp && resp.__timeout)
-      });
-    })()`);
-    const captureGate = typeof rawGate === 'string' ? JSON.parse(rawGate) : { parseFailed: rawGate };
-    check('capture-screenshot 未授权 http 时立即拒绝（不等 120s 超时）',
-      captureGate.timeout === false && captureGate.ms < 8000, captureGate);
-    check('capture-screenshot 拒绝原因是权限（不再是误导性的「用户超时未截图」）',
-      captureGate.ok === false && /权限/.test(captureGate.error || ''), captureGate);
-    const leakedTargets = (await send('Target.getTargets')).targetInfos.filter((t) => /127\.0\.0\.1:9/.test(t.url || ''));
-    check('capture-screenshot 未授权时不开窗（没有留下指向该 http 地址的 target）',
-      leakedTargets.length === 0, leakedTargets.map((t) => t.url));
+  //
+  // BUG-078（v1.6.2）起 host_permissions 回退为 <all_urls>，**覆盖了 http**：
+  // 生产环境里 `permissions.contains({origins:['http://*/*']})` 恒为 true，这条闸门不会再被触发。
+  // 但它是纵深防御（万一将来再次收窄权限，仍要给出提示而不是静默失败），所以不能把断言删掉；
+  // 也不能沿用「按环境权限状态分支」的写法 —— 那会让整段断言恒被跳过（覆盖静默消失）。
+  // 改为**在 SW 上下文里把 contains 桩成未授权**，断言因此是确定性的、与环境无关。
+  {
+    const swTarget = (await send('Target.getTargets')).targetInfos
+      .find((t) => /^chrome-extension:\/\/[a-p]{32}\/background\.js/.test(t.url || ''));
+    let swSession = null;
+    if (swTarget) {
+      swSession = (await send('Target.attachToTarget', { targetId: swTarget.targetId, flatten: true })).sessionId;
+    }
+    const evalSwOnce = async (expr) => {
+      const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, swSession);
+      if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || 'SW eval error');
+      return r.result.value;
+    };
+    // 等 SW 真的就绪（同一个 background.js url 可能对应多个 target，含已停用的）
+    let swStubbed = false;
+    for (let i = 0; i < 12 && swSession && !swStubbed; i++) {
+      try {
+        swStubbed = (await evalSwOnce(`(function () {
+          if (typeof swHasHttpHostPermission !== 'function') return false;
+          if (!self.__dpOrigContains) self.__dpOrigContains = chrome.permissions.contains;
+          chrome.permissions.contains = function (p, cb) { cb(false); };
+          return true;
+        })()`)) === true;
+      } catch (e) { /* 上下文可能正在切换 */ }
+      if (!swStubbed) await sleep(300);
+    }
+    try {
+      const rawGate = await evalJs(`(async () => {
+        var t0 = Date.now();
+        var resp = await Promise.race([
+          new Promise(function (r) {
+            chrome.runtime.sendMessage({ type: 'capture-screenshot', url: 'http://127.0.0.1:9/' }, function (x) { r(x || { ok: false, error: 'no response' }); });
+          }),
+          new Promise(function (r) { setTimeout(function () { r({ __timeout: true }); }, 8000); })
+        ]);
+        return JSON.stringify({
+          ms: Date.now() - t0,
+          ok: !!(resp && resp.ok),
+          error: (resp && resp.error) || '',
+          timeout: !!(resp && resp.__timeout)
+        });
+      })()`);
+      const captureGate = typeof rawGate === 'string' ? JSON.parse(rawGate) : { parseFailed: rawGate };
+      check('capture-screenshot 未授权 http 时立即拒绝（不等 120s 超时）',
+        swStubbed && captureGate.timeout === false && captureGate.ms < 8000, { stubbed: swStubbed, gate: captureGate });
+      check('capture-screenshot 拒绝原因是权限（不再是误导性的「用户超时未截图」）',
+        captureGate.ok === false && /权限/.test(captureGate.error || ''), captureGate);
+      const leakedTargets = (await send('Target.getTargets')).targetInfos.filter((t) => /127\.0\.0\.1:9/.test(t.url || ''));
+      check('capture-screenshot 未授权时不开窗（没有留下指向该 http 地址的 target）',
+        leakedTargets.length === 0, leakedTargets.map((t) => t.url));
+    } finally {
+      // 还原 SW 的 permissions.contains，避免影响后续断言（尤其是 [DEBT-02] 段）
+      if (swStubbed && swSession) {
+        try {
+          await evalSwOnce('(function () { if (self.__dpOrigContains) { chrome.permissions.contains = self.__dpOrigContains; delete self.__dpOrigContains; } return true; })()');
+        } catch (e) { /* 忽略 */ }
+      }
+      if (swSession) { try { await send('Target.detachFromTarget', { sessionId: swSession }); } catch (e) { /* 忽略 */ } }
+    }
   }
 
   // v1.5.14 DEBT-01：静默备份链路整条下线（页面侧 webdavSilentPut / webdavSilentPutIncremental

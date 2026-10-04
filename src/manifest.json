@@ -21,10 +21,7 @@
     "service_worker": "background.js"
   },
   "host_permissions": [
-    "https://*/*"
-  ],
-  "optional_host_permissions": [
-    "http://*/*"
+    "<all_urls>"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: *; connect-src *"

@@ -14,6 +14,7 @@
    探针: DP_EXT_DIR=<目录> 可指向另一份扩展源码 —— 「修复前 / 后对比」就是拿它跑同一套断言
 */
 const { spawn } = require('child_process');
+const http = require('http');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -421,10 +422,19 @@ function send(method, params, sessionId) {
   check('非法文件被拒绝', (await evalJs('(async () => { try { await _applyGroupImport({ foo: 1 }); return "no-throw"; } catch (e) { return "rejected"; } })()')) === 'rejected');
   check('空 url 卡片被跳过', (await evalJs(`(async () => { const g = await _applyGroupImport({ type: 'deeppage-group', version: 1, group: { name: '脏数据', cards: [{ name: 'a' }, { name: 'b', url: 'https://b.com' }] } }); return g.cards.length; })()`)) === 1);
 
-  console.log('\n[10] P1-10 权限收窄 + 运行时授权');
+  console.log('\n[10] 权限模型 + 运行时授权（P1-10 收窄 → BUG-078 部分回退）');
   const mf = JSON.parse(await evalJs('JSON.stringify(chrome.runtime.getManifest())'));
-  check('host_permissions 已收窄为 https', JSON.stringify(mf.host_permissions) === JSON.stringify(['https://*/*']), mf.host_permissions);
-  check('http 改为可选权限', JSON.stringify(mf.optional_host_permissions) === JSON.stringify(['http://*/*']), mf.optional_host_permissions);
+  // ⚠️ BUG-078（v1.6.2）：host_permissions 从 "https://*/*" 回退为 "<all_urls>"。
+  //    原因：chrome.tabs.captureVisibleTab **只接受 `<all_urls>` 或已授权的 activeTab**，
+  //    特定 host 权限（哪怕 https://*/* 命中目标页）也会报
+  //    "Either the '<all_urls>' or 'activeTab' permission is required"。
+  //    实测：`https://*/*`（✗）／`https://*/*` + 声明 activeTab（✗，programmatic 开的窗口没有 activeTab 授权）
+  //    ／`<all_urls>`（✓）—— 于是 P1-10 的收窄把整个截图功能打断了 12 个版本。
+  //    任何人想再次收窄，必须先让 [34] 段的真实截图断言仍然通过（它现在会直接失败）。
+  check('host_permissions 为 <all_urls>（截图 captureVisibleTab 的硬性要求）',
+    JSON.stringify(mf.host_permissions) === JSON.stringify(['<all_urls>']), mf.host_permissions);
+  check('不再需要可选 http 权限（<all_urls> 已覆盖，权限闸门自然短路、不再弹窗）',
+    mf.optional_host_permissions === undefined, mf.optional_host_permissions);
   check('hasHttpHostPermission 返回布尔且不抛错', (await evalJs('(async () => typeof (await hasHttpHostPermission()))()')) === 'boolean');
   check('https 地址无需申请权限', (await evalJs('(async () => await ensurePermissionForUrl("https://example.com/x"))()')) === true);
   check('无协议地址直接放行', (await evalJs('(async () => await ensurePermissionForUrl(""))()')) === true);
@@ -3078,7 +3088,135 @@ function send(method, params, sessionId) {
   check('负对照（端到端）：未知键确实没有被写进 storage',
     tampered.evilStored === false, tampered);
 
-  console.log('\n[34] 页面无 JS 报错');
+  console.log('\n[34] BUG-078 网页截图主链路（真实开窗 → 真实点击注入按钮 → 真实 captureVisibleTab）');
+  // 靶子用**本地静态页面**：离线、确定，不依赖外网（外网抖动会让这条断言变脆）。
+  // 这条断言是本次补上的 —— 截图功能自 v1.3.3 起整体失效 12 个版本，正是因为原先没有任何断言
+  // 真的跑过一次「成功截图」（BUG-046 只测了权限闸门）。
+  const shotFixture = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end('<!doctype html><html><head><title>DP Shot Fixture</title></head><body style="margin:0;background:#00bb55;color:#fff">'
+      + '<div id="fixture">SHOT-FIXTURE-OK</div></body></html>');
+  });
+  await new Promise((r) => shotFixture.listen(0, '127.0.0.1', r));
+  const shotPort = shotFixture.address().port;
+  const shotUrl = `http://127.0.0.1:${shotPort}/`;
+
+  /** PNG 完整性校验（Node 侧，用内置 zlib）：签名 + IHDR + IDAT 解压长度 == h*(1+w*channels)
+   *  这比「字符串非空」强得多 —— 能证明拿到的是**完整可解码的真 PNG**。 */
+  const pngIntegrity = (dataUrl) => {
+    const b64 = String(dataUrl || '').split(',')[1] || '';
+    const buf = Buffer.from(b64, 'base64');
+    if (buf.length < 8 || buf.slice(0, 8).toString('hex') !== '89504e470d0a1a0a') return { ok: false, reason: 'bad signature', bytes: buf.length };
+    let off = 8, ihdr = null; const idat = [];
+    while (off + 8 <= buf.length) {
+      const len = buf.readUInt32BE(off);
+      const type = buf.slice(off + 4, off + 8).toString('ascii');
+      const data = buf.slice(off + 8, off + 8 + len);
+      if (type === 'IHDR') ihdr = { w: data.readUInt32BE(0), h: data.readUInt32BE(4), depth: data[8], color: data[9] };
+      else if (type === 'IDAT') idat.push(data);
+      off += 12 + len;
+      if (type === 'IEND') break;
+    }
+    if (!ihdr) return { ok: false, reason: 'no IHDR', bytes: buf.length };
+    const channels = ihdr.color === 6 ? 4 : ihdr.color === 2 ? 3 : ihdr.color === 0 ? 1 : 0;
+    if (!channels) return { ok: false, reason: 'color type ' + ihdr.color, bytes: buf.length };
+    const raw = require('zlib').inflateSync(Buffer.concat(idat));
+    const expect = ihdr.h * (1 + ihdr.w * channels);
+    return { ok: raw.length === expect, w: ihdr.w, h: ihdr.h, bytes: buf.length, rawLen: raw.length, expect: expect };
+  };
+
+  // 页面内的点击驱动：找靶子 tab → 等注入按钮出现 → 真实点它（只点一次）
+  await evalJs(`(function () {
+    window.__dpClickShotBtn = async function (port) {
+      if (window.__dpShotClicked) return 'already-clicked';
+      var tabs = await chrome.tabs.query({});
+      var tab = tabs.filter(function (t) { return (t.url || '').indexOf('127.0.0.1:' + port) !== -1; })[0];
+      if (!tab) return 'waiting-tab';
+      var r = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: function () { return !!document.getElementById('dp-capture-btn'); } });
+      if (!(r && r[0] && r[0].result)) return 'waiting-button';
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: function () { var b = document.getElementById('dp-capture-btn'); if (b) b.click(); } });
+      window.__dpShotClicked = true;
+      return 'clicked';
+    };
+    return 'ok';
+  })()`);
+
+  // ① SW 契约层：真实消息链路 → 断言拿到**完整可解码**的 PNG
+  await evalJs(`(function () {
+    window.__dpShotClicked = false;
+    window.__dpShot1 = { phase: 'pending' };
+    chrome.runtime.sendMessage({ type: 'capture-screenshot', url: ${JSON.stringify(shotUrl)} }, function (x) {
+      window.__dpShot1 = { phase: 'settled', resp: x || null, lastError: chrome.runtime.lastError ? chrome.runtime.lastError.message : null };
+    });
+    return 'started';
+  })()`);
+  let shot1 = null;
+  for (let i = 0; i < 45; i++) {
+    shot1 = JSON.parse(await evalJs('JSON.stringify(window.__dpShot1)'));
+    if (shot1 && shot1.phase !== 'pending') break;
+    await evalJs(`window.__dpClickShotBtn(${shotPort})`);
+    await sleep(400);
+  }
+  const swResp = (shot1 && shot1.resp) || null;
+  const png = (swResp && swResp.ok) ? pngIntegrity(swResp.dataUrl) : null;
+  check('BUG-078 截图主链路成功（真实开窗 → 点击注入按钮 → captureVisibleTab 返回 dataUrl）',
+    !!(swResp && swResp.ok && /^data:image\/png;base64,/.test(swResp.dataUrl || '')),
+    { ok: swResp && swResp.ok, error: swResp && swResp.error, phase: shot1 && shot1.phase, head: String((swResp && swResp.dataUrl) || '').slice(0, 30) });
+  check('BUG-078 拿到的是**完整可解码的真 PNG**（签名 + IHDR + IDAT 解压长度校验，不是空串/截断数据）',
+    !!(png && png.ok && png.bytes > 3000 && png.w > 0 && png.h > 0), png);
+
+  // ② 用户路径：卡片右键「📸 刷新截图」→ 卡片封面真的落库 + 成功文案（而不是红色「截图失败」）
+  //    注意 starter 必须是**同步返回**的：runShotFlow 式的 awaitPromise 会阻塞点击，导致自己把自己等超时。
+  const uiKey = 'shot_fixture_card';
+  await evalJs(`(async () => {
+    var card = { id: ${JSON.stringify(uiKey)}, name: '截图靶子', url: ${JSON.stringify(shotUrl)}, image: '', color: '#00bb55', visitCount: 0, createdAt: Date.now(), lastOpened: 0 };
+    groups[activeGroupIndex].cards = (groups[activeGroupIndex].cards || []).filter(function (c) { return c.id !== ${JSON.stringify(uiKey)}; });
+    groups[activeGroupIndex].cards.push(card);
+    speeddials = groups[activeGroupIndex].cards;
+    await saveGroups(groups);              // refreshCardCapture 会从 storage 重新读分组
+    renderSpeeddials();
+    [].forEach.call(document.querySelectorAll('.toast'), function (t) { t.remove(); });
+    window.__dpShotClicked = false;
+    refreshCardCapture(${JSON.stringify(uiKey)});   // 右键菜单「刷新截图」调的就是它
+    return 'ok';
+  })()`);
+  let uiImage = '';
+  for (let i = 0; i < 45; i++) {
+    await evalJs(`window.__dpClickShotBtn(${shotPort})`);
+    await sleep(400);
+    uiImage = await evalJs(`(function () {
+      var c = (groups[activeGroupIndex].cards || []).filter(function (x) { return x.id === ${JSON.stringify(uiKey)}; })[0];
+      return c ? (c.image || '') : '';
+    })()`);
+    if (uiImage) break;
+  }
+  const uiToasts = await evalJs(`[].map.call(document.querySelectorAll('.toast'), function (t) { return t.textContent; }).join('|')`);
+  check('BUG-078 用户路径：卡片封面真的被写入（image 从空变成 idx: 引用 → 截图已落库）',
+    /^idx:/.test(uiImage || ''), { image: uiImage });
+  check('BUG-078 用户路径：出现「截图已更新」成功文案，且**没有**红色「截图失败」',
+    /截图已更新/.test(uiToasts || '') && !/截图失败/.test(uiToasts || ''), { toasts: uiToasts, image: uiImage });
+
+  // 清理：删掉靶子卡片与它的图片、关掉遗留靶子窗口、强制释放 fixture 连接
+  // （http.Server.close() 会等 keep-alive 连接结束，不强制释放会把测试挂死）
+  await evalJs(`(async () => {
+    var c = (groups[activeGroupIndex].cards || []).filter(function (x) { return x.id === ${JSON.stringify(uiKey)}; })[0];
+    if (c && c.image && typeof deleteCardImageRef === 'function') { try { await deleteCardImageRef(c.image); } catch (e) {} }
+    groups[activeGroupIndex].cards = (groups[activeGroupIndex].cards || []).filter(function (x) { return x.id !== ${JSON.stringify(uiKey)}; });
+    speeddials = groups[activeGroupIndex].cards;
+    await saveGroups(groups);
+    renderSpeeddials();
+    var tabs = await chrome.tabs.query({});
+    var ids = tabs.filter(function (t) { return (t.url || '').indexOf('127.0.0.1:${shotPort}') !== -1; }).map(function (t) { return t.id; });
+    if (ids.length) { try { await chrome.tabs.remove(ids); } catch (e) {} }
+    [].forEach.call(document.querySelectorAll('.toast'), function (t) { t.remove(); });
+    return 'ok';
+  })()`);
+  await new Promise((r) => {
+    if (typeof shotFixture.closeAllConnections === 'function') shotFixture.closeAllConnections();
+    shotFixture.close(() => r());
+  });
+
+  console.log('\n[35] 页面无 JS 报错');
   consoleLog.report();
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 

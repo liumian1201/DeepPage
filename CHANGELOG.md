@@ -1,5 +1,55 @@
 # DeepPage 更新日志
 
+## v1.6.2 (待发布) — 🐛 修复：网页截图整体失效（`captureVisibleTab` 只接受 `<all_urls>`）
+
+> **用户实测**：卡片右键 →「📸 刷新截图」→ 弹出窗口 → 点「📸 截图」→ 红色提示
+> 「截图失败: `Either the '<all_urls>' or 'activeTab' permission is required.`」
+
+### 🐛 根因：v1.3.3 的权限收窄打断了整条截图链路（潜伏 **12 个版本**）
+- 截图链路是：`chrome.windows.create` 开窗 → `chrome.scripting.executeScript` 注入「📸 截图」按钮
+  → 用户点击 → `chrome.tabs.captureVisibleTab(win.id)` 取图。
+- 而 **`captureVisibleTab` 只接受 `<all_urls>` 或已授权的 `activeTab`**。P1-10（v1.3.3）把
+  `host_permissions` 从 `<all_urls>` 收窄成 `https://*/*` 之后，这一步**必然失败** ——
+  与页面协议无关，**https 页面一样失败**。
+- 为什么一直没被发现：全仓**没有任何断言真的跑过一次「成功截图」**。BUG-046（v1.5.13）补的是
+  **权限闸门**（未授权时不开窗、给出提示），它只保证「失败得清楚」，不保证「成功得起来」。
+
+### 🔬 实测证据（真实 Chromium + 真实 `captureScreenshot()` + 真实点击注入按钮）
+| 权限配置 | 结果 |
+|---|---|
+| `https://*/*`（v1.6.1 现状） | ❌ `Either the '<all_urls>' or 'activeTab' permission is required.` |
+| `https://*/*` + 声明 `activeTab` | ❌ 仍失败（programmatic 打开的窗口没有 activeTab 授权） |
+| **`<all_urls>`** | ✅ 成功：本机 https 页面 **68,766 字节** PNG、本地 fixture **12,098 字节** PNG |
+
+结论：**除 `<all_urls>` 外无可行解**（`activeTab` 这条路是实测被否掉的，不是文档推断）。
+
+### 🔧 修复
+- `manifest.json`：`host_permissions` 回退为 `["<all_urls>"]`；移除已冗余的
+  `optional_host_permissions: ["http://*/*"]` —— 实测 `<all_urls>` 已覆盖 http
+  （`permissions.contains({origins:['http://*/*']})` 返回 `true`），权限闸门因此自然短路，
+  不再弹「访问 http 网站」授权框。
+- 权限闸门代码（`ensurePermissionForUrl` / `swHasHttpHostPermission`）**保留**：属纵深防御 ——
+  万一将来再次收窄，仍会给出提示而不是静默失败。
+- `PRIVACY_POLICY.md` 权限表同步（含「为什么截图需要 `<all_urls>`」的理由）。
+- ⚠️ **这是对 P1-10（v1.3.3「权限收窄」）的部分回退**，已记入 `ROADMAP.md`。
+  代价：安装/更新时权限提示回到「读取和更改您在所有网站上的数据」。
+  （当前分发是 .crx 拖拽 / 解压加载，不涉及商店自动更新时的权限重批。）
+
+### ✅ 测试（4 项新断言 + 2 项改写 + 3 项恢复确定性）
+- `tests/e2e-p0.test.js` 新增 [34] 段，靶子用**本地静态 HTTP 页面**（离线、确定、不依赖外网）：
+  ① SW 契约层：真实消息 → 真实开窗 → **真实点击注入按钮** → 拿到 `data:image/png`；
+  ② **PNG 完整性**：Node 侧用内置 `zlib` 校验 PNG 签名 + IHDR + `IDAT` 解压长度 == `h*(1+w*channels)`
+     （比「字符串非空」强得多，能证明不是空串或截断数据）；
+  ③ 用户路径：`refreshCardCapture()`（右键「刷新截图」的入口）→ 卡片封面真的写成 `idx:` 引用并落库；
+  ④ 用户路径：出现「截图已更新」且**没有**红色「截图失败」。
+- [10] 段两条 P1-10 断言改写为新权限模型，并把「为什么必须 `<all_urls>`」写进注释 ——
+  **任何人再次收窄权限，[34] 段的真实截图断言都会直接失败**（这是本次补上的关键护栏）。
+- `tests/e2e-sw-protocol.test.js`：BUG-046 的 3 条闸门断言原先按「环境是否已授权 http」分支，
+  `<all_urls>` 之后该分支恒为「已授权」→ 断言会被**整段静默跳过**（覆盖悄悄消失）。
+  改为**在 SW 上下文里把 `permissions.contains` 桩成未授权**，断言恢复确定性、与环境无关。
+- 验证：E2E **489 项**（p0 411 + SW 23 + WebDAV 55）｜ 逻辑桩测 81 ｜ 工程反向对照 52 ｜ ESLint 0 error / 34 warning。
+- 修复前 / 后对照（`DP_EXT_DIR` 指向 v1.6.1 源码）：**6 项失败**（2 项权限模型 + 4 项截图链路）→ 新代码 0 项失败。
+
 ## v1.6.1 (2026-10-04) — 🐛 修复：自己导出的备份被误报「已忽略 1 项未知或不合法的设置（备份可能被篡改）」
 
 > 用户在真实环境从云端恢复后看到两条并排提示：绿色的「☁️ 已从云端恢复（26 张图片），即将刷新...」
