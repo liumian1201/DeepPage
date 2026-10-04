@@ -734,3 +734,11 @@
   opacity: 0;
   pointer-events: none;
 }
+
+/* BUG-079 加固：分组行整体作为拖拽源 → 禁止行内文本选中，避免拖动时启动「拖选中的文字」
+   （用户实测表现为：跟着鼠标的是 ⠿ 字形、到处显示禁止光标、drop 永不触发）。
+   输入框必须保留可选字，否则改分组名时无法选中文本。 */
+.group-mgr-item { user-select: none; -webkit-user-select: none; }
+.group-mgr-item input { user-select: text; -webkit-user-select: text; }
+.group-mgr-drag { cursor: grab; }
+.group-mgr-item.dragging .group-mgr-drag, .group-mgr-drag:active { cursor: grabbing; }

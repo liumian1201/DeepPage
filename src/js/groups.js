@@ -321,7 +321,9 @@ function renderGroupManagerList() {
   groups.forEach(function (g, i) {
     var activeCls = i === activeGroupIndex ? ' active' : '';
     var cardCount = (g.cards && g.cards.length) ? g.cards.length : 0;
-    html += '<div class="group-mgr-item' + activeCls + '" data-index="' + i + '">' +
+    // BUG-079 加固：**整行**作为拖拽源（用户直觉是拖整行），行内 input/button 上按下时由
+    // 下面的 mousedown 委托临时关掉 draggable，保证输入框仍能正常选字/点击。
+    html += '<div class="group-mgr-item' + activeCls + '" data-index="' + i + '" draggable="true">' +
       '<span class="mgr-card-count">' + cardCount + '</span>' +
       '<input type="color" class="group-mgr-color" data-index="' + i + '" value="' + escapeHtml(g.color || '#4a90d9') + '" title="分组颜色" aria-label="分组颜色">' +
       '<input type="text" class="group-mgr-icon" data-index="' + i + '" maxlength="2" placeholder="图标" value="' + escapeHtml(g.icon || '') + '" title="分组图标（emoji，最多 2 字）" aria-label="分组图标">' +
@@ -370,13 +372,22 @@ function renderGroupManagerList() {
   // **动态增删的列表必须用委托**。委托后容器不随重渲染消失，拖拽状态也不再随闭包丢失。
   if (!list.dataset.gmgrDndBound) {
     list.dataset.gmgrDndBound = '1';
+    list.addEventListener('mousedown', function (e) {
+      // 行内控件上按下时不启动行拖拽（否则输入框无法选字、按钮点击会被拖拽吞掉）
+      var row = e.target.closest && e.target.closest('.group-mgr-item');
+      if (!row) return;
+      row.draggable = !(e.target.closest('input') || e.target.closest('button'));
+    }, true);
     list.addEventListener('dragstart', function (e) {
       var handle = e.target.closest && e.target.closest('.group-mgr-drag');
-      if (!handle || !list.contains(handle)) return;
-      _gmgrDragFrom = parseInt(handle.dataset.index, 10);
+      var row0 = e.target.closest && e.target.closest('.group-mgr-item');
+      var src = (handle && list.contains(handle)) ? handle : row0;   // 手柄或整行都可作为拖拽源
+      if (!src || !list.contains(src)) return;
+      var handle2 = src;
+      _gmgrDragFrom = parseInt(handle2.dataset.index, 10);
       e.dataTransfer.effectAllowed = 'move';
       try { e.dataTransfer.setData('text/plain', String(_gmgrDragFrom)); } catch (err) { /* best-effort: 排序用的是 _gmgrDragFrom，dataTransfer 只是给外部拖放留的标记 */ }
-      var row = handle.closest('.group-mgr-item');
+      var row = handle2.closest('.group-mgr-item');
       if (row) row.classList.add('dragging');
     });
     list.addEventListener('dragend', function () {
