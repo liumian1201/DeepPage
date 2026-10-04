@@ -371,6 +371,12 @@
   border-color: var(--accent);
 }
 
+/* BUG-086：这颗按钮在 .setting-group 里被拉成满宽（446px），配上 .btn-backup 的
+   text-align:left → 文字中心比按钮中心偏左 155px，看着就是"没居中、文字靠左"。
+   同页同宽同 padding 的 .btn-reset-danger 是 text-align:center（实测偏差 0），
+   唯一变量就是 text-align。用户口径：**只修这一颗**，其余同类按钮保持原样。 */
+#btn-dash-edit { text-align: center; }
+
 /* v1.3.1: 禁用态（界面锁定时看板编辑按钮） */
 .btn-backup:disabled {
   opacity: 0.5;

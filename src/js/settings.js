@@ -125,6 +125,8 @@ async function initSettings() {
   if (typeof applyAppearance === 'function') applyAppearance(currentSettings);
   // 齿轮按钮必须启动即可用，否则面板永远打不开（其余面板事件延迟绑定）
   if (domSettings.btnOpen) domSettings.btnOpen.addEventListener('click', openSettingsPanel);
+  // BUG-083：主题按钮同理 —— 它是首屏可见控件，不能等面板初始化才绑（见 _initThemeToggle）
+  _initThemeToggle();
 }
 
 /** v1.3.3: 首次打开设置面板时才构建表单状态并绑定面板事件（幂等） */
@@ -264,6 +266,16 @@ function _syncAllRangeFills(root) {
   (root || document).querySelectorAll('input[type="range"]').forEach(_syncRangeFill);
 }
 
+/* BUG-082（#8-1 用户实测：点「↺ 重置卡片大小」后滑块与标签都回 270px，进度填充没跟随）：
+   程序化写 el.value **不会**触发 input 事件 → 上面那个捕获阶段同步器不会跑 → --pct 停在
+   用户上一次拖拽时的旧值，看起来就是「进度条和滑块对不上」。
+   凡是「代码写滑块值」（重置按钮 / 数据回填）一律走这里，不要直接 el.value =。 */
+function _setRangeValue(el, v) {
+  if (!el) return;
+  el.value = v;
+  _syncRangeFill(el);
+}
+
 /** 应用主题 */
 function applyTheme(theme) {
   if (theme === 'auto') {
@@ -272,6 +284,44 @@ function applyTheme(theme) {
   } else {
     document.documentElement.setAttribute('data-theme', theme);
   }
+}
+
+/** 右上角主题按钮的图标与 tooltip（按当前主题三态：浅色 / 深色 / 跟随系统） */
+function updateThemeIcon(theme) {
+  var sun = document.getElementById('ico-sun');
+  var moon = document.getElementById('ico-moon');
+  var auto = document.getElementById('ico-auto');
+  if (sun) sun.style.display = theme === 'light' ? '' : 'none';
+  if (moon) moon.style.display = theme === 'dark' ? '' : 'none';
+  if (auto) auto.style.display = theme === 'auto' ? '' : 'none';
+  var btn = document.getElementById('btn-theme');
+  if (btn) btn.title = '主题：' + (theme === 'light' ? '浅色' : theme === 'dark' ? '深色' : '跟随系统') + '（点击切换）';
+}
+
+/**
+ * BUG-083：右上角主题按钮必须在**首屏**就可用（用户实测：首次打开点不动，
+ * 开合一次设置面板后才行）。它不属于面板内部控件，绑定不能等 ensureSettingsPanelReady()。
+ * 幂等：重复调用只绑一次（用 dataset 标记），否则点一次会连切两个状态。
+ */
+function _initThemeToggle() {
+  var btnTheme = document.getElementById('btn-theme');
+  if (btnTheme && !btnTheme.dataset.themeBound) {
+    btnTheme.dataset.themeBound = '1';
+    btnTheme.addEventListener('click', function () {
+      var current = currentSettings ? currentSettings.theme : 'light';
+      var next;
+      if (current === 'light') { next = 'dark'; }
+      else if (current === 'dark') { next = 'auto'; }
+      else { next = 'light'; }
+      currentSettings.theme = next;
+      applyTheme(currentSettings.theme);
+      saveSettings(currentSettings);
+      if (domSettings.theme) domSettings.theme.value = currentSettings.theme;
+      updateThemeIcon(next);
+      showToast('主题：' + (next === 'light' ? '浅色' : next === 'dark' ? '深色' : '跟随系统'), 'info');
+    });
+  }
+  updateThemeIcon((currentSettings && currentSettings.theme) || 'light');
 }
 
 /** 应用卡片列数 */
@@ -546,6 +596,9 @@ function openSettingsPanel() {
   // BUG-039 同类：外观区（卡片尺寸/圆角/透明度/列数/配色）也必须每次回填，
   // 否则它会停留在首次打开时的值，之后任意保存都会把它写回数据
   if (typeof populateAppearanceForm === 'function') populateAppearanceForm(domSettings, currentSettings || {});
+  // BUG-082：回填是程序化赋值（不触发 input）→ 每次打开面板都要按当前值重算一遍
+  // 所有滑块的 --pct，否则进度填充会停留在上一次打开时的位置
+  _syncAllRangeFills(domSettings.panel);
   domSettings.panel.classList.remove('hidden');
   domSettings.overlay.classList.remove('hidden');
   // 重置面板位置
@@ -621,38 +674,11 @@ function bindSettingsEvents() {
     });
   });
 
-  // 右上角主题切换按钮
-  var btnTheme = document.getElementById('btn-theme');
-  if (btnTheme) {
-    btnTheme.addEventListener('click', function () {
-      var current = currentSettings.theme;
-      var next;
-      if (current === 'light') { next = 'dark'; }
-      else if (current === 'dark') { next = 'auto'; }
-      else { next = 'light'; }
-      currentSettings.theme = next;
-      applyTheme(currentSettings.theme);
-      saveSettings(currentSettings);
-      domSettings.theme.value = currentSettings.theme;
-      updateThemeIcon(next);
-      showToast('主题：' + (next === 'light' ? '浅色' : next === 'dark' ? '深色' : '跟随系统'), 'info');
-    });
-  }
-
-  // 初始化主题图标
-  if (currentSettings) updateThemeIcon(currentSettings.theme);
-
-  function updateThemeIcon(theme) {
-    var sun = document.getElementById('ico-sun');
-    var moon = document.getElementById('ico-moon');
-    var auto = document.getElementById('ico-auto');
-    if (sun) sun.style.display = theme === 'light' ? '' : 'none';
-    if (moon) moon.style.display = theme === 'dark' ? '' : 'none';
-    if (auto) auto.style.display = theme === 'auto' ? '' : 'none';
-    var btn = document.getElementById('btn-theme');
-    if (btn) btn.title = '主题：' + (theme === 'light' ? '浅色' : theme === 'dark' ? '深色' : '跟随系统') + '（点击切换）';
-  }
-
+  // BUG-083（#8-3 用户实测：首次打开 DeepPage 右上角主题按钮点不动，开合一次设置面板后才行）：
+  // 这段绑定原先写在 bindSettingsEvents() 里，而它只在 ensureSettingsPanelReady()（首次打开
+  // 设置面板）时执行 → 首屏这个按钮**根本没有监听器**。它不属于「面板内部事件」，必须在
+  // 启动路径（initSettings）就绑定 —— 与齿轮按钮同理。见 _initThemeToggle()。
+  _initThemeToggle();
   // 天气类型切换 → 显示/隐藏自定义 API 输入框
   domSettings.weatherType.addEventListener('change', () => {
     toggleCustomWeatherGroup(domSettings.weatherType.value);
@@ -806,9 +832,9 @@ function bindSettingsEvents() {
   var btnResetSize = document.getElementById('btn-reset-dash-size');
   if (btnResetSize) {
     btnResetSize.addEventListener('click', function () {
-      if (domSettings.dashItemH) domSettings.dashItemH.value = 0;
+      _setRangeValue(domSettings.dashItemH, 0);   // BUG-082：同步 --pct
       if (domSettings.dashItemHVal) domSettings.dashItemHVal.textContent = '自适应';
-      if (domSettings.dashGap) domSettings.dashGap.value = 16;
+      _setRangeValue(domSettings.dashGap, 16);    // BUG-082：同步 --pct
       if (domSettings.dashGapVal) domSettings.dashGapVal.textContent = '16px';
       document.documentElement.style.setProperty('--dash-gap', '16px');
       document.querySelectorAll('.dashboard-item').forEach(function (item) { item.style.height = ''; });

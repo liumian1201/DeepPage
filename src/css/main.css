@@ -211,7 +211,13 @@
   padding: 8px 10px;
   border-radius: 8px;
   background: var(--bg-tertiary);
+  /* BUG-079 加固（观感）：整行都是拖拽源，行本身就得给 grab 光标 ——
+     用户实测的原话是「按住行拖不了」，而视觉上完全看不出行主体能拖（原来只有 ⠿ 有 grab）。
+     行内控件保持各自语义：色块/图标输入框不显示 grab（那里按下会被刻意排除，要能选字/取色），
+     按钮与分组名输入框各自已有 pointer，不在此覆盖。 */
+  cursor: grab;
 }
+.group-mgr-color, .group-mgr-icon { cursor: default; }
 
 .group-mgr-item.active {
   background: var(--accent-light);
@@ -960,27 +966,28 @@
   max-width: 94vw;
 }
 
-/* 垂直排列 = 单列（每个组件占满一行） */
+/* 垂直排列 = 单列（每个组件占一行），但**宽度仍由跨列数 --dash-n 决定**。
+   BUG-085 用户口径（2026-10-04）：布局方向只决定「横排 / 竖排」，用户设置好的宽度
+   不能因为换个排列方式就变，而且两种排列下 −/＋ 都必须能调。
+   原先这里写的是 `width: 100%`：特异性 (0,2,1) 压过下面 `.dashboard-item` 的
+   `flex: 0 1 calc(… var(--dash-n) …)`，导致垂直排列下点 −/＋ **界面零反应**
+   （而数据其实已经改了、还落了盘 —— 静默不一致，用户报的就是"点不动"）。 */
 .dashboard-section[data-layout="column"] {
   flex-direction: column;
-  align-items: stretch;
+  align-items: center;
 }
 .dashboard-section[data-layout="column"] .dashboard-item {
   flex: 0 0 auto;
-  width: 100%;
+  width: calc((100% - 11 * var(--dash-gap, 16px)) / 12 * var(--dash-n) + (var(--dash-n) - 1) * var(--dash-gap, 16px) - 0.02px);
 }
 
-/* 窄屏：直接单列堆叠。
-   注意不能改成「列数减半」——组件的跨列数合计 12，容器只有 6 列时会被迫折行成 2+2，
-   既不是横向也不是规整的纵向（v1.5.1 修正）。 */
+/* 窄屏：仍然强制单列堆叠，但同样**不覆盖宽度**（否则窄窗口下 −/＋ 又会变成"点了没反应"）。
+   v1.5.1 注释里担心的「跨列合计 12 的组件在 6 列容器里被迫折行成 2+2」在单列堆叠下不存在：
+   这里方向被强制成 column，组件之间不再争抢同一行。 */
 @media (max-width: 560px) {
   .dashboard-section {
     flex-direction: column;
-    align-items: stretch;
-  }
-  .dashboard-section .dashboard-item {
-    flex: 0 0 auto;
-    width: 100%;
+    align-items: center;
   }
 }
 

@@ -275,6 +275,35 @@ function send(method, params, sessionId) {
   check('启动即已应用外观尺寸变量（不依赖面板）', await evalJs('getComputedStyle(document.documentElement).getPropertyValue("--card-width").trim().length > 0'));
   const gridCols = await evalJs('document.getElementById("speeddial-grid").style.gridTemplateColumns');
   check('Grid 列宽来自 CSS 变量（未依赖滑块默认值）', gridCols.includes('minmax'), gridCols);
+  // BUG-083（#8-3 用户实测：首次打开 DeepPage 右键菜单旁的「切换主题」按钮点不动，
+  //   点一下设置按钮、再把设置面板关掉之后就能点了）——真因是主题按钮的监听器被写在
+  //   bindSettingsEvents() 里，而它只在首次打开设置面板时执行 → 首屏这个按钮没有监听器。
+  //   这一条必须在「面板尚未初始化」时跑，所以放在本段打开面板之前（顺序不能挪）。
+  const themeFirst = JSON.parse(await evalJs(`(async () => {
+    var btn = document.getElementById('btn-theme');
+    var r = btn.getBoundingClientRect();
+    var cx = Math.round(r.left + r.width / 2), cy = Math.round(r.top + r.height / 2);
+    var top = document.elementFromPoint(cx, cy);
+    var before = document.documentElement.getAttribute('data-theme');
+    var beforeSetting = currentSettings.theme;
+    btn.click();
+    await new Promise(function (x) { setTimeout(x, 200); });
+    var out = {
+      panelReady: _settingsPanelReady,
+      hitIsButton: !!(top && (top === btn || btn.contains(top))),
+      beforeTheme: before, afterTheme: document.documentElement.getAttribute('data-theme'),
+      beforeSetting: beforeSetting, afterSetting: currentSettings.theme
+    };
+    currentSettings.theme = 'light';
+    applyTheme('light');
+    await saveSettings(currentSettings);
+    return JSON.stringify(out);
+  })()`));
+  check('BUG-083 面板未初始化时主题按钮已可用（点击真的切主题；修复前此断言必失败）',
+    themeFirst.panelReady === false && themeFirst.beforeTheme === 'light'
+      && themeFirst.afterTheme === 'dark' && themeFirst.afterSetting === 'dark', themeFirst);
+  check('BUG-083 主题按钮未被其它元素遮挡（elementFromPoint 命中按钮自身）',
+    themeFirst.hitIsButton === true, themeFirst);
   check('齿轮按钮可打开面板（懒初始化不阻断入口）', await evalJs('(()=>{document.getElementById("btn-settings").click();return !document.getElementById("settings-panel").classList.contains("hidden");})()'));
   check('面板打开后已完成初始化', (await evalJs('_settingsPanelReady')) === true);
   check('表单已回填列数', (await evalJs('document.getElementById("setting-columns-slider").value')) === (await evalJs('String(currentSettings.columns || 5)')));
@@ -665,18 +694,92 @@ function send(method, params, sessionId) {
   await evalJs('openSettingsPanel()');
   await sleep(400);
   check('布局方向默认有选中值', ['row', 'column'].includes(await evalJs('document.getElementById("setting-dashboard-layout").value')), await evalJs('document.getElementById("setting-dashboard-layout").value'));
+  // BUG-085 用户口径（2026-10-04）：布局方向只决定「横排 / 竖排」——**设置好的宽度不能因为
+  // 换个排列方式就变，而且两种排列下 −/＋ 都必须能调**。
+  // 注意下方那条断言的历史：v1.5.2 写的是「垂直排列：组件上下堆叠且等宽」，它把旧语义
+  // （column 下 `width:100%` 压掉跨列数 --dash-n）固化成了"正确行为" ——
+  // 语义一改，旧断言就会把本次修复误判成回归（经验 5：语义变更必须同步改断言）。
+  const _dashBoxes = async () => JSON.parse(await evalJs(`(() => {
+    var items = [].slice.call(document.querySelectorAll('#dashboard-grid .dashboard-item'));
+    return JSON.stringify(items.map(function (e) {
+      var r = e.getBoundingClientRect();
+      return { widget: e.dataset.widget, span: e.dataset.span, w: Math.round(r.width), left: Math.round(r.left), top: Math.round(r.top) };
+    }));
+  })()`));
+  const dashRow = await _dashBoxes();   // 先在「水平排列」下量一遍
   await evalJs(`(() => { const sel = document.getElementById('setting-dashboard-layout'); sel.value = 'column'; sel.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; })()`);
   await sleep(800);
   check('切到垂直排列后 data-layout=column', (await evalJs('document.getElementById("dashboard-grid").getAttribute("data-layout")')) === 'column');
-  const colBox = JSON.parse(await evalJs(`JSON.stringify((() => {
-    const items = [...document.querySelectorAll('#dashboard-grid .dashboard-item')];
-    const rs = items.map(e => e.getBoundingClientRect());
-    return { tops: new Set(rs.map(r => Math.round(r.top))).size, lefts: new Set(rs.map(r => Math.round(r.left))).size, widths: new Set(rs.map(r => Math.round(r.width))).size };
-  })())`));
-  check('垂直排列：组件上下堆叠且等宽', colBox.tops === 4 && colBox.lefts === 1 && colBox.widths === 1, colBox);
+  const dashCol = await _dashBoxes();
+  check('垂直排列：组件上下堆叠（每个组件一行，不再共享同一行）',
+    dashCol.length === dashRow.length && new Set(dashCol.map(x => x.top)).size === dashCol.length, dashCol);
+  check('BUG-085 垂直排列下宽度与水平排列逐项一致（宽度设置不因排列方式改变；修复前 column 一律 width:100%）',
+    dashCol.length === dashRow.length
+      && dashCol.every((c, i) => c.widget === dashRow[i].widget && Math.abs(c.w - dashRow[i].w) <= 1),
+    { row: dashRow.map(x => x.widget + ':' + x.span + '=' + x.w), col: dashCol.map(x => x.widget + ':' + x.span + '=' + x.w) });
+  // 垂直排列下真实点组件上的 ＋/− → 宽度必须真的变
+  //（用户报的"点不动"真身：点击改了数据甚至已落盘，但 width:100% 把 --dash-n 压掉 → 界面零反应）
+  const spanEff = JSON.parse(await evalJs(`(async () => {
+    document.getElementById('btn-dash-edit').click();          // 真实入口（会顺手关掉设置面板）
+    await new Promise(function (r) { setTimeout(r, 500); });
+    var item = document.querySelector('#dashboard-grid .dashboard-item[data-widget="clock"]') || document.querySelector('#dashboard-grid .dashboard-item');
+    var grow = item.querySelector('.dash-span-grow'), shrink = item.querySelector('.dash-span-shrink');
+    function box() { var r = item.getBoundingClientRect(); return { span: item.dataset.span, w: Math.round(r.width) }; }
+    var before = box();
+    var dir = 'grow';
+    grow.click();
+    await new Promise(function (r) { setTimeout(r, 450); });
+    if (item.dataset.span === before.span) {                    // 已在 12 列上限 → 换 − 方向验证
+      dir = 'shrink';
+      shrink.click();
+      await new Promise(function (r) { setTimeout(r, 450); });
+    }
+    var out = {
+      editing: document.body.classList.contains('dash-editing'),
+      hasGrow: !!grow, hasShrink: !!shrink,
+      visible: grow ? getComputedStyle(grow).display !== 'none' : false,
+      dir: dir, before: before, after: box()
+    };
+    if (out.after.span !== out.before.span) {                   // 还原 span
+      (dir === 'grow' ? shrink : grow).click();
+      await new Promise(function (r) { setTimeout(r, 450); });
+      out.restored = box();
+    }
+    document.getElementById('btn-dash-edit').click();           // 退出编辑态（走官方入口，会 flush 落盘）
+    await new Promise(function (r) { setTimeout(r, 300); });
+    out.editingAfterExit = document.body.classList.contains('dash-editing');
+    return JSON.stringify(out);
+  })()`));
+  check('BUG-085 垂直排列下 −/＋ 宽度按钮存在且可见（编辑态）',
+    spanEff.editing === true && spanEff.hasGrow === true && spanEff.hasShrink === true && spanEff.visible === true, spanEff);
+  check('BUG-085 垂直排列下点 ＋/− 真的改变宽度（修复前 span 变了、宽度 Δ0，静默不一致）',
+    (spanEff.after.span - spanEff.before.span) === (spanEff.dir === 'grow' ? 1 : -1)
+      && (spanEff.dir === 'grow' ? spanEff.after.w > spanEff.before.w : spanEff.after.w < spanEff.before.w),
+    spanEff);
+  check('BUG-085 试完还原：span 回到原值且已退出编辑态',
+    (!spanEff.restored || spanEff.restored.span === spanEff.before.span) && spanEff.editingAfterExit === false, spanEff);
   await evalJs(`(() => { const sel = document.getElementById('setting-dashboard-layout'); sel.value = 'row'; sel.dispatchEvent(new Event('change', { bubbles: true })); return 'ok'; })()`);
   await sleep(800);
   check('切回水平排列生效', (await evalJs('document.getElementById("dashboard-grid").getAttribute("data-layout")')) === 'row');
+  // BUG-086 现象 A：「看板的编辑组件顺序按钮没居中、文字靠左」——
+  // 真身是设置面板里那颗满宽 .btn-backup（text-align:left）→ 文字中心比按钮中心偏左 155px。
+  // 断言用 Range 量文字块中心（比 scrollWidth 精确），并要求按钮真实可见（宽度 > 100px），
+  // 否则隐藏面板时量到 0×0 会"假通过"。
+  await evalJs(`(() => { document.querySelector('.tab-btn[data-tab="dashboard"]').click(); openSettingsPanel(); return 'ok'; })()`);
+  await sleep(400);
+  const dashBtnAlign = JSON.parse(await evalJs(`(() => {
+    var b = document.getElementById('btn-dash-edit');
+    var br = b.getBoundingClientRect();
+    var range = document.createRange(); range.selectNodeContents(b);
+    var tr = range.getBoundingClientRect();
+    return JSON.stringify({
+      textAlign: getComputedStyle(b).textAlign,
+      btnW: Math.round(br.width),
+      textCenterDx: +(((tr.left + tr.right) / 2) - ((br.left + br.right) / 2)).toFixed(1)
+    });
+  })()`));
+  check('BUG-086 「✋ 编辑组件顺序」满宽按钮文字居中（修复前 text-align:left → 文字中心偏左 155px）',
+    dashBtnAlign.btnW > 100 && dashBtnAlign.textAlign === 'center' && Math.abs(dashBtnAlign.textCenterDx) <= 2, dashBtnAlign);
   await evalJs('closeSettingsPanel()');
   await sleep(300);
 
@@ -3320,7 +3423,284 @@ function send(method, params, sessionId) {
     return 'ok';
   })()`);
 
-  console.log('\n[36] 页面无 JS 报错');
+  console.log('\n[36] v1.6.4 收尾：BUG-079 真因/加固 + BUG-081 多选壁纸 + #8 实测 BUG-082/083/084');
+
+  // —— (1) BUG-079 真因：用户实测「光标进到行间空隙/列表留白就变 🚫、松手无效」——
+  //    根因是原先只在「正落在某一行上」才 preventDefault → 空隙处浏览器判定不接受放置，
+  //    drop 永不触发。dd699bc 改为整块列表接受放置 + 空隙按落点找最近行。
+  //    落点用两行中线（elementFromPoint 命中的是列表容器，不是行）。
+  const gmgr = JSON.parse(await evalJs(`(async () => {
+    if (typeof ensureSettingsPanelReady === 'function') await ensureSettingsPanelReady();
+    while (groups.length < 3) groups.push({ id: 'gdrag' + groups.length, name: '拖拽测试组' + groups.length, cards: [], sortMode: 'manual' });
+    await saveGroups(groups); renderGroupDots(); openGroupManager();
+    await new Promise(function (r) { setTimeout(r, 400); });
+    var rows = [].slice.call(document.querySelectorAll('.group-mgr-item'));
+    function center(el) { var r = el.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; }
+    // 行内「非输入区」起拖点：从左往右扫，取 elementFromPoint 命中本行且不在 input/button 上的点
+    function freePoint(row) {
+      var rr = row.getBoundingClientRect();
+      for (var dx = 3; dx < rr.width - 3; dx += 3) {
+        var x = Math.round(rr.left + dx), y = Math.round(rr.top + rr.height / 2);
+        var el = document.elementFromPoint(x, y);
+        if (!el || !row.contains(el) || el.closest('input') || el.closest('button')) continue;
+        return { x: x, y: y, hit: String(el.className || el.tagName) };
+      }
+      return null;
+    }
+    var r0 = rows[0].getBoundingClientRect(), r1 = rows[1].getBoundingClientRect();
+    var gap = { x: Math.round(r0.left + r0.width / 2), y: Math.round((r0.bottom + r1.top) / 2) };
+    var gapEl = document.elementFromPoint(gap.x, gap.y);
+    var rowTags = [].slice.call(document.querySelectorAll('.group-mgr-name')).map(function (i) { return i.value; });
+    return JSON.stringify({
+      names: groups.map(function (g) { return g.name; }),
+      rowTags: rowTags,
+      handle: center(rows[0].querySelector('.group-mgr-drag')),
+      free: freePoint(rows[0]),
+      gap: gap,
+      gapHitsRow: !!(gapEl && gapEl.closest && gapEl.closest('.group-mgr-item')),
+      gapHit: gapEl ? String(gapEl.id || gapEl.className || gapEl.tagName) : null,
+      last: center(rows[rows.length - 1]),
+      nameInput: (function () { var inp = rows[0].querySelector('.group-mgr-name'); var r = inp.getBoundingClientRect(); return { x: Math.round(r.left + 3), y: Math.round(r.top + r.height / 2), w: Math.round(r.width) }; })()
+    });
+  })()`));
+  check('BUG-079 前提：落点确实在两行之间的空隙上（elementFromPoint 不是行）',
+    gmgr.gapHitsRow === false && gmgr.names.length >= 3, { gap: gmgr.gap, gapHit: gmgr.gapHit });
+
+  // 真实 CDP 拖拽（不是合成 DragEvent）：可指定起拖点与落点，并观测页面是否接受放置
+  const realDrag2 = async (fromKey, toKey) => {
+    const from = gmgr[fromKey], to = gmgr[toKey];
+    // 每次拖拽前重新取一次顺序快照：上一次拖拽本身就会改变顺序，
+    // 拿 initial 快照比对会得出「拖错了一行」的假失败（本文件第一版就踩了这个）
+    const namesBefore = JSON.parse(await evalJs('JSON.stringify(groups.map(function (g) { return g.name; }))'));
+    await evalJs(`(function () {
+      window.__dgo = { over: 0, prevented: 0, drop: 0, dropPrevented: 0 };
+      document.addEventListener('dragover', function (e) { window.__dgo.over++; if (e.defaultPrevented) window.__dgo.prevented++; });
+      document.addEventListener('drop', function (e) { window.__dgo.drop++; if (e.defaultPrevented) window.__dgo.dropPrevented++; });
+      return 'ok';
+    })()`);
+    interceptedDrag = null;
+    await send('Input.setInterceptDrags', { enabled: true }, sid);
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: from.x, y: from.y, button: 'left', clickCount: 1, buttons: 1 }, sid);
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: from.x + 12, y: from.y + 12, button: 'left', buttons: 1 }, sid);
+    for (let i = 0; i < 20 && !interceptedDrag; i++) await sleep(100);
+    const started = !!interceptedDrag;
+    if (started) {
+      await send('Input.dispatchDragEvent', { type: 'dragEnter', x: to.x, y: to.y, data: interceptedDrag }, sid);
+      await send('Input.dispatchDragEvent', { type: 'dragOver', x: to.x, y: to.y, data: interceptedDrag }, sid);
+      await sleep(150);
+      await send('Input.dispatchDragEvent', { type: 'drop', x: to.x, y: to.y, data: interceptedDrag }, sid);
+      await sleep(600);
+    }
+    await send('Input.setInterceptDrags', { enabled: false }, sid).catch(() => {});
+    const dgo = JSON.parse(await evalJs('JSON.stringify(window.__dgo)'));
+    const after = JSON.parse(await evalJs('JSON.stringify(groups.map(function (g) { return g.name; }))'));
+    const stored = JSON.parse(await evalJs(`new Promise(function (r) { chrome.storage.sync.get('groups', function (x) { r(JSON.stringify((x.groups || []).map(function (g) { return g.name; }))); }); })`));
+    return { started, dgo, after, stored, namesBefore, from: fromKey, to: toKey, names: gmgr.names };
+  };
+
+  const gapDrag = await realDrag2('handle', 'gap');
+  check('BUG-079 真因：落在两行之间的空隙也能重排（修复前此处不 preventDefault → drop 不触发、顺序静默不变）',
+    gapDrag.started && gapDrag.dgo.prevented > 0 && gapDrag.dgo.dropPrevented > 0
+      && gapDrag.after[1] === gapDrag.namesBefore[0] && gapDrag.stored.join() === gapDrag.after.join(), gapDrag);
+
+  // —— (2) 加固：整行（非输入区）作为拖拽源 ——
+  const rowDrag = await realDrag2('free', 'last');
+  check('BUG-079 加固：从整行非输入区起拖也能重排并落盘（修复前只有 ⠿ 手柄是拖拽源）',
+    !!gmgr.free && rowDrag.started && rowDrag.after[rowDrag.after.length - 1] === rowDrag.namesBefore[0]
+      && rowDrag.stored.join() === rowDrag.after.join(), { free: gmgr.free, rowDrag });
+
+  // —— (3) 加固：在输入框上按下不启动行拖拽，且输入框仍可正常选字 ——
+  interceptedDrag = null;
+  await send('Input.setInterceptDrags', { enabled: true }, sid);
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: gmgr.nameInput.x, y: gmgr.nameInput.y, button: 'left', clickCount: 1, buttons: 1 }, sid);
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: gmgr.nameInput.x + Math.min(40, gmgr.nameInput.w - 6), y: gmgr.nameInput.y, button: 'left', buttons: 1 }, sid);
+  await sleep(800);
+  const inputDragState = JSON.parse(await evalJs(`JSON.stringify({
+    rowDraggable: document.querySelector('.group-mgr-item').getAttribute('draggable'),
+    focused: document.activeElement === document.querySelector('.group-mgr-item .group-mgr-name'),
+    selLen: (function () { var i = document.querySelector('.group-mgr-item .group-mgr-name'); try { return Math.abs((i.selectionEnd || 0) - (i.selectionStart || 0)); } catch (e) { return -1; } })(),
+    value: document.querySelector('.group-mgr-item .group-mgr-name').value
+  })`));
+  inputDragState.intercepted = interceptedDrag !== null;
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: gmgr.nameInput.x, y: gmgr.nameInput.y, button: 'left', clickCount: 1, buttons: 0 }, sid);
+  await send('Input.setInterceptDrags', { enabled: false }, sid).catch(() => {});
+  check('BUG-079 加固：在输入框上按下不启动行拖拽（临时关掉行的 draggable）',
+    inputDragState.intercepted === false && inputDragState.rowDraggable === 'false', inputDragState);
+  check('BUG-079 加固：输入框仍保持可选字（mousedown 被拖拽吞掉的话这里选不中）',
+    inputDragState.focused === true && inputDragState.selLen > 0, inputDragState);
+
+  // 清理本次造的分组
+  await evalJs(`(async () => {
+    groups = groups.filter(function (g) { return g.id.indexOf('gdrag') !== 0; });
+    activeGroupIndex = Math.min(activeGroupIndex, groups.length - 1);
+    speeddials = (groups[activeGroupIndex] && groups[activeGroupIndex].cards) || [];
+    await saveGroups(groups); renderSpeeddials(); renderGroupDots();
+    if (typeof closeGroupManager === 'function') closeGroupManager();
+    return 'ok';
+  })()`);
+
+  // —— (4) BUG-081：多选本地壁纸只生效第一张（FileList 被 this.value='' 清空，async 循环提前结束）——
+  const multiWall = JSON.parse(await evalJs(`(async () => {
+    await ensureSettingsPanelReady();
+    openSettingsPanel();
+    await new Promise(function (r) { setTimeout(r, 200); });
+    var before = (getLocalWallpapers() || []).length;
+    var mk = function (n) { return new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0])], n, { type: 'image/png' }); };
+    var dt = new DataTransfer();
+    dt.items.add(mk('m1.png')); dt.items.add(mk('m2.png')); dt.items.add(mk('m3.png'));
+    var inp = document.getElementById('wallpaper-file-input-multi');
+    inp.files = dt.files;
+    inp.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise(function (r) { setTimeout(r, 1800); });
+    var list = getLocalWallpapers() || [];
+    var mine = list.filter(function (x) { return ['m1.png', 'm2.png', 'm3.png'].indexOf(x.name) !== -1; });
+    var out = { before: before, after: list.length, added: list.length - before, names: mine.map(function (x) { return x.name; }), keys: mine.map(function (x) { return x.key; }) };
+    // 清理：走真实删除路径（同时回收 IndexedDB 里的图片）
+    for (var i = 0; i < out.keys.length; i++) { await deleteLocalWallpaper(out.keys[i]); }
+    await new Promise(function (r) { setTimeout(r, 300); });
+    out.afterCleanup = (getLocalWallpapers() || []).length;
+    return JSON.stringify(out);
+  })()`));
+  check('BUG-081 一次选 3 张本地壁纸全部入库（修复前只进第一张）',
+    multiWall.added === 3 && multiWall.names.length === 3
+      && ['m1.png', 'm2.png', 'm3.png'].every(function (n) { return multiWall.names.indexOf(n) !== -1; })
+      && multiWall.afterCleanup === multiWall.before, multiWall);
+
+  // —— (5) BUG-082（#8-1 用户实测 图1）：点「↺ 重置」后进度填充必须跟随滑块 ——
+  //    程序化赋值不触发 input → BUG-080 的捕获同步器不跑 → --pct 停在用户拖拽时的旧值。
+  //    不变量：面板内**每个**滑块的 --pct 必须等于由 (value,min,max) 算出的百分比。
+  const pctFix = JSON.parse(await evalJs(`(async () => {
+    await ensureSettingsPanelReady();
+    openSettingsPanel();
+    await new Promise(function (r) { setTimeout(r, 300); });
+    var panel = document.getElementById('settings-panel');
+    function bad() {
+      var arr = [];
+      panel.querySelectorAll('input[type="range"]').forEach(function (el) {
+        var mn = Number(el.min || 0), mx = Number(el.max === '' || el.max === undefined ? 100 : el.max);
+        var v = Number(el.value);
+        var exp = (mx > mn) ? Math.max(0, Math.min(100, ((v - mn) / (mx - mn)) * 100)) : 0;
+        var got = parseFloat(el.style.getPropertyValue('--pct'));
+        if (!(Math.abs(got - exp) < 0.01)) arr.push({ id: el.id, v: v, exp: +exp.toFixed(2), got: isNaN(got) ? 'missing' : got });
+      });
+      return arr;
+    }
+    function poke(id, v) { var el = document.getElementById(id); if (el) { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); } }
+    var out = { onOpen: bad() };
+    poke('setting-card-height', 80);
+    await new Promise(function (r) { setTimeout(r, 150); });
+    var hs = document.getElementById('setting-card-height');
+    out.dragged = { pct: hs.style.getPropertyValue('--pct'), label: document.getElementById('card-height-val').textContent };
+    document.getElementById('btn-reset-card-size').click();
+    await new Promise(function (r) { setTimeout(r, 250); });
+    out.afterResetCard = { value: hs.value, pct: hs.style.getPropertyValue('--pct'), label: document.getElementById('card-height-val').textContent, bad: bad() };
+    poke('setting-dash-gap', 40);
+    await new Promise(function (r) { setTimeout(r, 150); });
+    document.getElementById('btn-reset-dash-size').click();
+    await new Promise(function (r) { setTimeout(r, 200); });
+    out.afterResetDash = bad();
+    poke('setting-search-top', 120); poke('setting-search-gap', 200);
+    await new Promise(function (r) { setTimeout(r, 150); });
+    document.getElementById('btn-reset-search-pos').click();
+    await new Promise(function (r) { setTimeout(r, 200); });
+    out.afterResetSearch = bad();
+    poke('setting-card-font-size', 20);
+    await new Promise(function (r) { setTimeout(r, 150); });
+    document.getElementById('btn-reset-topbar').click();
+    await new Promise(function (r) { setTimeout(r, 200); });
+    out.afterResetTopbar = bad();
+    closeSettingsPanel();
+    return JSON.stringify(out);
+  })()`));
+  check('BUG-082 打开面板时所有滑块进度填充正确（BUG-080 的原行为未回退）',
+    pctFix.onOpen.length === 0, pctFix.onOpen);
+  check('BUG-082 图1 复现姿势：点「↺ 重置卡片大小」后进度填充跟随滑块（修复前停在拖拽时的 0%）',
+    pctFix.afterResetCard.value === '270' && pctFix.afterResetCard.label === '270px'
+      && pctFix.afterResetCard.bad.length === 0, pctFix.afterResetCard);
+  check('BUG-082 另外三个「↺ 重置」按钮同样不留 stale 进度（同一缺陷的其余 8 个滑块）',
+    pctFix.afterResetDash.length === 0 && pctFix.afterResetSearch.length === 0
+      && pctFix.afterResetTopbar.length === 0,
+    { dash: pctFix.afterResetDash, search: pctFix.afterResetSearch, topbar: pctFix.afterResetTopbar });
+
+  // —— (6) BUG-084（#8-6 用户实测）：沉浸模式下滚轮切组 → 退出后卡片变 1 列 ——
+  //    根因（BUG-084）：沉浸模式里 .speeddial-section 是 display:none → 网格父容器 clientWidth = 0，
+  //    updateGridColumns() 据此算出 1 列并把 grid.style.width 写成「一张卡宽」(270px)；
+  //    退出沉浸模式没有任何路径重算 → 每行只剩 1 张（刷新才恢复）。
+  const immFix = JSON.parse(await evalJs(`(async () => {
+    var grid = document.getElementById('speeddial-grid');
+    function snap() { return { inlineWidth: grid.style.width, clientWidth: grid.clientWidth, tpl: getComputedStyle(grid).gridTemplateColumns }; }
+    var out = { initial: snap() };
+    // 滚轮切组需要 ≥2 个分组，临时补一个（结束时删掉）
+    out.addedGroup = false;
+    if (groups.length < 2) { groups.push({ id: 'gimm' + groups.length, name: '沉浸测试组' + groups.length, cards: [], sortMode: 'manual' }); await saveGroups(groups); out.addedGroup = true; }
+    var click = function () { document.body.dispatchEvent(new MouseEvent('click', { bubbles: true })); };
+    click(); await new Promise(function (r) { setTimeout(r, 60); }); click();
+    await new Promise(function (r) { setTimeout(r, 300); });
+    out.immersive = document.body.classList.contains('immersive');
+    out.parentWidthImmersive = grid.parentElement ? grid.parentElement.clientWidth : 'n/a';
+    out.duringImmersive = snap();
+    return JSON.stringify(out);
+  })()`));
+  check('BUG-084 沉浸模式确实已进入、且此时网格容器宽度为 0（缺陷前提，没有这个前提就测不到）',
+    immFix.immersive === true && immFix.parentWidthImmersive === 0, immFix);
+  // 真实滚轮：到底后「两次同方向」才切一组（main.js 的 _scrollEdge 语义），所以每组滚两下
+  const idxBeforeWheel = await evalJs('activeGroupIndex');
+  for (let g = 0; g < 2; g++) {
+    for (let k = 0; k < 2; k++) {
+      await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 700, y: 450, deltaX: 0, deltaY: 120, button: 'none' }, sid);
+      await sleep(220);
+    }
+    await sleep(350);
+  }
+  const immAfter = JSON.parse(await evalJs(`(() => {
+    var grid = document.getElementById('speeddial-grid');
+    return JSON.stringify({
+      activeGroupIndex: activeGroupIndex,
+      duringInlineWidth: grid.style.width,
+      duringClientWidth: grid.clientWidth
+    });
+  })()`));
+  immAfter.idxBeforeWheel = idxBeforeWheel;
+  immAfter.wheelSwitched = immAfter.activeGroupIndex !== idxBeforeWheel;
+  // 滚轮没切成功时用同一个函数补触发（switchGroup 就是滚轮 handler 调用的那个函数）——
+  // 本条的断言对象是「切组之后网格宽度会不会被写死」，不是滚轮 handler 本身
+  if (!immAfter.wheelSwitched) {
+    await evalJs('(async () => { await switchGroup((activeGroupIndex + 1) % groups.length); return "ok"; })()');
+    await sleep(400);
+    immAfter.usedSwitchGroupFallback = true;
+  }
+  check('BUG-084 缺陷触发条件成立：沉浸模式下发生了分组切换（滚轮切不动时不静默降级为「没测到」）',
+    immAfter.wheelSwitched === true || immAfter.usedSwitchGroupFallback === true, immAfter);
+  await evalJs('(function () { document.body.dispatchEvent(new MouseEvent("click", { bubbles: true })); return "ok"; })()');
+  await sleep(60);
+  await evalJs('(function () { document.body.dispatchEvent(new MouseEvent("click", { bubbles: true })); return "ok"; })()');
+  await sleep(500);
+  const immExit = JSON.parse(await evalJs(`(async () => {
+    var grid = document.getElementById('speeddial-grid');
+    var oneCard = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--card-width'), 10) || 270;
+    var out = {
+      exited: !document.body.classList.contains('immersive'),
+      inlineWidth: grid.style.width, clientWidth: grid.clientWidth,
+      tpl: getComputedStyle(grid).gridTemplateColumns,
+      oneCardWidth: oneCard,
+      parentWidth: grid.parentElement ? grid.parentElement.clientWidth : -1
+    };
+    // 清理：删掉临时补的分组并重渲染
+    var had = groups.some(function (g) { return g.id.indexOf('gimm') === 0; });
+    if (had) {
+      groups = groups.filter(function (g) { return g.id.indexOf('gimm') !== 0; });
+      activeGroupIndex = Math.min(activeGroupIndex, groups.length - 1);
+      speeddials = (groups[activeGroupIndex] && groups[activeGroupIndex].cards) || [];
+      await saveGroups(groups); renderSpeeddials(); renderGroupDots();
+    }
+    out.cleanedUp = had;
+    return JSON.stringify(out);
+  })()`));
+  check('BUG-084 退出沉浸模式后网格宽度未被写死成「一张卡宽」（修复前 inline=270px → 每行只剩 1 张，刷新才恢复）',
+    immExit.exited === true && immExit.inlineWidth !== (immExit.oneCardWidth + 'px')
+      && immExit.clientWidth > immExit.oneCardWidth * 1.5, immExit);
+
+  console.log('\n[37] 页面无 JS 报错');
   consoleLog.report();
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 

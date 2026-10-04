@@ -175,7 +175,12 @@ async function init() {
     var now = Date.now();
     if (now - _immClick < 350) {
       document.body.classList.toggle('immersive');
-      showToast(document.body.classList.contains('immersive') ? '已进入沉浸模式，再次双击恢复界面' : '界面已恢复', 'info');
+      var immersed = document.body.classList.contains('immersive');
+      // BUG-084（#8-6）：沉浸模式下 .speeddial-section 是 display:none，期间任何
+      // updateGridColumns() 都会在零宽容器上测量（appearance.js 已加零宽守卫，不再写坏宽度）。
+      // 退出时再显式重算一次，保证「进出沉浸模式」这一对操作之后网格宽度一定回到真实值。
+      if (!immersed && typeof updateGridColumns === 'function') updateGridColumns();
+      showToast(immersed ? '已进入沉浸模式，再次双击恢复界面' : '界面已恢复', 'info');
       _immClick = 0;
     } else {
       _immClick = now;

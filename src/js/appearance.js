@@ -39,7 +39,17 @@ function updateGridColumns(cols) {
     grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(' + w + 'px, 1fr))';
 
     // 根据父容器宽度算实际能放几列（上限滑块列数）
-    var parentWidth = grid.parentElement ? grid.parentElement.clientWidth : window.innerWidth;
+    // BUG-084（#8-6 沉浸模式变 1 列）：沉浸模式把 .speeddial-section 设为 display:none，
+    // 网格父容器 clientWidth = 0 → 下面会算出 actualCols = 1，并把 grid.style.width 写成
+    // 「一张卡宽」(270px)；而这个内联宽度在退出沉浸模式后没有任何路径重算 → 卡片就永久
+    // 变成每行 1 个（刷新恢复，因为刷新会重跑 applyAppearance 拿到真实宽度）。
+    // 修法：**隐藏/零宽容器下不做测量、也不写样式** —— 与 BUG-048「别拿不可信测量结果
+    // 覆盖状态」同一原则。退出沉浸模式时由 main.js 显式重算一次兜底。
+    // 网格不在 DOM 里时同样「测不到就不写」（原来回退 window.innerWidth，会把视口宽度当成
+    // 容器宽度写进内联样式 —— 同族错误）。
+    if (!grid.parentElement) return;
+    var parentWidth = grid.parentElement.clientWidth;
+    if (!(parentWidth > 0)) return;
     var actualCols = Math.max(1, Math.min(cols, Math.floor((parentWidth + gap) / (w + gap))));
     var gridWidth = actualCols * w + (actualCols - 1) * gap;
 
@@ -119,13 +129,15 @@ function bindAppearancePreview(dom, onChanged) {
 
   var resetBtn = document.getElementById('btn-reset-card-size');
   if (resetBtn) resetBtn.addEventListener('click', function () {
-    if (ws) ws.value = 270;
+    // BUG-082：程序化赋值不触发 input 事件 → 必须走 _setRangeValue 同步 --pct，
+    // 否则滑块拇指与标签都回到 270px 了，进度填充还停在用户拖拽时的旧位置
+    _setRangeValue(ws, 270);
     if (wsv) wsv.textContent = '270px';
-    if (hs) hs.value = 270;
+    _setRangeValue(hs, 270);
     if (hsv) hsv.textContent = '270px';
-    if (rs) rs.value = 14;
+    _setRangeValue(rs, 14);
     if (rsv) rsv.textContent = '14px';
-    if (os) os.value = 100;
+    _setRangeValue(os, 100);
     if (osv) osv.textContent = '100%';
     document.documentElement.style.setProperty('--card-width', '270px');
     document.documentElement.style.setProperty('--card-height', '270px');
@@ -148,7 +160,7 @@ function bindAppearancePreview(dom, onChanged) {
     // → 赋主题默认值，collectAppearanceForm 的 val() 会把它映射回 ''（= 未自定义）
     if (bc) bc.value = '#f0f2f5';
     if (tc) tc.value = '#202124';
-    if (fs) fs.value = 13;
+    if (fs) _setRangeValue(fs, 13);
     if (fsv) fsv.textContent = '13px';
     document.documentElement.style.removeProperty('--topbar-bg');
     document.documentElement.style.removeProperty('--bg-primary');
@@ -165,8 +177,8 @@ function bindAppearancePreview(dom, onChanged) {
     var sg = document.getElementById('setting-search-gap');
     var stv = document.getElementById('search-top-val');
     var sgv = document.getElementById('search-gap-val');
-    if (st) st.value = 60;
-    if (sg) sg.value = 48;
+    if (st) _setRangeValue(st, 60);
+    if (sg) _setRangeValue(sg, 48);
     if (stv) stv.textContent = '60px';
     if (sgv) sgv.textContent = '48px';
     document.documentElement.style.setProperty('--search-top', '60px');
