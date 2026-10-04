@@ -283,24 +283,76 @@ function send(method, params, sessionId) {
   // ===== v1.5.16 DEBT-02：SW 侧降级路径（background.js 的 7 处空 catch 分级治理）=====
   // 这些代码跑在 Service Worker 里，页面上下文看不到 → 用 CDP 直接挂到 SW target 上求值。
   // 刻意不调 Runtime.enable(SW)：避免把 SW 的 console 事件并进本套件的「无 console error」门。
+  //
+  // ⚠️ 踩坑记录（v1.5.16 CI 首跑全红）：MV3 的 SW 会被浏览器回收再重启，
+  // `Target.getTargets` 可能同时列出「已停用实例」与「新实例」，**两者的 url 都是 background.js**。
+  // 直接 `.find()` 取第一个并单次求值 → 在 CI（机器慢、SW 空闲回收更频繁）挂到了那个空上下文：
+  // 表现为 `typeof _swWarnDegraded === 'undefined'`、连 `chrome` 都没有（但消息协议照常工作，
+  // 因为消息走的是真正活着的那个实例）。本地快所以一直没暴露。
+  // 修法：① 先用一次消息往返唤醒 SW；② 把所有候选 target 逐个挂上并**轮询等待**
+  // background.js 真的在该上下文里就绪；③ 单个用例失败时错误隔离，不让套件崩。
   console.log('\n[DEBT-02] SW 侧降级路径（诊断 / 有意静默 / 用户已关窗）');
-  let swSid = null;
-  {
-    const { targetInfos } = await send('Target.getTargets');
-    const swTarget = targetInfos.find((t) => /^chrome-extension:\/\/[a-p]{32}\/background\.js/.test(t.url || ''));
-    if (swTarget) {
-      const a = await send('Target.attachToTarget', { targetId: swTarget.targetId, flatten: true });
-      swSid = a.sessionId;
+  const swTargetInfo = (t) => ({ type: t.type, url: String(t.url || '').replace(/[a-p]{32}/, '<ext-id>') });
+  async function attachWorkingSw(timeoutMs = 15000) {
+    const deadline = Date.now() + timeoutMs;
+    const givenUp = new Set();
+    const seen = [];
+    while (Date.now() < deadline) {
+      let targetInfos = [];
+      try { targetInfos = (await send('Target.getTargets')).targetInfos; } catch (e) { /* 重试 */ }
+      const candidates = targetInfos.filter((t) => /^chrome-extension:\/\/[a-p]{32}\/background\.js/.test(t.url || ''));
+      candidates.forEach((t) => { if (!seen.some((s) => s.targetId === t.targetId)) seen.push(swTargetInfo(t)); });
+      for (const t of candidates) {
+        if (givenUp.has(t.targetId)) continue;
+        let session;
+        try {
+          session = (await send('Target.attachToTarget', { targetId: t.targetId, flatten: true })).sessionId;
+        } catch (e) { givenUp.add(t.targetId); continue; }
+        // 轮询等待该上下文真的加载完 background.js（挂上正在启动的 SW 时会先拿到空作用域）。
+        // 就绪判据刻意用**两个版本都存在**的符号（stringToColor + chrome.runtime）：
+        // 若用本批新增的 _swWarnDegraded，旧代码上会永远「不就绪」，修复前/后对照会退化成 1 条失败。
+        for (let i = 0; i < 12; i++) {
+          try {
+            const r = await send('Runtime.evaluate', {
+              expression: 'typeof stringToColor === "function" && typeof chrome !== "undefined" && !!chrome.runtime',
+              returnByValue: true,
+            }, session);
+            if (r.result && r.result.value === true) return { sid: session, target: swTargetInfo(t), seen: seen };
+          } catch (e) { /* 上下文可能正在切换，继续轮询 */ }
+          await sleep(300);
+        }
+        givenUp.add(t.targetId);
+        try { await send('Target.detachFromTarget', { sessionId: session }); } catch (e) { /* 忽略 */ }
+      }
+      await sleep(500);
     }
+    return { sid: null, target: null, seen: seen };
   }
-  const evalSw = async (expr) => {
+  // 先唤醒：一次消息往返确保 SW 实例真的在跑（上面的 webdav:test 已做过，这里显式再确认一次）
+  await evalJsStr(msg({ type: 'webdav:test', payload: { _url: 'file:///tmp/dav', _user: 'u', _pass: btoa('p') } }));
+  const swAttach = await attachWorkingSw();
+  let swSid = swAttach.sid;
+  check('DEBT-02 挂到真正加载了 background.js 的 Service Worker 上下文（SW 侧断言的前提）',
+    !!swSid, { attached: !!swSid, target: swAttach.target, seenSwTargets: swAttach.seen });
+
+  const evalSwOnce = async (expr) => {
     const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, swSid);
     if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || 'SW eval error');
     return r.result.value;
   };
-  const swReady = !!swSid && (await evalSw('typeof _swWarnDegraded === "function"')) === true;
-  check('DEBT-02 已挂到 Service Worker 上下文且降级诊断出口就位（SW 侧断言的前提）',
-    swReady, { hasSession: !!swSid, swReady });
+  // SW 可能在断言过程中被回收重启 → 遇到上下文类错误时重挂一次再试
+  const evalSw = async (expr) => {
+    try {
+      return await evalSwOnce(expr);
+    } catch (e) {
+      const msgText = String((e && e.message) || e);
+      if (!/context|Session|Target|detached|Cannot find/i.test(msgText)) throw e;
+      const re = await attachWorkingSw(8000);
+      if (!re.sid) throw e;
+      swSid = re.sid;
+      return await evalSwOnce(expr);
+    }
+  };
 
   // 逐条错误隔离：旧代码上这些函数/出口不存在时应「该条断言失败」，而不是掀翻整个套件
   const swCase = async (body) => {

@@ -1,5 +1,29 @@
 # DeepPage 更新日志
 
+## v1.5.17 (2026-10-04) — CI 修复：Service Worker 上下文挂载健壮性（扩展运行时代码零改动）
+
+> v1.5.16 的**扩展代码本身没问题**，但它的 CI 首跑全红 —— 原因在**测试挂载 SW 上下文的方式**，
+> 且只在 CI 环境暴露。本版只改测试与文档，扩展运行时代码与 v1.5.16 **完全一致**；
+> 之所以单独发一个版本，是为了让发布产物对应一次**全绿的 CI**（tag 与已发布产物不改写）。
+
+### 🔧 现象与根因
+- **现象**：CI 里 SW 套件的 DEBT-02 断言全红，失败签名与「旧代码」一模一样
+  （`_swWarnDegraded is not defined`、连 `chrome` 都没有）；但**同一时刻消息协议工作正常**
+  （`webdav:put` 照常返回 `{ ok:false, error:'Failed to fetch' }`）。
+- **根因**：MV3 的 Service Worker 会被浏览器**空闲回收再重启**，`Target.getTargets` 可能同时列出
+  「已停用实例」与「新实例」，**两者 url 都是 `background.js`**。原实现 `.find()` 取第一个 + 单次求值，
+  于是挂到了那个空上下文（消息走的是真正活着的那个实例，所以协议类断言照常通过）。
+  本地机器快、SW 不易被回收，所以一直没暴露 —— **只在 CI（更慢 + 空闲回收更频繁）复现**。
+- **修法**：① 先做一次消息往返唤醒 SW；② 遍历**所有**候选 target，逐个挂上并**轮询等待**
+  `background.js` 真的在该上下文就绪 —— 就绪判据刻意用**新旧版本都存在**的符号
+  （`stringToColor` + `chrome.runtime`），否则修复前 / 后对照会退化成 1 条失败；
+  ③ 断言过程中上下文被回收时自动重挂一次；④ 失败时打印「见过的 SW target 列表」，便于下次一眼定位。
+
+### ✅ 验证
+- 本地：SW 套件 21/21（与 v1.5.16 预期一致）；修复前 / 后对照仍是 **旧代码 8 项失败 → 新代码 0 项失败**。
+- CI：本版 tag 的 CI 与 Release 均 success（v1.5.16 的 CI 红正是本次修复的对象，tag 不改写）。
+- E2E **475 项**（p0 399 + SW 21 + WebDAV 55）｜ 逻辑桩测 29 ｜ 工程反向对照 52 ｜ ESLint 0 error / 34 warning。
+
 ## v1.5.16 (2026-10-04) — 技术债清理 ③（收官）：DEBT-02 静默吞异常（`background.js` 7 处）→ **技术债清零**
 
 > 第三批 = DEBT-02 在 **Service Worker 侧**的剩余 7 处。至此 `audit-static-scan.mjs` 第 6 节
@@ -40,8 +64,10 @@
   - 单条用例**错误隔离**（`swCase()`）：旧代码上缺函数时是「该条断言失败」，不是整个套件崩掉。
   - 刻意**不调** `Runtime.enable`(SW)：避免把 SW 的 console 事件并进「无 console error」门，改变既有门的语义。
 - 验证：E2E **475 项**（p0 399 + SW 21 + WebDAV 55）｜ 逻辑桩测 29 ｜ 工程反向对照 52 ｜ ESLint 0 error / **34 warning**。
-- 修复前 / 后对照（`DP_EXT_DIR` 指向 v1.5.15 源码）：SW 套件 **9 项失败**（缺 `_swWarnDegraded` /
+- 修复前 / 后对照（`DP_EXT_DIR` 指向 v1.5.15 源码）：SW 套件 **8 项失败**（缺 `_swWarnDegraded` /
   `_swCloseCaptureWindow` / `addPageToGroupFromMenu`，以及 MKCOL 无诊断）→ 新代码 0 项失败。
+  （注：v1.5.16 发布时 CI 首跑红，原因是**测试挂载 SW 上下文的方式**在 CI 上不可靠，
+  已在 **v1.5.17** 修复 —— 扩展运行时代码未变。）
 - `audit-static-scan.mjs` **第 6 节（空 catch）已清零**，第 1、2 节保持为空。
 
 ## v1.5.15 (2026-10-04) — 技术债清理 ②：DEBT-02 静默吞异常（`src/js/` 20 处分级治理）
