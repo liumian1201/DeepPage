@@ -34,8 +34,7 @@ var GroupsStore = (function () {
   // 表面 JSON 长度并不完全一致，实测边界会随内容浮动 —— 预算必须明显低于上限，不能贴着写）
   var ITEM_BUDGET = 6000;
 
-  /** 上一次已知的 chunk 键集合（用于清理孤儿键）与本次写出的 meta 令牌（回声判定） */
-  var _lastKeys = null;
+  /** 本页最后一次写出的 meta 令牌（回声判定用；写入前必须先记下） */
   var _lastToken = null;
 
   function _utf8Length(s) {
@@ -128,8 +127,8 @@ var GroupsStore = (function () {
     return null;
   }
 
-  /** 把分片结构信息视为「已知状态」（读完立刻调用，写入时据此清理孤儿键） */
-  function _rememberRead(data) {
+  /** 当前 meta 声明的分片键（顺序与分组一致） */
+  function _keysOf(data) {
     var keys = [];
     var meta = data && data[META_KEY];
     if (meta && Array.isArray(meta.g)) {
@@ -137,7 +136,7 @@ var GroupsStore = (function () {
         (entry && Array.isArray(entry.k) ? entry.k : []).forEach(function (k) { keys.push(k); });
       });
     }
-    _lastKeys = keys;
+    return keys;
   }
 
   function _readAll() {
@@ -150,12 +149,11 @@ var GroupsStore = (function () {
   function readSync() {
     return _readAll().then(function (data) {
       var groups = decode(data);
-      _rememberRead(data);
       var meta = data[META_KEY];
       return {
         groups: groups,
         meta: meta || null,
-        keys: _lastKeys.slice(),
+        keys: _keysOf(data),
         hasMeta: !!(meta && Array.isArray(meta.g)),
         hasLegacy: Array.isArray(data[LEGACY_KEY]) && data[LEGACY_KEY].length > 0,
         rev: data[REV_KEY],
@@ -188,7 +186,6 @@ var GroupsStore = (function () {
             resolve(false);
             return;
           }
-          _lastKeys = built.keys.slice();
           resolve(true);
         });
       } catch (e) {
@@ -201,17 +198,13 @@ var GroupsStore = (function () {
     });
   }
 
-  /** 清理：本次未写出的旧 chunk 键 + 旧版单项 `groups`。
+  /** 清理：本次 meta 未声明的 chunk 键（删组 / 切块数变少 / 另一标签页或上次崩溃的残留）+ 旧版单项 `groups`。
+   *  判据只能是「storage 实况 vs 本次写出的键」——写完那一刻 meta 已指向新键，旧的只能从实况里比出来。
    *  只在真的存在垃圾时才发 remove（少一次写操作），失败不致命（下次写入再清）。 */
   function _dropStale(newKeys) {
-    var stale = [];
-    if (_lastKeys) {
-      _lastKeys.forEach(function (k) { if (newKeys.indexOf(k) === -1 && stale.indexOf(k) === -1) stale.push(k); });
-    }
     return _readAll().then(function (data) {
-      Object.keys(data).forEach(function (k) {
-        // 兜底：storage 里还留着本次没写出的 chunk 键（另一标签页/上次崩溃留下的）
-        if (k.indexOf(CHUNK_PREFIX) === 0 && newKeys.indexOf(k) === -1 && stale.indexOf(k) === -1) stale.push(k);
+      var stale = Object.keys(data).filter(function (k) {
+        return k.indexOf(CHUNK_PREFIX) === 0 && newKeys.indexOf(k) === -1;
       });
       if (Array.isArray(data[LEGACY_KEY]) && data[LEGACY_KEY].length > 0) stale.push(LEGACY_KEY);
       if (!stale.length) return null;
@@ -232,7 +225,6 @@ var GroupsStore = (function () {
       var doomed = Object.keys(data).filter(function (k) {
         return k === META_KEY || k === LEGACY_KEY || k.indexOf(CHUNK_PREFIX) === 0;
       });
-      _lastKeys = [];
       if (!doomed.length) return null;
       return new Promise(function (resolve) {
         chrome.storage.sync.remove(doomed, function () { resolve(); });
