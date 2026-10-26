@@ -83,6 +83,28 @@ function dedupCardIds(groups, manifest, unzipped) {
 
 // ==================== 一键全部导出（fflate Zip） ====================
 
+/** BUG-089: 分组在 sync 里是分片（groups_meta + gc_*）—— 这些是存储层内部键，
+ *  不能出现在导出的 config.json 里（旧版本/云端解析都不认识它们）。 */
+function _stripGroupsShardKeys(config) {
+  if (!config || typeof config !== 'object') return config;
+  Object.keys(config).forEach(function (k) {
+    if (k === GroupsStore.META_KEY || k.indexOf(GroupsStore.CHUNK_PREFIX) === 0) delete config[k];
+  });
+  return config;
+}
+
+/** BUG-089: 导入 / 云端恢复的统一写盘入口 —— 分组走分片，其余键与它放进同一次 set
+ *  （保持原子性，也少一次写入操作）。返回 true=写入成功，调用方据此决定是否走 local 兜底。 */
+function _writeImportedConfig(settings, groupsData, activeGroupIndex, extra) {
+  var items = {
+    settings: settings,
+    activeGroup: activeGroupIndex || 0,
+    groups_rev: Date.now()   // BUG-036: 版本号随数据同写，避免旧 local 兜底数据反超 sync
+  };
+  if (extra) Object.keys(extra).forEach(function (k) { items[k] = extra[k]; });
+  return GroupsStore.writeSync(Array.isArray(groupsData) ? groupsData : [], items);
+}
+
 async function exportAll() {
   try {
     // v1.3.3: 合并写窗口内可能有未落盘的设置/分组 → 导出前先 flush，否则备份的是旧数据
@@ -91,16 +113,11 @@ async function exportAll() {
     var config = await new Promise(function (resolve) {
       chrome.storage.sync.get(null, function (result) { resolve(result); });
     });
-    // 如果 sync 中的分组为空（可能因为超限存在 local），从 local 补充
-    if (!config.groups || (Array.isArray(config.groups) && config.groups.length === 0)) {
-      var localData = await new Promise(function (resolve) {
-        chrome.storage.local.get(['groups', 'activeGroup'], function (result) { resolve(result); });
-      });
-      if (localData.groups && Array.isArray(localData.groups) && localData.groups.length > 0) {
-        config.groups = localData.groups;
-        config.activeGroup = localData.activeGroup;
-      }
-    }
+    // BUG-089: 分组在 sync 里是分片（groups_meta + gc_*），`groups` 键已不存在 ——
+    // 必须走逻辑视图 getGroups()（含 local 兜底与版本号比对），否则导出的备份会是空分组。
+    config.groups = await getGroups();
+    config.activeGroup = await getActiveGroup();
+    _stripGroupsShardKeys(config);
     // 写入导出时间戳，供导入预览使用
     if (config.settings) {
       config.settings._exportTime = new Date().toLocaleString('zh-CN');
@@ -254,18 +271,9 @@ function importAll() {
           // 旧配置 JSON
           await showImportConfirmAsync('检测到旧格式配置备份，导入将覆盖当前所有数据。');
           var oldSyncFailed = false;
-          await new Promise(function (resolve) {
-            chrome.storage.sync.set({
-              settings: data.settings || {},
-              groups: data.groups || [],
-              activeGroup: data.activeGroup || 0,
-              // BUG-036: 与数据同一次写入版本号，避免旧 local 兜底数据反超 sync
-              groups_rev: Date.now()
-            }, function () {
-              if (chrome.runtime.lastError) oldSyncFailed = true;
-              resolve();
-            });
-          });
+          // BUG-089: 分组走分片写入；settings / activeGroup / 版本号 与它同一次 set（保持原子性）
+          var oldOk = await _writeImportedConfig(data.settings || {}, data.groups || [], data.activeGroup || 0);
+          oldSyncFailed = !oldOk;
           if (oldSyncFailed) {
             var oldFSettings = data.settings || {};
             oldFSettings.storageFallback = 'local';
@@ -273,10 +281,12 @@ function importAll() {
               chrome.storage.local.set({ groups: data.groups || [], activeGroup: data.activeGroup || 0, groups_rev: Date.now() }, resolve);
             });
             var oldSettingsFailed = false;
-            await new Promise(function (resolve) {
-              chrome.storage.sync.set({ settings: oldFSettings, groups: [], activeGroup: 0 }, function () {
-                if (chrome.runtime.lastError) oldSettingsFailed = true;
-                resolve();
+            await GroupsStore.clearSync().then(function () {
+              return new Promise(function (resolve) {
+                chrome.storage.sync.set({ settings: oldFSettings, activeGroup: 0 }, function () {
+                  if (chrome.runtime.lastError) oldSettingsFailed = true;
+                  resolve();
+                });
               });
             });
             if (oldSettingsFailed) {
@@ -1004,18 +1014,8 @@ async function _doIncrementalRestore(configName) {
         showToast('⚠️ 已忽略 ' + rejected + ' 项未知或不合法的设置（备份可能被篡改）', 'warning');
       }
     }
-    var syncFailed = false;
-    await new Promise(function (resolve) {
-      chrome.storage.sync.set({
-        settings: safeSettings,
-        groups: config.groups || [],
-        activeGroup: config.activeGroup || 0,
-        groups_rev: Date.now()   // BUG-036: 版本号随数据同写
-      }, function () {
-        if (chrome.runtime.lastError) syncFailed = true;
-        resolve();
-      });
-    });
+    // BUG-089: 分组走分片写入（单项 8KB 上限不再能卡住恢复）
+    var syncFailed = !(await _writeImportedConfig(safeSettings, config.groups || [], config.activeGroup || 0));
     if (syncFailed) {
       var fSettings = safeSettings;
       fSettings.storageFallback = 'local';
@@ -1023,10 +1023,12 @@ async function _doIncrementalRestore(configName) {
         chrome.storage.local.set({ groups: config.groups || [], activeGroup: config.activeGroup || 0, groups_rev: Date.now() }, resolve);
       });
       var ssf2 = false;
-      await new Promise(function (resolve) {
-        chrome.storage.sync.set({ settings: fSettings, groups: [], activeGroup: 0 }, function () {
-          if (chrome.runtime.lastError) ssf2 = true;
-          resolve();
+      await GroupsStore.clearSync().then(function () {
+        return new Promise(function (resolve) {
+          chrome.storage.sync.set({ settings: fSettings, activeGroup: 0 }, function () {
+            if (chrome.runtime.lastError) ssf2 = true;
+            resolve();
+          });
         });
       });
       if (ssf2) {
@@ -1287,18 +1289,8 @@ async function _importConfig(unzipped, manifest) {
   var safeSettings = normalizeImportedSettings(config.settings);
   var rejectedCount = countRejectedSettings(config.settings, safeSettings);
   if (rejectedCount > 0) console.warn('[导入] 已忽略 ' + rejectedCount + ' 项未知/不合法的设置');
-  var syncFailed = false;
-  await new Promise(function (resolve) {
-    chrome.storage.sync.set({
-      settings: safeSettings,
-      groups: config.groups || [],
-      activeGroup: config.activeGroup || 0,
-      groups_rev: Date.now()   // BUG-036: 版本号随数据同写
-    }, function () {
-      if (chrome.runtime.lastError) { syncFailed = true; }
-      resolve();
-    });
-  });
+  // BUG-089: 分组走分片写入（单项 8KB 上限不再能卡住导入）
+  var syncFailed = !(await _writeImportedConfig(safeSettings, config.groups || [], config.activeGroup || 0));
   if (syncFailed) {
     var fSettings = safeSettings;
     fSettings.storageFallback = 'local';
@@ -1306,10 +1298,12 @@ async function _importConfig(unzipped, manifest) {
       chrome.storage.local.set({ groups: config.groups || [], activeGroup: config.activeGroup || 0, groups_rev: Date.now() }, resolve);
     });
     var ssf = false;
-    await new Promise(function (resolve) {
-      chrome.storage.sync.set({ settings: fSettings, groups: [], activeGroup: 0 }, function () {
-        if (chrome.runtime.lastError) ssf = true;
-        resolve();
+    await GroupsStore.clearSync().then(function () {
+      return new Promise(function (resolve) {
+        chrome.storage.sync.set({ settings: fSettings, activeGroup: 0 }, function () {
+          if (chrome.runtime.lastError) ssf = true;
+          resolve();
+        });
       });
     });
     if (ssf) {
@@ -1349,20 +1343,12 @@ async function _collectAllData() {
   ]);
 
   var config = syncData;
-  // BUG-036: 与 getGroups 同规则 —— sync 里没有数据、或 local 兜底数据的版本更新时，
-  // 导出必须以 local 为准；否则 sync 写入被配额拒绝的用户会导出「超限前的旧数据」
-  var localData = await new Promise(function (resolve) {
-    chrome.storage.local.get(['groups', 'activeGroup', 'groups_rev'], function (result) { resolve(result); });
-  });
-  var syncRev = typeof config.groups_rev === 'number' ? config.groups_rev : 0;
-  var localRev = typeof localData.groups_rev === 'number' ? localData.groups_rev : 0;
-  var syncGroupsEmpty = !config.groups || (Array.isArray(config.groups) && config.groups.length === 0);
-  if (localData.groups && Array.isArray(localData.groups) && localData.groups.length > 0 &&
-      (syncGroupsEmpty || localRev > syncRev)) {
-    config = config || {};
-    config.groups = localData.groups;
-    config.activeGroup = localData.activeGroup;
-  }
+  // BUG-089: sync 侧分组是分片的，逻辑视图统一交给 getGroups()
+  //（它已包含 BUG-036 的「sync vs local 版本号比对」，不必在这里重做一遍）
+  config = config || {};
+  config.groups = await getGroups();
+  config.activeGroup = await getActiveGroup();
+  _stripGroupsShardKeys(config);
   // groups_rev 只是本机判定 sync/local 谁更新的内部标记，不写进备份
   if (config && config.groups_rev !== undefined) delete config.groups_rev;
   if (config.settings) config.settings._exportTime = new Date().toLocaleString('zh-CN');

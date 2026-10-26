@@ -503,17 +503,21 @@ function send(method, params, sessionId) {
       var origExec = chrome.scripting.executeScript;
       var execCalls = [];
       chrome.scripting.executeScript = async function (o) { execCalls.push(o.args); return [{ result: true }]; };
-      var origGroups = await new Promise(function (r) { chrome.storage.sync.get(['groups'], function (x) { r(x.groups || []); }); });
+      // BUG-089: 分组在 sync 里是分片（groups_meta + gc_*）—— 读写都走 GroupsStore
+      var readGroups = async function () {
+        return GroupsStore.decode(await new Promise(function (r) { chrome.storage.sync.get(null, r); })) || [];
+      };
+      var origGroups = await readGroups();
       try {
-        await new Promise(function (r) { chrome.storage.sync.set({ groups: [{ id: 'gdebt02sw', name: 'DEBT02SW组', cards: [
+        await GroupsStore.writeSync([{ id: 'gdebt02sw', name: 'DEBT02SW组', cards: [
           { id: 'badcard', name: '坏卡片', url: 'not-a-url' },
           { id: 'goodcard', name: '好卡片', url: 'https://example.com/swdup' }
-        ] }] }, r); });
+        ] }], {});
 
         self.__swWarnBuf.length = 0;
         await addPageToGroupFromMenu('not-a-url', '坏页面', 0, 999999);
         var badWarns = self.__swWarnBuf.slice();
-        var afterBad = await new Promise(function (r) { chrome.storage.sync.get(['groups'], function (x) { r(x.groups || []); }); });
+        var afterBad = await readGroups();
 
         self.__swWarnBuf.length = 0;
         execCalls.length = 0;
@@ -536,7 +540,7 @@ function send(method, params, sessionId) {
         };
       } finally {
         chrome.scripting.executeScript = origExec;
-        await new Promise(function (r) { chrome.storage.sync.set({ groups: origGroups }, r); });
+        await GroupsStore.writeSync(origGroups, {});
       }
     `);
     check('DEBT-02 右键添加：页面 URL 解析不了 → 跳过重复检查但仍添加卡片（降级可用）',

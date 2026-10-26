@@ -133,10 +133,9 @@ async function collectCardImageGarbage() {
   try {
     var validKeys = new Set();
     // 检查 sync 和 local 两处存储（大容量数据在 local）
-    var result = await new Promise(function (resolve) {
-      chrome.storage.sync.get(['groups'], function (data) { resolve(data); });
-    });
-    var groups = result.groups;
+    // BUG-089: sync 侧分组是分片的，必须走 GroupsStore 解码，不能直接读 `groups` 键
+    var syncRead = await GroupsStore.readSync();
+    var groups = syncRead.groups;
     if (!groups || !Array.isArray(groups) || groups.length === 0) {
       var localResult = await new Promise(function (resolve) {
         chrome.storage.local.get(['groups'], function (data) { resolve(data); });

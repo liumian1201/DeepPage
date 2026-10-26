@@ -163,6 +163,7 @@ DeepPage/
 │   │   ├── suggest.js      # 搜索建议：浏览历史 / 书签（可选权限，v1.5.0）
 │   │   ├── contextmenu.js  # 右键菜单 + 移动到分组子菜单
 │   │   ├── storage.js      # chrome.storage 封装 + 默认值 + 合并写 + local_bak
+│   │   ├── groups-store.js # 分组数据 sync 分片存储（groups_meta + gc_*，页面与 SW 共用）
 │   │   ├── settings.js     # 设置面板交互 + CSS 变量预览（面板懒初始化）
 │   │   ├── settings-webdav.js  # WebDAV 配置区 UI 逻辑（从 settings.js 抽离）
 │   │   ├── a11y.js         # 无障碍：弹窗焦点管理 / aria 标签 / Toast live region

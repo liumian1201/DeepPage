@@ -7,15 +7,17 @@
 | 脚本 | 覆盖 | 依赖 | 运行 |
 |------|------|------|------|
 | `dashboard-logic.test.js` | 看板顺序逻辑：防抖写盘 / 边界不写盘 / 顺序未变不写盘 / 锁定拒绝 / ESC 暴露（29 项） | 仅 Node（`vm` + 最小 DOM 桩） | `npm test` |
+| `groups-shard-logic.test.js` | **BUG-089 分组分片存储**：体积估算只高估不低估（中文/emoji）/ 切块每块 ≤ 预算且顺序零丢失 / 怪 id 键名安全 / 重复 id 键唯一 / 单卡超预算单独成块 / decode 往返与旧格式回退 / 变更判定与回声令牌（33 项） | 仅 Node（`vm`） | `npm test` |
 | `console-error-filter.test.js` | **BUG-073 反向对照**：console.error 过滤规则双向断言（外部网络失败可忽略 / 代码回归必须可见）（22 项） | 仅 Node | `npm test` |
 | `e2e-exit-code.test.js` | **BUG-041 反向对照**：退出码语义（环境不满足 → 3 / 测试崩溃 → 1 且不得打印「跳过」）（30 项） | 仅 Node（`spawnSync`） | `npm test` |
-| `e2e-p0.test.js` | 真实浏览器主页全链路（399 项）：加载与渲染 / ESC 链 / 锁定 / 看板栅格与编辑态 / 多选批量 / 分组 / 壁纸 · 待办 · 建议 · favicon / 备份导入导出 / 同步写合并与配额回退 / ARIA / 跨标签页 / **DEBT-01 主链路** / **DEBT-02 页面侧降级路径** | Node + Chromium 构建 | `npm run test:e2e` |
+| `e2e-p0.test.js` | 真实浏览器主页全链路（451 项）：加载与渲染 / ESC 链 / 锁定 / 看板栅格与编辑态 / 多选批量 / 分组 / 壁纸 · 待办 · 建议 · favicon / 备份导入导出 / 同步写合并与配额回退 / ARIA / 跨标签页 / **DEBT-01 主链路** / **DEBT-02 页面侧降级路径** / **BUG-089 分组分片存储** | Node + Chromium 构建 | `npm run test:e2e` |
 | `e2e-sw-protocol.test.js` | 真实 SW 链路（23 项）：`image-fetch` / `weather-fetch` / WebDAV 非法协议被拒、http 截图权限闸门与不开窗、**DEBT-01 死链路下线**、**DEBT-02 SW 侧降级路径**（CDP 直连 SW 上下文） | Node + Chromium 构建 | `npm run test:e2e` |
 | `e2e-webdav.test.js` | **真实 WebDAV 服务器**联调（55 项）：目录穿越 / 恶意 manifest 注入 / 导入白名单 / 分组导出图片 / 上传失败与孤儿 GC / 中文密码 / 增量备份与按需恢复 | Node + Chromium 构建 | `npm run test:e2e` |
 | `lib/console-error-filter.js` | 三个 E2E 共用的 console.error 来源精确过滤器（被逻辑测试直接断言） | 仅 Node | — |
 | `lib/webdav-test-server.js` | 零依赖最小 WebDAV 服务器（请求日志 + PUT 故障注入），供 `e2e-webdav.test.js` 使用 | 仅 Node | — |
 
-> 当前基线（v1.6.0）：E2E **477 项**（p0 399 + SW 23 + WebDAV 55）｜ 逻辑桩测 **81 项**（29 + 22 + 30）。
+> 当前基线：E2E **529 项**（p0 451 + SW 23 + WebDAV 55）｜ 逻辑桩测 **114 项**（29 + 33 + 22 + 30）。
+> （写数字容易腐烂 —— 数字只是「当前这一版的快照」，判据永远是 `npm test` / `npm run test:e2e` 的真实退出码。）
 
 ## 断言约定（踩过的坑，新增用例请遵守）
 

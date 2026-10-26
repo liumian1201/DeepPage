@@ -5,6 +5,10 @@
    v1.0.7: 审计确认无 setInterval/全局持久变量，SW 可正常休眠
    ============================================================ */
 
+// BUG-089: 分组数据在 sync 里是分片的（groups_meta + gc_*）。编解码与读写逻辑和页面共用，
+// 因此 SW 直接加载页面那份模块（classic service worker 支持 importScripts）。
+importScripts('js/groups-store.js');
+
 // ---- 消息代理 ----
 
 /**
@@ -570,6 +574,17 @@ async function batchCaptureOne(url) {
 
 var _rebuildingMenus = false;
 
+/** BUG-089: SW 侧读取分组（sync 分片优先，读不到回退 local）。
+ *  返回 null 表示「一处都没有」——调用方据此放弃，避免用空数组覆盖用户数据。 */
+async function swReadGroups() {
+  var syncRead = await GroupsStore.readSync();
+  if (Array.isArray(syncRead.groups) && syncRead.groups.length > 0) return syncRead.groups;
+  var localResult = await chrome.storage.local.get(['groups']);
+  var localGroups = localResult.groups;
+  if (Array.isArray(localGroups) && localGroups.length > 0) return localGroups;
+  return null;
+}
+
 /** 根据当前分组数据重建右键菜单 */
 async function rebuildContextMenus() {
   if (_rebuildingMenus) return;
@@ -579,12 +594,7 @@ async function rebuildContextMenus() {
     await new Promise(function (r) { chrome.contextMenus.removeAll(r); });
 
     // 读取分组（大容量用户数据在 local，需回退）
-    var result = await chrome.storage.sync.get(['groups']);
-    var groups = result.groups;
-    if (!groups || !Array.isArray(groups) || groups.length === 0) {
-      var localResult = await chrome.storage.local.get(['groups']);
-      groups = localResult.groups;
-    }
+    var groups = await swReadGroups();
     if (!groups || !Array.isArray(groups) || groups.length === 0) return;
 
     // 创建父菜单
@@ -608,9 +618,12 @@ async function rebuildContextMenus() {
   }
 }
 
-/** 监听 storage 变更：分组数据变化时自动刷新右键菜单（sync + local 双通道） */
+/** 监听 storage 变更：分组数据变化时自动刷新右键菜单（sync + local 双通道）
+ *  BUG-089: sync 侧现在是分片（groups_meta + gc_*），不能只盯 `groups` 这一个键 */
 chrome.storage.onChanged.addListener(function (changes, areaName) {
-  if ((areaName === 'sync' || areaName === 'local') && changes.groups) {
+  if (areaName === 'sync' && GroupsStore.affectsGroups(changes)) {
+    rebuildContextMenus();
+  } else if (areaName === 'local' && changes.groups) {
     rebuildContextMenus();
   }
 });
@@ -625,12 +638,7 @@ async function addPageToGroupFromMenu(pageUrl, pageTitle, groupIndex, tabId) {
   }
 
   // 读取当前分组数据（大容量用户数据在 local，需回退）
-  var result = await chrome.storage.sync.get(['groups']);
-  var groups = result.groups;
-  if (!groups || !Array.isArray(groups) || groups.length === 0) {
-    var localResult = await chrome.storage.local.get(['groups']);
-    groups = localResult.groups;
-  }
+  var groups = await swReadGroups();
   if (!groups || !groups[groupIndex]) return;
 
   // v1.2.8: 检查重复（完整 URL 匹配，非仅域名）→ 当前页面弹确认框
@@ -689,25 +697,23 @@ async function addPageToGroupFromMenu(pageUrl, pageTitle, groupIndex, tabId) {
   if (!groups[groupIndex].cards) groups[groupIndex].cards = [];
   groups[groupIndex].cards.push(card);
 
-  // v1.2.8: 写入 sync，超限则回退 local（try-catch 防 reject 跳过回退）
+  // v1.2.8: 写入 sync，超限则回退 local
   // BUG-036: 必须按「这次写入是否成功」决定回退 —— 原先只看 sync 里有没有值，
   // 配额拒绝时旧值原样留着（非空），新卡片只留在内存里，刷新即丢失
-  var groupsSyncOk = true;
-  try {
-    await chrome.storage.sync.set({ groups: groups, groups_rev: Date.now() });
-  } catch (e) { groupsSyncOk = false; }
+  // BUG-089: 分组改走分片写入（GroupsStore），单项 8KB 上限不再可能卡死整份数据
+  var groupsSyncOk = await GroupsStore.writeSync(groups, { groups_rev: Date.now() });
   if (!groupsSyncOk) {
     chrome.storage.local.set({ groups: groups, groups_rev: Date.now() }).catch(function (e) {
       console.warn('[bg] groups 本地兜底写入失败:', e && e.message);
     });
   }
-  chrome.storage.sync.get(['groups'], function (check) {
-    if (!check.groups || !Array.isArray(check.groups) || check.groups.length === 0) {
-      chrome.storage.local.set({ groups: groups, groups_rev: Date.now() }).catch(function (e) {
-        console.warn('[bg] groups 本地兜底写入失败:', e && e.message);
-      });
-    }
-  });
+  // 写入被静默丢弃时（sync 里一个分组都没有）同样兜底到 local
+  var checkRead = await GroupsStore.readSync();
+  if (!Array.isArray(checkRead.groups) || checkRead.groups.length === 0) {
+    chrome.storage.local.set({ groups: groups, groups_rev: Date.now() }).catch(function (e) {
+      console.warn('[bg] groups 本地兜底写入失败:', e && e.message);
+    });
+  }
 
   // v1.0.5: 不在此处重建菜单（onChanged 会自动触发）
 }

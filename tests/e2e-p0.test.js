@@ -205,6 +205,8 @@ function send(method, params, sessionId) {
     return r.result.value;
   };
 
+  /** BUG-089: 分组在 sync 里是分片（groups_meta + gc_*）—— 断言一律读「逻辑视图」 */
+  const syncGroups = async () => (await evalJs(`new Promise(function (r) { chrome.storage.sync.get(null, function (d) { r(GroupsStore.decode(d) || []); }); })`)) || [];
   let pass = 0, fail = 0;
   const check = (name, cond, extra) => {
     if (cond) { pass++; console.log('  ✅ ' + name); }
@@ -323,7 +325,7 @@ function send(method, params, sessionId) {
   check('注入写入计数器', (await evalJs(`(() => {
     window.__writes = [];
     window.__origSet = chrome.storage.sync.set.bind(chrome.storage.sync);
-    chrome.storage.sync.set = function (items, cb) { window.__writes.push(Object.keys(items)[0]); return window.__origSet(items, cb); };
+    chrome.storage.sync.set = function (items, cb) { var ks = Object.keys(items); window.__writes.push(ks.some(function(k){return k===GroupsStore.META_KEY||k.indexOf(GroupsStore.CHUNK_PREFIX)===0;}) ? 'groups' : ks[0]); return window.__origSet(items, cb); };
     return 'ok';
   })()`)) === 'ok');
   // 连发 12 次设置保存（模拟拖滑块 / 连点开关）
@@ -351,7 +353,7 @@ function send(method, params, sessionId) {
   // 安全属性：结构性数据（增删改卡片/分组）必须立即落盘，不能被合并写拖延
   await evalJs(`(() => {
     window.__writes = [];
-    chrome.storage.sync.set = function (items, cb) { window.__writes.push(Object.keys(items)[0]); return window.__origSet(items, cb); };
+    chrome.storage.sync.set = function (items, cb) { var ks = Object.keys(items); window.__writes.push(ks.some(function(k){return k===GroupsStore.META_KEY||k.indexOf(GroupsStore.CHUNK_PREFIX)===0;}) ? 'groups' : ks[0]); return window.__origSet(items, cb); };
     return 'ok';
   })()`);
   await evalJs('(async () => { await saveGroups(groups); return "ok"; })()');
@@ -951,7 +953,7 @@ function send(method, params, sessionId) {
   const grpOrderAfter = JSON.parse(await evalJs('JSON.stringify(groups.map(g => g.name))'));
   check('真实鼠标拖拽后顺序改变且长度不变', grpOrderAfter.length === grpOrderBefore.length && grpOrderAfter[grpOrderAfter.length - 1] === grpOrderBefore[0], { before: grpOrderBefore, after: grpOrderAfter });
   check('活动分组按 id 跟随（未错位）', (await evalJs('groups[activeGroupIndex] && groups[activeGroupIndex].id')) === (await evalJs('(async () => (await getActiveGroup(), groups[activeGroupIndex].id))()')), await evalJs('groups[activeGroupIndex].name'));
-  check('拖拽后持久化到 storage', (await evalJs(`new Promise(r => chrome.storage.sync.get('groups', d => r((d.groups || []).map(g => g.name).join(','))))`)) === grpOrderAfter.join(','));
+  check('拖拽后持久化到 storage', (await syncGroups()).map(g => g.name).join(',') === grpOrderAfter.join(','));
 
   await evalJs('closeGroupManager()');
   await sleep(300);
@@ -1374,7 +1376,7 @@ function send(method, params, sessionId) {
     speeddials = groups[0].cards;
     await saveGroups(groups);
     await new Promise(r => setTimeout(r, 900));
-    const sync = await new Promise(r => chrome.storage.sync.get(['groups','groups_rev'], r));
+    const sync = { groups: GroupsStore.decode(await new Promise(r => chrome.storage.sync.get(null, r))) };
     const local = await new Promise(r => chrome.storage.local.get(['groups','groups_rev'], r));
     const back = await getGroups();
     const toast = document.querySelector('.toast');
@@ -1397,7 +1399,7 @@ function send(method, params, sessionId) {
     activeGroupIndex = 0; speeddials = groups[0].cards;
     await saveGroups(groups);
     await new Promise(r => setTimeout(r, 700));
-    const sync = await new Promise(r => chrome.storage.sync.get(['groups','groups_rev'], r));
+    const sync = { groups: GroupsStore.decode(await new Promise(r => chrome.storage.sync.get(null, r))) };
     const back = await getGroups();
     return JSON.stringify({
       syncHasSmall: JSON.stringify(sync.groups || []).indexOf('SMALL_A2') !== -1,
@@ -1527,13 +1529,19 @@ function send(method, params, sessionId) {
     await saveGroups(groups);                       // 刷新本页「刚写入」状态
     await new Promise(r => setTimeout(r, 100));
     // 立即写入一份不同的 groups（等价于另一个标签页在 1.5s 窗口内的真实改动）
+    // BUG-089: 另一个标签页现在写的是分片（groups_meta + gc_*），令牌与本地不同
     const other = [mk('ea','E组A','ECHO_A'), mk('eb','E组B','ECHO_B_XTAB')];
-    await new Promise(r => chrome.storage.sync.set({ groups: other, groups_rev: Date.now() }, r));
-    await new Promise(r => setTimeout(r, 500));
+    const built = GroupsStore.build(other);
+    const items = {};
+    built.keys.forEach(function (k) { items[k] = built.items[k]; });
+    items[GroupsStore.META_KEY] = { v: 1, w: 'other-tab-echo', g: built.meta };
+    items.groups_rev = Date.now();
+    await new Promise(r => chrome.storage.sync.set(items, r));
+    await new Promise(r => setTimeout(r, 600));
     const received = groups.map(g => g.name).join(',');
     await saveGroups(groups);                       // 本页随后再写一次（旧行为会把对方改动回滚）
     await new Promise(r => setTimeout(r, 500));
-    const stored = await new Promise(r => chrome.storage.sync.get('groups', d => r(d.groups || [])));
+    const stored = GroupsStore.decode(await new Promise(r => chrome.storage.sync.get(null, r))) || [];
     return JSON.stringify({ received, stored: stored.map(g => g.name).join(',') });
   })()`));
   check('BUG-055 窗口内的外部 groups 改动被接收（不再整段忽略）', echoGroups.received === 'E组A,E组B', echoGroups);
@@ -1569,7 +1577,7 @@ function send(method, params, sessionId) {
   check('BUG-055 B 页新增的卡片已进入 A 页内存', (await evalJs(`(groups[activeGroupIndex].cards || []).some(c => c.name === 'XTAB_CARD')`)) === true);
   await evalJs(`(async () => { await saveGroups(groups); return 'ok'; })()`);
   await sleep(700);
-  check('BUG-055 A 页回写后 B 的卡片仍在 sync（未被回滚）', (await evalJs(`new Promise(r => chrome.storage.sync.get('groups', d => r(JSON.stringify(d.groups || []) .indexOf('XTAB_CARD') !== -1)))`)) === true);
+  check('BUG-055 A 页回写后 B 的卡片仍在 sync（未被回滚）', JSON.stringify(await syncGroups()).indexOf('XTAB_CARD') !== -1);
   try { await send('Target.closeTarget', { targetId: tabC.targetId }); } catch (e) { /* 忽略 */ }
   await sleep(300);
 
@@ -1686,8 +1694,14 @@ function send(method, params, sessionId) {
     await new Promise(r => setTimeout(r, 300));
     // 模拟另一个标签页删掉两个分组（索引 3 越界）
     const shrunk = [mk('q1','Q1','ONE'), mk('q2','Q2','TWO')];
-    await new Promise(r => chrome.storage.sync.set({ groups: shrunk, groups_rev: Date.now() }, r));
-    await new Promise(r => setTimeout(r, 700));
+    // BUG-089: 另一个标签页写的是分片（令牌不同 → 本页必须重新读取并校正索引）
+    const built = GroupsStore.build(shrunk);
+    const items = {};
+    built.keys.forEach(function (k) { items[k] = built.items[k]; });
+    items[GroupsStore.META_KEY] = { v: 1, w: 'other-tab-shrink', g: built.meta };
+    items.groups_rev = Date.now();
+    await new Promise(r => chrome.storage.sync.set(items, r));
+    await new Promise(r => setTimeout(r, 900));
     return JSON.stringify({
       idx: activeGroupIndex, len: groups.length,
       outOfRange: activeGroupIndex >= groups.length,
@@ -2724,12 +2738,14 @@ function send(method, params, sessionId) {
   }
   const dragAfter = JSON.parse(await evalJs(`(async () => {
     var gid = groups[activeGroupIndex].id;
-    var stored = await new Promise(function (r) { chrome.storage.sync.get(['groups', 'activeGroup'], function (x) { r(x); }); });
+    // BUG-089: 分组是分片存储 → 读逻辑视图
+    var stored = { groups: GroupsStore.decode(await new Promise(function (r) { chrome.storage.sync.get(null, r); })) || [] };
+    var storedActive = await new Promise(function (r) { chrome.storage.sync.get(['activeGroup'], function (x) { r(x.activeGroup); }); });
     var sg = (stored.groups || []).filter(function (g) { return g.id === gid; })[0] || { cards: [] };
     return JSON.stringify({
       ids: groups[activeGroupIndex].cards.map(function (c) { return c.id; }),
       storedIds: (sg.cards || []).map(function (c) { return c.id; }),
-      storedActive: stored.activeGroup,
+      storedActive: storedActive,
       memActive: activeGroupIndex,
       gid: gid
     });
@@ -3439,7 +3455,8 @@ function send(method, params, sessionId) {
     await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: to.x, y: to.y, button: 'left', clickCount: 1, buttons: 0 }, sid);
     await sleep(600);
     const after = JSON.parse(await evalJs('JSON.stringify(groups.map(function (g) { return g.name; }))'));
-    const stored = JSON.parse(await evalJs(`new Promise(function (r) { chrome.storage.sync.get('groups', function (x) { r(JSON.stringify((x.groups || []).map(function (g) { return g.name; }))); }); })`));
+    // BUG-089: 分组是分片存储 → 读逻辑视图取名称顺序
+    const stored = JSON.parse(await evalJs(`new Promise(function (r) { chrome.storage.sync.get(null, function (x) { r(JSON.stringify((GroupsStore.decode(x) || []).map(function (g) { return g.name; }))); }); })`));
     return { names, after, stored, painted, movedToEnd: after[after.length - 1] === names[0], changed: after.join() !== names.join() };
   };
   const dr0 = await dragRects();
@@ -3739,7 +3756,154 @@ function send(method, params, sessionId) {
     immExit.exited === true && immExit.inlineWidth !== (immExit.oneCardWidth + 'px')
       && immExit.clientWidth > immExit.oneCardWidth * 1.5, immExit);
 
-  console.log('\n[37] 页面无 JS 报错');
+  console.log('\n[37] BUG-089 分组数据分片存储（单项 8KB 上限不再卡死整份数据）');
+
+  // 用户真实场景：约 34~36 张卡 ≈7.9~8.1KB（旧实现是**单个** sync 项，实测上限只有 7973 字节）
+  // → 再加一张卡必然 kQuotaBytesPerItem；且此后每次写整份（加卡/切组/访问计数）都刷红字。
+  /** 单条用例错误隔离：修复前对照时旧代码没有 GroupsStore，直接抛错 —— 必须表现为「断言失败」，
+   *  不能掀翻整个套件（与 DEBT-02 的 debt02Case 同一约定） */
+  const shardCase = async (body) => {
+    try { return JSON.parse(await evalJs(body)); } catch (e) { return { __error: (e && e.message) || String(e) }; }
+  };
+  const shard = await shardCase(`(async () => {
+    const mkCard = (i) => ({ id: 'sb' + i, name: '卡片' + i, url: 'https://site' + i + '.example.com/path' + i,
+      color: 'hsl(59, 64%, 47%)', image: 'idx:cardimg_sb' + i, visitCount: 12, createdAt: 1700000000000,
+      lastOpened: 1700000000000, themeColor: '#74646e' });
+    const cards = [];
+    for (let i = 0; i < 36; i++) cards.push(mkCard(i));
+    groups = [{ id: 'gsb', name: '分片测试', sortMode: 'manual', cards: cards }];
+    activeGroupIndex = 0; speeddials = groups[0].cards;
+    await saveGroups(groups);
+    await new Promise(r => setTimeout(r, 1200));
+    const beforeBytes = GroupsStore.itemBytes(groups[0].cards);
+    groups[0].cards.push({ id: 'sbtop', name: '新卡', url: 'https://new.example.com/', visitCount: 0, createdAt: Date.now() });
+    await saveGroups(groups);
+    await new Promise(r => setTimeout(r, 1500));
+    const raw = await new Promise(r => chrome.storage.sync.get(null, r));
+    const decoded = GroupsStore.decode(raw) || [];
+    const chunkKeys = Object.keys(raw).filter(k => k.indexOf(GroupsStore.CHUNK_PREFIX) === 0);
+    return JSON.stringify({
+      beforeBytes: beforeBytes,
+      afterBytes: GroupsStore.itemBytes(groups[0].cards),
+      hasMeta: !!(raw[GroupsStore.META_KEY] && Array.isArray(raw[GroupsStore.META_KEY].g)),
+      legacyPresent: Object.prototype.hasOwnProperty.call(raw, 'groups'),
+      chunkCount: chunkKeys.length,
+      chunkMax: chunkKeys.length ? Math.max.apply(null, chunkKeys.map(k => GroupsStore.itemBytes(raw[k]))) : 0,
+      syncHasNewCard: JSON.stringify(decoded).indexOf('sbtop') !== -1,
+      syncCardCount: ((decoded[0] && decoded[0].cards) || []).length
+    });
+  })()`);
+  check('复现前提：这份数据加卡后体积 > 实测单项上限 7973 字节（旧实现此处必被 kQuotaBytesPerItem 拒绝）',
+    shard.afterBytes > 7973, { beforeBytes: shard.beforeBytes, afterBytes: shard.afterBytes });
+  check('sync 里改成分片布局（groups_meta + gc_*），不再有旧版单项 groups',
+    shard.hasMeta === true && shard.legacyPresent === false, shard);
+  check('每一块都低于单项预算 6000 字节（预算必须明显低于实际上限）',
+    shard.chunkCount > 0 && shard.chunkMax <= 6000, { chunkCount: shard.chunkCount, chunkMax: shard.chunkMax });
+  check('用户场景：加一张卡能写进 sync 且读得回来（旧代码：新卡只落 local、sync 永久停在旧版本）',
+    shard.syncHasNewCard === true && shard.syncCardCount === 37, shard);
+
+  // 单个分组自身超过预算 → 自动切块（不能再退回「整份一个单项」）
+  const chunked = await shardCase(`(async () => {
+    const cards = [];
+    for (let i = 0; i < 60; i++) cards.push({ id: 'ck' + i, name: '大组卡片' + i, url: 'https://big' + i + '.example.com/',
+      color: 'hsl(10, 50%, 50%)', visitCount: 3, createdAt: 1700000000000, lastOpened: 1700000000000 });
+    groups = [{ id: 'gbig', name: '超预算组', sortMode: 'manual', cards: cards }];
+    activeGroupIndex = 0; speeddials = groups[0].cards;
+    await saveGroups(groups);
+    await new Promise(r => setTimeout(r, 1500));
+    const raw = await new Promise(r => chrome.storage.sync.get(null, r));
+    const keys = Object.keys(raw).filter(k => k.indexOf(GroupsStore.CHUNK_PREFIX) === 0);
+    const decoded = GroupsStore.decode(raw) || [];
+    return JSON.stringify({
+      wholeBytes: GroupsStore.itemBytes(cards),
+      chunkCount: keys.length,
+      chunkMax: keys.length ? Math.max.apply(null, keys.map(k => GroupsStore.itemBytes(raw[k]))) : 0,
+      restored: ((decoded[0] && decoded[0].cards) || []).map(c => c.id).join(',') === cards.map(c => c.id).join(',')
+    });
+  })()`);
+  check('单组超过预算时自动切成多块（整份体积 > 预算，但每块都在预算内）',
+    chunked.wholeBytes > 6000 && chunked.chunkCount >= 2 && chunked.chunkMax <= 6000, chunked);
+  check('切块后按顺序还原（卡片顺序与数量完全一致）', chunked.restored === true, chunked);
+
+  // 旧数据迁移：sync 里只有旧版单项 `groups` 时能正常读出，下一次保存后迁移成新布局
+  const legacyMigrated = await shardCase(`(async () => {
+    const legacy = [{ id: 'gmig', name: '迁移组', sortMode: 'manual', cards: [
+      { id: 'mig1', name: '旧卡1', url: 'https://m1.example.com/', visitCount: 0 },
+      { id: 'mig2', name: '旧卡2', url: 'https://m2.example.com/', visitCount: 0 }
+    ] }];
+    const raw0 = await new Promise(r => chrome.storage.sync.get(null, r));
+    const doomed = Object.keys(raw0).filter(k => k === GroupsStore.META_KEY || k.indexOf(GroupsStore.CHUNK_PREFIX) === 0);
+    if (doomed.length) await new Promise(r => chrome.storage.sync.remove(doomed, r));
+    await new Promise(r => chrome.storage.sync.set({ groups: legacy, groups_rev: Date.now() }, r));
+    const readBack = await getGroups();
+    const okRead = JSON.stringify(readBack.map(g => g.id)) === '["gmig"]';
+    groups = readBack; activeGroupIndex = 0; speeddials = groups[0].cards;
+    await saveGroups(groups);
+    await new Promise(r => setTimeout(r, 1500));
+    const after = await new Promise(r => chrome.storage.sync.get(null, r));
+    const back = GroupsStore.decode(after) || [];
+    return JSON.stringify({
+      okRead: okRead,
+      hasMetaAfter: !!(after[GroupsStore.META_KEY] && Array.isArray(after[GroupsStore.META_KEY].g)),
+      legacyGone: !Object.prototype.hasOwnProperty.call(after, 'groups'),
+      cardsKept: ((back[0] && back[0].cards) || []).length,
+      nameKept: (back[0] || {}).name || ''
+    });
+  })()`);
+  check('旧格式（单个 groups 项）仍能被 getGroups() 读出（升级不丢数据）',
+    legacyMigrated.okRead === true, legacyMigrated);
+  check('下一次保存后自动迁移成新布局，旧版单项被清理',
+    legacyMigrated.hasMetaAfter === true && legacyMigrated.legacyGone === true, legacyMigrated);
+  check('迁移后卡片与分组名完好', legacyMigrated.cardsKept === 2 && legacyMigrated.nameKept === '迁移组', legacyMigrated);
+
+  // 删组后不能留下孤儿分片键（否则白占 QUOTA_BYTES，且下次读会拼出已删除的分组）
+  const orphan = await shardCase(`(async () => {
+    groups = [
+      { id: 'gkeep', name: '保留组', sortMode: 'manual', cards: [{ id: 'k1', name: 'K1', url: 'https://k1.example.com/', visitCount: 0 }] },
+      { id: 'gdrop', name: '待删组', sortMode: 'manual', cards: [{ id: 'd1', name: 'D1', url: 'https://d1.example.com/', visitCount: 0 }] }
+    ];
+    activeGroupIndex = 0; speeddials = groups[0].cards;
+    await saveGroups(groups);
+    await new Promise(r => setTimeout(r, 1200));
+    const beforeKeys = Object.keys(await new Promise(r => chrome.storage.sync.get(null, r)))
+      .filter(k => k.indexOf(GroupsStore.CHUNK_PREFIX) === 0);
+    // 真删第二个分组（走真实删除流程的数据改动）
+    groups = [groups[0]];
+    activeGroupIndex = 0; speeddials = groups[0].cards;
+    if (typeof _invalidateGroupDOMCache === 'function') _invalidateGroupDOMCache();
+    await saveGroups(groups);
+    await new Promise(r => setTimeout(r, 1500));
+    const raw = await new Promise(r => chrome.storage.sync.get(null, r));
+    const afterKeys = Object.keys(raw).filter(k => k.indexOf(GroupsStore.CHUNK_PREFIX) === 0);
+    const decoded = GroupsStore.decode(raw) || [];
+    return JSON.stringify({
+      beforeKeys: beforeKeys,
+      afterKeys: afterKeys,
+      dropKeyGone: afterKeys.every(k => k.indexOf('gdrop') === -1),
+      groupsLeft: decoded.map(g => g.id).join(',')
+    });
+  })()`);
+  check('删组后该组的分片键被清理（无孤儿键）',
+    orphan.dropKeyGone === true && orphan.afterKeys.length < orphan.beforeKeys.length, orphan);
+  check('删组后 sync 里只剩保留组', orphan.groupsLeft === 'gkeep', orphan);
+
+  // 跨标签页：另一标签页按新协议写分片（令牌不同）→ 本页必须接收
+  const xshard = await shardCase(`(async () => {
+    const before = groups.map(g => g.name).join(',');
+    const list = groups.concat([{ id: 'gxtab9', name: '外部新增组', sortMode: 'manual', cards: [] }]);
+    const built = GroupsStore.build(list);
+    const items = {};
+    built.keys.forEach(function (k) { items[k] = built.items[k]; });
+    items[GroupsStore.META_KEY] = { v: 1, w: 'other-tab-x-' + Date.now(), g: built.meta };
+    items.groups_rev = Date.now();
+    await new Promise(r => chrome.storage.sync.set(items, r));
+    await new Promise(r => setTimeout(r, 900));
+    return JSON.stringify({ before: before, after: groups.map(g => g.name).join(','), received: groups.some(g => g.id === 'gxtab9') });
+  })()`);
+  check('跨标签页：另一标签页写分片后本页收到新分组（旧实现只监听 groups 键，收不到）',
+    xshard.received === true && xshard.after !== xshard.before, xshard);
+
+  console.log('\n[38] 页面无 JS 报错');
   consoleLog.report();
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 

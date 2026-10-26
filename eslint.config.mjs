@@ -90,6 +90,10 @@ export default [
   // 同函数内 var 重复声明无副作用 → 仅提示，不阻断
   {
     files: ['src/background.js'],
+    languageOptions: {
+      // BUG-089: SW 用 importScripts 加载与页面共用的 groups-store.js（classic service worker）
+      globals: { importScripts: 'readonly' },
+    },
     rules: {
       'no-redeclare': 'warn',
     },

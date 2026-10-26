@@ -87,12 +87,16 @@ function initWebdavSection() {
       if (r.bak_timestamp) msg += '\n🕐 备份时间：' + new Date(r.bak_timestamp).toLocaleString('zh-CN');
       msg += '\n当前数据将被覆盖，是否继续？';
       showImportConfirmAsync(msg).then(function () {
-        chrome.storage.sync.set({ groups: [], activeGroup: 0 }, function () {
-          // BUG-036: 兜底数据带版本号，保证 getGroups 认定 local 更新
-          chrome.storage.local.set({ groups: r.groups_local_bak, activeGroup: 0, groups_rev: Date.now() }, function () {
-            if (typeof collectCardImageGarbage === 'function') collectCardImageGarbage();
-            if (typeof showToast === 'function') showToast('已恢复，即将刷新...', 'success');
-            setTimeout(function () { window.location.reload(); }, 1000);
+        // BUG-089: sync 侧分组是分片（groups_meta + gc_*）—— 清空必须走 clearSync，
+        // 只写 { groups: [] } 会把分片留在 sync 里，local 兜底数据反而读不到
+        GroupsStore.clearSync().then(function () {
+          chrome.storage.sync.set({ activeGroup: 0 }, function () {
+            // BUG-036: 兜底数据带版本号，保证 getGroups 认定 local 更新
+            chrome.storage.local.set({ groups: r.groups_local_bak, activeGroup: 0, groups_rev: Date.now() }, function () {
+              if (typeof collectCardImageGarbage === 'function') collectCardImageGarbage();
+              if (typeof showToast === 'function') showToast('已恢复，即将刷新...', 'success');
+              setTimeout(function () { window.location.reload(); }, 1000);
+            });
           });
         });
       }).catch(function (e) {

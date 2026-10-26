@@ -201,7 +201,9 @@ function flushSyncWrites(keys) {
       clearTimeout(_pendingWriteTimers[key]);
       delete _pendingWriteTimers[key];
     }
-    var p = _writeSyncKey(key, job.value, job.extra);
+    var p = (key === STORAGE_KEYS.GROUPS && typeof GroupsStore === 'object' && GroupsStore)
+      ? _writeGroupsSyncRaw(job.value, job.extra)   // BUG-089: 分组走分片写入
+      : _writeSyncKey(key, job.value, job.extra);
     if (typeof job.afterFlush === 'function') {
       p = p.then(function (ok) { return job.afterFlush(ok); });
     }
@@ -231,6 +233,17 @@ function saveToStorage(key, value) {
   return _writeSyncKey(key, value);
 }
 
+/** BUG-089: 分组数据不再写单个 `groups` 项（单项 8KB 上限会把整份数据锁死），
+ *  改由 GroupsStore 分片写入（groups_meta + gc_* ，见 groups-store.js）。
+ *  extra 支持求值函数（版本号要等真正写入时再取时间戳）。 */
+function _writeGroupsSyncRaw(groups, extra) {
+  var extraObj = extra;
+  if (typeof extraObj === 'function') {
+    try { extraObj = extraObj(); } catch (e) { extraObj = null; }
+  }
+  return GroupsStore.writeSync(groups, extraObj || null);
+}
+
 /** chrome.storage.local 读写封装（供 wallpaper.js / weather.js 使用） */
 function loadFromLocal(key, defaultValue) {
   return new Promise(function (resolve) {
@@ -257,19 +270,18 @@ async function getGroups() {
   // BUG-036: 两侧都读出来，按写入版本号决定哪一份更新。
   // 原实现是「sync 非空就信 sync」—— sync 写入被配额拒绝时旧值原样留着（非空），
   // 于是 local 里的兜底数据永远读不到，刷新后回到超限前的旧版本（静默丢数据）。
-  var syncData = await new Promise(function (resolve) {
-    chrome.storage.sync.get([STORAGE_KEYS.GROUPS, STORAGE_KEYS.GROUPS_REV], function (r) { resolve(r || {}); });
-  });
+  // BUG-089: sync 侧改为分片读取（groups_meta + gc_*，兼容旧版单项 `groups` 以完成迁移）
+  var syncRead = await GroupsStore.readSync();
   var localData = await new Promise(function (resolve) {
     chrome.storage.local.get([STORAGE_KEYS.GROUPS, STORAGE_KEYS.GROUPS_REV], function (r) { resolve(r || {}); });
   });
-  var syncGroups = syncData[STORAGE_KEYS.GROUPS];
+  var syncGroups = syncRead.groups;
   var localGroups = localData[STORAGE_KEYS.GROUPS];
   var syncOk = Array.isArray(syncGroups) && syncGroups.length > 0;
   var localOk = Array.isArray(localGroups) && localGroups.length > 0;
   if (syncOk && localOk) {
     // 版本号相同（或都没有版本号）时以 sync 为准 —— 保持升级前的语义
-    return _groupsRevOf(localData[STORAGE_KEYS.GROUPS_REV]) > _groupsRevOf(syncData[STORAGE_KEYS.GROUPS_REV])
+    return _groupsRevOf(localData[STORAGE_KEYS.GROUPS_REV]) > _groupsRevOf(syncRead.rev)
       ? localGroups : syncGroups;
   }
   if (syncOk) return syncGroups;
@@ -278,7 +290,7 @@ async function getGroups() {
   var oldCards = await loadFromStorage(STORAGE_KEYS.SPEEDDIALS, null);
   if (oldCards && Array.isArray(oldCards) && oldCards.length > 0) {
     var migrated = [{ id: 'g1', name: '常用', cards: oldCards }];
-    await _writeSyncKey(STORAGE_KEYS.GROUPS, migrated, function () {
+    await _writeGroupsSyncRaw(migrated, function () {
       return { [STORAGE_KEYS.GROUPS_REV]: Date.now() };
     });
     await saveToStorage(STORAGE_KEYS.ACTIVE_GROUP, 0);
@@ -286,7 +298,7 @@ async function getGroups() {
     return migrated;
   }
   // 全新安装
-  await _writeSyncKey(STORAGE_KEYS.GROUPS, DEFAULT_GROUPS, function () {
+  await _writeGroupsSyncRaw(DEFAULT_GROUPS, function () {
     return { [STORAGE_KEYS.GROUPS_REV]: Date.now() };
   });
   await saveToStorage(STORAGE_KEYS.ACTIVE_GROUP, 0);
@@ -347,7 +359,7 @@ async function saveGroups(groups, opts) {
   // BUG-028: _savingGroups 未定义时默认视为已在保存中，避免误复位
   var _wasSaving = typeof _savingGroups !== 'undefined' ? _savingGroups : true;
   if (typeof _savingGroups !== 'undefined') _savingGroups = true;
-  var ok = await _writeSyncKey(STORAGE_KEYS.GROUPS, groups, _groupsRevPayload);
+  var ok = await _writeGroupsSyncRaw(groups, _groupsRevPayload);
   if (typeof _savingGroups !== 'undefined' && !_wasSaving) _savingGroups = false;
   await _finalizeGroupsWrite(groups, ok);
 }
@@ -361,12 +373,18 @@ async function _finalizeGroupsWrite(groups, syncOk) {
   await _verifyGroupsWrite(groups);
 }
 
-/** 写入后校验：sync 里没有该键/为空数组时回退到 local（同时刷新右键菜单） */
+/** 写入后校验：sync 里没有分组数据时回退到 local（同时刷新右键菜单）
+ *  BUG-089: 分组现在存在分片里 —— 只看 `groups_meta` / 旧版 `groups` 是否存在，
+ *  不去读全部 chunk（省一次 10KB 级拷贝）。 */
 async function _verifyGroupsWrite(groups) {
   // 同步存储超限时自动回退到本地存储
   await new Promise(function (resolve) {
-    chrome.storage.sync.get([STORAGE_KEYS.GROUPS], function (result) {
-      if (!result[STORAGE_KEYS.GROUPS] || (Array.isArray(result[STORAGE_KEYS.GROUPS]) && result[STORAGE_KEYS.GROUPS].length === 0)) {
+    chrome.storage.sync.get([GroupsStore.META_KEY, GroupsStore.LEGACY_KEY], function (result) {
+      var meta = result[GroupsStore.META_KEY];
+      var legacy = result[GroupsStore.LEGACY_KEY];
+      var hasMeta = !!(meta && Array.isArray(meta.g) && meta.g.length > 0);
+      var hasLegacy = !!(Array.isArray(legacy) && legacy.length > 0);
+      if (!hasMeta && !hasLegacy) {
         _fallbackGroupsToLocal(groups).then(resolve);
       } else { resolve(); }
     });

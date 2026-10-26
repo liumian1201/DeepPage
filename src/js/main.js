@@ -328,41 +328,74 @@ function _debounceCollisionCheck() {
   _collisionCheckTimer = setTimeout(_checkDashboardCollision, 150);
 }
 
+/** BUG-089: 外部（另一个标签页 / 右键菜单 / 导入）改了分组后，把逻辑视图整份重读进内存。
+ *  为什么不能再用 onChanged 的 newValue：分组在 sync 里是分片（groups_meta + gc_*），
+ *  单个 newValue 拼不出完整数据。读取用 getGroups()，它已含 local 兜底与版本号比对。
+ *  并发读用序号挡（只认最后一次）；内容与内存一致时直接返回 —— 值判定天然免疫「自己的回声」，
+ *  也免疫 _dropStale 清理旧分片键带来的多余通知。 */
+var _groupsReloadSeq = 0;
+async function _reloadGroupsFromStorage() {
+  var seq = ++_groupsReloadSeq;
+  // 先确认「确实还有分组数据」。两处都空 = 分组刚被清空（另一个标签页做「重置全部数据」/清空数据）：
+  // 此时绝不能调 getGroups() —— 它会把「一处都没有」当成全新安装，凭空写回默认分组，
+  // 等于在别的标签页里把用户刚清掉的数据又复活一份。
+  var probe = await GroupsStore.readSync();
+  var hasSyncGroups = !!(probe.groups && probe.groups.length);
+  var hasLocalGroups = await new Promise(function (resolve) {
+    chrome.storage.local.get(['groups'], function (d) { resolve(!!(Array.isArray(d.groups) && d.groups.length)); });
+  });
+  if (!hasSyncGroups && !hasLocalGroups) return;
+  if (seq !== _groupsReloadSeq) return;
+  var newGroups;
+  try {
+    newGroups = await getGroups();
+  } catch (e) {
+    _warnDegraded('读取其它标签页的分组改动', e);
+    return;
+  }
+  if (seq !== _groupsReloadSeq) return;                       // 期间又来了新通知 → 让最后一次生效
+  if (!newGroups || !Array.isArray(newGroups) || newGroups.length === 0) return;
+  var stable = typeof _stableJson === 'function' ? _stableJson : function (v) { return JSON.stringify(v); };
+  if (stable(groups) === stable(newGroups)) return;            // 数据没变（自己写入的回声 / 无关清理）
+  // BUG-045: 另一个标签页删组/重排后，本页的 activeGroupIndex 可能越界或指向别的分组。
+  // 不校正的后果：speeddials 被置空（看板空白、圆点无选中），此后本页新增卡片还会以
+  // 越界/错位的索引写盘 —— 把别的分组的卡片整组覆盖。与 doDeleteGroup/moveGroupTo 一致：
+  // 先按 id 跟随原分组，找不到再夹紧索引。
+  var prevActiveId = (groups && groups[activeGroupIndex]) ? groups[activeGroupIndex].id : null;
+  groups = newGroups;
+  var followIdx = prevActiveId
+    ? groups.findIndex(function (g) { return g && g.id === prevActiveId; })
+    : -1;
+  var clamped;
+  if (followIdx !== -1) clamped = followIdx;
+  else if (!groups.length) clamped = 0;
+  else clamped = Math.min(activeGroupIndex, groups.length - 1);
+  if (clamped !== activeGroupIndex) {
+    activeGroupIndex = clamped;
+    // 本页视图变了 → 同步 activeGroup，否则本页下一次 saveSpeeddials 会按 storage 里的
+    // 陈旧索引把卡片写到别的分组（getActiveGroup 读的就是这个键）
+    if (typeof saveActiveGroup === 'function') saveActiveGroup(activeGroupIndex);
+  }
+  speeddials = (groups[activeGroupIndex] && groups[activeGroupIndex].cards)
+    ? groups[activeGroupIndex].cards : [];
+  // 外部改动可能涉及任意分组 → 除当前分组外整体失效 DOM 池，
+  // 否则切到某个分组会看到改动前的陈旧卡片（同 BUG-052）
+  if (typeof _invalidateGroupDOMCache === 'function') _invalidateGroupDOMCache(activeGroupIndex);
+  _debouncedRefresh();
+}
+
 chrome.storage.onChanged.addListener(function (changes, areaName) {
   if (areaName !== 'sync') return;
   // BUG-055: 回声判定必须按「值」—— 原实现按「key + 1.5s 时间窗」判定，
   // 本页任意一次 groups 写入（点卡片计数、切组、favicon 批量）都会让窗口内的
   // 「另一个标签页的真实改动」被整段丢弃，本页随后用陈旧数组整份回写把它回滚
-  if (changes.groups && !_savingGroups) {
-    var newGroups = changes.groups.newValue;
-    var _selfGroupsWrite = typeof isSelfSyncValue === 'function' && isSelfSyncValue('groups', newGroups);
-    if (newGroups && Array.isArray(newGroups) && !_selfGroupsWrite) {
-      // BUG-045: 另一个标签页删组/重排后，本页的 activeGroupIndex 可能越界或指向别的分组。
-      // 不校正的后果：speeddials 被置空（看板空白、圆点无选中），此后本页新增卡片还会以
-      // 越界/错位的索引写盘 —— 把别的分组的卡片整组覆盖。与 doDeleteGroup/moveGroupTo 一致：
-      // 先按 id 跟随原分组，找不到再夹紧索引。
-      var prevActiveId = (groups && groups[activeGroupIndex]) ? groups[activeGroupIndex].id : null;
-      groups = newGroups;
-      var followIdx = prevActiveId
-        ? groups.findIndex(function (g) { return g && g.id === prevActiveId; })
-        : -1;
-      var clamped;
-      if (followIdx !== -1) clamped = followIdx;
-      else if (!groups.length) clamped = 0;
-      else clamped = Math.min(activeGroupIndex, groups.length - 1);
-      if (clamped !== activeGroupIndex) {
-        activeGroupIndex = clamped;
-        // 本页视图变了 → 同步 activeGroup，否则本页下一次 saveSpeeddials 会按 storage 里的
-        // 陈旧索引把卡片写到别的分组（getActiveGroup 读的就是这个键）
-        if (typeof saveActiveGroup === 'function') saveActiveGroup(activeGroupIndex);
-      }
-      speeddials = (groups[activeGroupIndex] && groups[activeGroupIndex].cards)
-        ? groups[activeGroupIndex].cards : [];
-      // 外部改动可能涉及任意分组 → 除当前分组外整体失效 DOM 池，
-      // 否则切到某个分组会看到改动前的陈旧卡片（同 BUG-052）
-      if (typeof _invalidateGroupDOMCache === 'function') _invalidateGroupDOMCache(activeGroupIndex);
-      _debouncedRefresh();
-    }
+  // BUG-089: 分组在 sync 里是分片（groups_meta + gc_*），`groups` 键已不再写入 ——
+  // 判定改为「任一相关键变化」，数据本身重新从 storage 读（分片无法从单个 newValue 拼出来）。
+  if (typeof GroupsStore === 'object' && GroupsStore && GroupsStore.affectsGroups(changes) && !_savingGroups) {
+    var _metaChange = changes[GroupsStore.META_KEY];
+    // 自己刚写出的那份（按写入令牌判定）跳过，避免自触发重渲染
+    var _selfGroupsWrite = _metaChange ? GroupsStore.isSelfMetaWrite(_metaChange.newValue) : false;
+    if (!_selfGroupsWrite) _reloadGroupsFromStorage();
   }
   if (changes.settings && changes.settings.newValue) {
     var newSettings = changes.settings.newValue;
