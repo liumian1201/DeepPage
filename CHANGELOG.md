@@ -1,9 +1,12 @@
 # DeepPage 更新日志
 
-## v1.6.4 (待发布) — 🐛 修复：加卡片 / 切分组必然 `kQuotaBytesPerItem quota exceeded`（BUG-089，分组数据改分片存储）
+## v1.6.3 (2026-10-26) — 🐛 修复：加卡片 / 切分组必然 `kQuotaBytesPerItem quota exceeded`（BUG-089，分组数据改分片存储）
 
 > **用户实测**（2026-10-26）：「现在我加了新卡会报错，加卡和切换分组就重复弹红字」——
 > 控制台原文 `[storage] sync 写入失败（groups）: Resource::kQuotaBytesPerItem quota exceeded`。
+>
+> **版本号说明**：`v1.6.3` 这个编号 2026-10-04 曾作为「第 2 批修复（BUG-079/080）」的计划号，
+> 后来你决定与 v1.6.2 **合并成一次发版**、从未打过 tag —— 所以这个号是空的，本次直接复用它，**不跳号**。
 
 ### 🐛 根因：整份分组卡片塞在**一个** `chrome.storage.sync` 项里
 - `groups` 是一个 sync 项，上限 `QUOTA_BYTES_PER_ITEM` = 8192 字节。
