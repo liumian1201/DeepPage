@@ -337,6 +337,8 @@ function _warnSyncWriteRejected() {
 
 async function saveGroups(groups, opts) {
   opts = opts || {};
+  // BUG-090: 写入前先看有没有「同一张卡被写进两个分组」的异常（正常情况永远不该出现）
+  if (typeof _warnCrossGroupCardIds === 'function') _warnCrossGroupCardIds(groups);
   // v1.2.1: 写入前保存上一版快照到 local（后悔药）
   if (typeof getGroups === 'function') {
     try {
@@ -394,10 +396,48 @@ async function _verifyGroupsWrite(groups) {
   try { chrome.runtime.sendMessage({ type: 'refresh-context-menus' }); } catch (e) { _warnDegraded('刷新右键菜单', e); }
 }
 
+/** 当前活动分组索引。
+ *  BUG-090: **必须先读 local**。`saveActiveGroup` 里 local 是立即写的，而 sync 走 500ms 合并窗口；
+ *  原实现「先读 sync，只有它等于 0 才回退 local」，于是「切到 0 号分组（常用）」后立刻读到 sync 里的
+ *  旧值 1 就直接返回 1 —— 调用方（saveSpeeddials）会把当前分组的卡片写进上一个分组。
+ *  local 代表「本机此刻在看的组」，用它比用跨设备同步值更符合语义。 */
 async function getActiveGroup() {
+  var localIdx = await loadFromLocal(STORAGE_KEYS.ACTIVE_GROUP, null);
+  if (typeof localIdx === 'number' && isFinite(localIdx)) return localIdx;
   var idx = await loadFromStorage(STORAGE_KEYS.ACTIVE_GROUP, 0);
-  if (idx !== 0) return idx;
-  return loadFromLocal(STORAGE_KEYS.ACTIVE_GROUP, 0);
+  return (typeof idx === 'number' && isFinite(idx)) ? idx : 0;
+}
+
+/** BUG-090: 页面上正在显示的那个分组（内存里的那一份）。
+ *  `groups` / `activeGroupIndex` 是 main.js 用 `let` 声明的全局 —— 读它们要防 TDZ
+ *  （与 cards.js 的 isLockedNow() 同一写法），取不到就返回 null 交给调用方兜底。 */
+function _displayedGroup() {
+  try {
+    if (typeof groups === 'undefined' || !Array.isArray(groups)) return null;
+    if (typeof activeGroupIndex === 'undefined') return null;
+    return groups[activeGroupIndex] || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** 写入前的完整性巡警：同一个卡片 id 出现在两个分组里 = 数据已被写坏（BUG-090）。
+ *  修好根因后不应再出现；留一道可见痕迹，避免同类回归再次静默扩散。 */
+function _warnCrossGroupCardIds(groupsList) {
+  if (!Array.isArray(groupsList)) return;
+  var owner = {};
+  var bad = [];
+  groupsList.forEach(function (g) {
+    ((g && g.cards) || []).forEach(function (c) {
+      if (!c || !c.id) return;
+      if (!owner[c.id]) { owner[c.id] = (g && g.id) || '?'; return; }
+      if (owner[c.id] !== ((g && g.id) || '?') && bad.indexOf(c.id) === -1) bad.push(c.id);
+    });
+  });
+  if (bad.length) {
+    console.warn('[storage] 同一卡片同时存在于多个分组（数据异常，共 ' + bad.length + ' 张）:',
+      bad.slice(0, 5).join(','));
+  }
 }
 
 async function saveActiveGroup(index) {
@@ -423,12 +463,28 @@ async function _snapshotGroupsForUndo() {
   }
 }
 
+/** 把「当前分组的卡片」落盘。
+ *  BUG-090: 必须按**当前显示的分组 id** 定位要写的组，不能读 storage 里的 activeGroup 索引 ——
+ *  那个写盘走 500ms 合并窗口（saveActiveGroup），切组后立刻加卡会拿到**上一个**分组的索引，
+ *  于是把当前分组的整份卡片写进上一个分组（两组指向同一份数据：用户实测 10+21+4+3 → 21+21+4+3 = 49 张，
+ *  常用里显示的变成「本地」的卡片）。用 id 锚定还有一个好处：分组顺序被别的标签页改过也不会错位。 */
 async function saveSpeeddials(cards) {
-  var groups = await getGroups();
-  var idx = await getActiveGroup();
-  if (!groups[idx]) groups[idx] = { id: 'g' + Date.now(), name: '默认', cards: [] };
-  groups[idx].cards = cards;
-  await saveGroups(groups);
+  var latest = await getGroups();
+  var shown = _displayedGroup();
+  var idx = -1;
+  if (shown && shown.id) {
+    idx = latest.findIndex(function (g) { return g && g.id === shown.id; });
+  }
+  if (idx < 0) idx = await getActiveGroup();   // 内存里取不到（启动早期 / TDZ）才回退
+  if (!latest[idx]) {
+    latest[idx] = {
+      id: (shown && shown.id) || ('g' + Date.now()),
+      name: (shown && shown.name) || '默认',
+      cards: []
+    };
+  }
+  latest[idx].cards = cards;
+  await saveGroups(latest);
 }
 
 // ---- 设置 ----

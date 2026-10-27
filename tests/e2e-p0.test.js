@@ -3903,7 +3903,101 @@ function send(method, params, sessionId) {
   check('跨标签页：另一标签页写分片后本页收到新分组（旧实现只监听 groups 键，收不到）',
     xshard.received === true && xshard.after !== xshard.before, xshard);
 
-  console.log('\n[38] 页面无 JS 报错');
+  console.log('\n[38] BUG-090 加卡时不再把「当前分组」的卡片写进别的分组');
+
+  // ① getActiveGroup 必须优先读本机 local：sync 的 activeGroup 走 500ms 合并写，切组后仍是旧值
+  const activeSrc = JSON.parse(await evalJs(`(async () => {
+    await new Promise(r => chrome.storage.sync.set({ activeGroup: 1 }, r));
+    await new Promise(r => chrome.storage.local.set({ activeGroup: 0 }, r));
+    const got = await getActiveGroup();
+    return JSON.stringify({ got: got, local: 0, sync: 1 });
+  })()`));
+  check('BUG-090 getActiveGroup 以本机 local 为准（修复前：sync 里的旧值 1 直接返回 → 切回 0 号组后加卡会写进上一个组）',
+    activeSrc.got === 0, activeSrc);
+
+  // ② saveSpeeddials 必须按「当前显示的分组 id」定位，而不是 storage 里的 activeGroup 索引
+  const anchored = JSON.parse(await evalJs(`(async () => {
+    groups = [
+      { id: 'gx0', name: '甲组', sortMode: 'manual', cards: [{ id: 'a1', name: 'A1', url: 'https://a1.example.com/', visitCount: 0 }] },
+      { id: 'gx1', name: '乙组', sortMode: 'manual', cards: [{ id: 'b1', name: 'B1', url: 'https://b1.example.com/', visitCount: 0 }] }
+    ];
+    activeGroupIndex = 0; speeddials = groups[0].cards;
+    await saveGroups(groups);
+    await new Promise(r => setTimeout(r, 900));
+    // 故意让 storage 的 activeGroup 指向另一个组（模拟「切组后立刻加卡」时合并写尚未落地）
+    await new Promise(r => chrome.storage.sync.set({ activeGroup: 1 }, r));
+    await new Promise(r => chrome.storage.local.set({ activeGroup: 1 }, r));
+    speeddials.push({ id: 'a2', name: 'A2', url: 'https://a2.example.com/', visitCount: 0 });
+    await saveSpeeddials(speeddials);          // 页面上显示的是「甲组」
+    await new Promise(r => setTimeout(r, 700));
+    const stored = await getGroups();
+    const byId = {};
+    stored.forEach(function (g) { byId[g.id] = (g.cards || []).map(function (c) { return c.id; }); });
+    await new Promise(r => chrome.storage.sync.set({ activeGroup: 0 }, r));
+    await new Promise(r => chrome.storage.local.set({ activeGroup: 0 }, r));
+    return JSON.stringify({ byId: byId });
+  })()`));
+  check('BUG-090 卡片写入以「当前显示的分组 id」为准（修复前：按 storage 索引写进「乙组」）',
+    !!(anchored.byId && anchored.byId.gx0) && anchored.byId.gx0.indexOf('a2') !== -1
+      && !!(anchored.byId && anchored.byId.gx1) && anchored.byId.gx1.indexOf('a2') === -1, anchored);
+
+  // ③ 真实操作序列：反复「切组 → 立刻加卡」，storage 里不该出现一张卡属于两个分组
+  const crossSeq = JSON.parse(await evalJs(`(async () => {
+    const mk = (i) => ({ id: 'cg' + i, name: 'C' + i, url: 'https://c' + i + '.example.com/', visitCount: 0 });
+    groups = [
+      { id: 'gz0', name: '零组', sortMode: 'manual', cards: [mk(0)] },
+      { id: 'gz1', name: '壹组', sortMode: 'manual', cards: [mk(1)] },
+      { id: 'gz2', name: '贰组', sortMode: 'manual', cards: [mk(2)] }
+    ];
+    activeGroupIndex = 1; speeddials = groups[1].cards;
+    await saveGroups(groups); renderSpeeddials(); renderGroupDots();
+    await new Promise(r => setTimeout(r, 1200));
+    // 写完**立刻**查一次 —— 这一刻才是真正落盘的内容（500ms 后的合并写会把它「治好」，
+    // 只查最终状态会漏掉这类瞬时损坏，而那正是用户备份里能抓到 49 张卡的原因）
+    const dupNow = [];
+    function scanDup(list) {
+      const seen = {};
+      (list || []).forEach(function (g) { (g.cards || []).forEach(function (c) {
+        if (seen[c.id] && seen[c.id] !== g.id) { if (dupNow.indexOf(c.id) === -1) dupNow.push(c.id); } else if (!seen[c.id]) seen[c.id] = g.id;
+      }); });
+    }
+    for (let i = 0; i < 3; i++) {
+      await switchGroup(0);                       // 切到 0 号组：最容易踩中合并写窗口的方向
+      speeddials.push({ id: 'z' + i, name: 'Z' + i, url: 'https://z' + i + '.example.com/', visitCount: 0 });
+      await saveSpeeddials(speeddials);
+      scanDup(await getGroups());                 // 落盘瞬间的不变量
+      await switchGroup(1);
+      await new Promise(r => setTimeout(r, 650));
+    }
+    await new Promise(r => setTimeout(r, 900));
+    const stored = await getGroups();
+    scanDup(stored);
+    return JSON.stringify({ dup: dupNow, counts: stored.map(function (g) { return (g.cards || []).length; }),
+      ids: stored.map(function (g) { return g.id; }) });
+  })()`));
+  check('BUG-090 反复「切组 → 立刻加卡」：落盘瞬间与最终状态都没有卡片同时属于两个分组',
+    crossSeq.dup.length === 0 && crossSeq.ids.join(',') === 'gz0,gz1,gz2', crossSeq);
+  check('BUG-090 每张新卡都进了「切过去的那一组」（零组 +3，其余不变）',
+    crossSeq.counts && crossSeq.counts[0] === 4 && crossSeq.counts[1] === 1 && crossSeq.counts[2] === 1, crossSeq);
+
+  // ④ 巡警：真的出现跨组重复 id 时必须留痕；正常数据不能刷告警（正反两向）
+  const guardWarn = JSON.parse(await evalJs(`(() => {
+    const buf = []; const orig = console.warn;
+    console.warn = (...a) => { buf.push(a.join(' ')); };
+    try {
+      _warnCrossGroupCardIds([{ id: 'ga', name: 'A', cards: [{ id: 'dup1' }] },
+                              { id: 'gb', name: 'B', cards: [{ id: 'dup1' }] }]);
+      const withDup = buf.length;
+      buf.length = 0;
+      _warnCrossGroupCardIds([{ id: 'ga', name: 'A', cards: [{ id: 'x1' }] },
+                              { id: 'gb', name: 'B', cards: [{ id: 'x2' }] }]);
+      return JSON.stringify({ withDup: withDup, clean: buf.length });
+    } finally { console.warn = orig; }
+  })()`));
+  check('BUG-090 巡警：跨组重复 id 会告警，正常数据不告警',
+    guardWarn.withDup === 1 && guardWarn.clean === 0, guardWarn);
+
+  console.log('\n[39] 页面无 JS 报错');
   consoleLog.report();
   check('无 console error / 未捕获异常', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
