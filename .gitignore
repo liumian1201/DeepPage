@@ -25,3 +25,5 @@ node_modules/
 # 临时文件
 *.tmp
 *.log
+# 本机私有与临时文件（agent 约定）
+.local/
